@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const SPAWNS = [[-5,-2],[-2,-2],[1,-2],[4,-2],[-5,1],[-2,1],[1,1],[4,1],[-3,4],[3,4]];
+const MAP_VERSION = "wide-map-v3";
+const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
 const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
 const DEFAULT_SETTINGS = {
   impostors: 1,
@@ -41,6 +42,7 @@ export class GameRoom extends DurableObject {
     this.meetingEndsAt = 0;
     this.practiceMode = false;
     this.settings = { ...DEFAULT_SETTINGS };
+    this.moveTicks = 0;
 
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment();
@@ -82,6 +84,7 @@ export class GameRoom extends DurableObject {
       sabotage: this.sabotage,
       meetingEndsAt: this.meetingEndsAt,
       practiceMode: this.practiceMode,
+      mapVersion: MAP_VERSION,
       settings: this.settings,
       players: [...this.players.values()].map((p) => ({
         ...p,
@@ -179,6 +182,7 @@ export class GameRoom extends DurableObject {
       sabotage: this.sabotage,
       meetingEndsAt: this.meetingEndsAt,
       practiceMode: this.practiceMode,
+      mapVersion: MAP_VERSION,
       settings: this.settings,
       serverTime: Date.now(),
       players: [...this.players.values()].map((p) => ({
@@ -275,6 +279,10 @@ export class GameRoom extends DurableObject {
   }
 
   async join(id, message) {
+    if (String(message.clientVersion || "") !== MAP_VERSION) {
+      this.send(id, { type: "error", message: "ゲームの版が一致しません。全端末でCtrl+Shift+Rを押して更新してください。" });
+      return;
+    }
     if (this.players.has(id)) {
       this.syncAll();
       return;
@@ -334,14 +342,22 @@ export class GameRoom extends DurableObject {
     const z = Number(message.z);
     if (!Number.isFinite(x) || !Number.isFinite(z)) return;
 
-    const allowed = (player.alive ? 1.25 : 1.9) * this.settings.speed;
-    if (Math.hypot(x - player.x, z - player.z) > allowed) return;
+    // 通信の揺れで正しい移動が破棄されないように余裕を持たせつつ、瞬間移動は拒否します。
+    const allowed = (player.alive ? 3.6 : 5.0) * this.settings.speed;
+    if (Math.hypot(x - player.x, z - player.z) > allowed) {
+      this.send(player.id, { type: "playerMoved", id: player.id, x: player.x, z: player.z, rotation: player.rotation, serverTime: Date.now() });
+      return;
+    }
 
-    player.x = clamp(x, -11, 11);
-    player.z = clamp(z, -7, 8);
+    player.x = clamp(x, -17.2, 17.2);
+    player.z = clamp(z, -12.2, 12.2);
     const rotation = Number(message.rotation);
     if (Number.isFinite(rotation)) player.rotation = rotation;
-    this.broadcast({ type: "playerMoved", id: player.id, x: player.x, z: player.z, rotation: player.rotation }, player.id);
+
+    // 送信者を含む全員へ同じ座標を返し、端末間の位置ずれを防ぎます。
+    this.broadcast({ type: "playerMoved", id: player.id, x: player.x, z: player.z, rotation: player.rotation, serverTime: Date.now() });
+    this.moveTicks += 1;
+    if (this.moveTicks % 30 === 0) this.syncAll();
   }
 
   async start(player) {
