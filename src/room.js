@@ -1,3 +1,5 @@
+import { DurableObject } from "cloudflare:workers";
+
 const COLORS=['red','blue','green','pink','orange','yellow','cyan','purple','white','lime'];
 const SPAWNS=[[-5,-2],[-2,-2],[1,-2],[4,-2],[-5,1],[-2,1],[1,1],[4,1],[-3,4],[3,4]];
 const TASKS=['reactor','wires','scanner','cargo','fuel','align'];
@@ -6,8 +8,8 @@ const uid=()=>crypto.randomUUID();
 const cleanName=v=>String(v||'Player').replace(/[<>]/g,'').trim().slice(0,16)||'Player';
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
-export class GameRoom{
-  constructor(state,env){this.state=state;this.env=env;this.sessions=new Map();this.players=new Map();this.votes=new Map();this.roomCode='';this.phase='lobby';this.hostId=null;this.winner=null;this.sabotage=null;this.meetingEndsAt=0;this.settings={...DEFAULT_SETTINGS};}
+export class GameRoom extends DurableObject{
+  constructor(state,env){super(state,env);this.state=state;this.env=env;this.sessions=new Map();this.players=new Map();this.votes=new Map();this.roomCode='';this.phase='lobby';this.hostId=null;this.winner=null;this.sabotage=null;this.meetingEndsAt=0;this.settings={...DEFAULT_SETTINGS};}
   async fetch(request){const url=new URL(request.url);this.roomCode ||= String(url.searchParams.get('room')||'').toUpperCase();const pair=new WebSocketPair();const client=pair[0],server=pair[1];server.accept();const id=uid();this.sessions.set(id,server);server.addEventListener('message',e=>this.onMessage(id,e.data));server.addEventListener('close',()=>this.disconnect(id));server.addEventListener('error',()=>this.disconnect(id));server.send(JSON.stringify({type:'hello',id,room:this.roomCode}));return new Response(null,{status:101,webSocket:client});}
   send(id,p){const s=this.sessions.get(id);if(s)try{s.send(JSON.stringify(p))}catch{}}
   broadcast(p,except=null){const e=JSON.stringify(p);for(const[id,s]of this.sessions){if(id===except)continue;try{s.send(e)}catch{}}}
