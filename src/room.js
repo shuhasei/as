@@ -1,37 +1,196 @@
 import { DurableObject } from "cloudflare:workers";
 
-const COLORS=['red','blue','green','pink','orange','yellow','cyan','purple','white','lime'];
-const SPAWNS=[[-5,-2],[-2,-2],[1,-2],[4,-2],[-5,1],[-2,1],[1,1],[4,1],[-3,4],[3,4]];
-const TASKS=['reactor','wires','scanner','cargo','fuel','align'];
-const DEFAULT_SETTINGS={impostors:1,tasks:4,speed:1,killCooldown:15,meetingTime:45,revealRoles:true};
-const uid=()=>crypto.randomUUID();
-const cleanName=v=>String(v||'Player').replace(/[<>]/g,'').trim().slice(0,16)||'Player';
-const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
-const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
-export class GameRoom extends DurableObject{
-  constructor(state,env){super(state,env);this.state=state;this.env=env;this.sessions=new Map();this.players=new Map();this.votes=new Map();this.roomCode='';this.phase='lobby';this.hostId=null;this.winner=null;this.sabotage=null;this.meetingEndsAt=0;this.settings={...DEFAULT_SETTINGS};}
-  async fetch(request){const url=new URL(request.url);this.roomCode ||= String(url.searchParams.get('room')||'').toUpperCase();const pair=new WebSocketPair();const client=pair[0],server=pair[1];server.accept();const id=uid();this.sessions.set(id,server);server.addEventListener('message',e=>this.onMessage(id,e.data));server.addEventListener('close',()=>this.disconnect(id));server.addEventListener('error',()=>this.disconnect(id));server.send(JSON.stringify({type:'hello',id,room:this.roomCode}));return new Response(null,{status:101,webSocket:client});}
-  send(id,p){const s=this.sessions.get(id);if(s)try{s.send(JSON.stringify(p))}catch{}}
-  broadcast(p,except=null){const e=JSON.stringify(p);for(const[id,s]of this.sessions){if(id===except)continue;try{s.send(e)}catch{}}}
-  publicState(forId=null){const viewer=this.players.get(forId);return{room:this.roomCode,phase:this.phase,hostId:this.hostId,winner:this.winner,sabotage:this.sabotage,meetingEndsAt:this.meetingEndsAt,settings:this.settings,serverTime:Date.now(),players:[...this.players.values()].map(p=>({id:p.id,name:p.name,color:p.color,x:p.x,z:p.z,rotation:p.rotation,alive:p.alive,connected:p.connected,host:p.id===this.hostId,role:p.id===forId||!p.alive||this.phase==='finished'?p.role:undefined,tasks:p.id===forId?p.tasks:undefined,completedTasks:p.id===forId?[...(p.completedTasks||[])]:undefined,tasksDone:p.id===forId?p.tasksDone:undefined,taskTotal:p.id===forId?p.tasks.length:undefined,emergencyUsed:p.id===forId?p.emergencyUsed:undefined,lastKillAt:p.id===forId?p.lastKillAt:undefined,reported:p.reported||false,ghost:!p.alive}))};}
-  syncAll(){for(const id of this.sessions.keys())this.send(id,{type:'state',state:this.publicState(id)});}
-  onMessage(id,raw){let m;try{m=JSON.parse(raw)}catch{return}if(m.type==='join')return this.join(id,m);const p=this.players.get(id);if(!p)return;switch(m.type){case'move':this.move(p,m);break;case'start':this.start(p);break;case'settings':this.updateSettings(p,m.settings);break;case'taskComplete':this.completeTask(p,m);break;case'kill':this.kill(p,m);break;case'report':this.report(p,m);break;case'meeting':this.startMeeting(p,'緊急会議');break;case'vote':this.vote(p,m);break;case'chat':this.chat(p,m);break;case'sabotage':this.startSabotage(p,m);break;case'fixSabotage':this.fixSabotage(p,m);break;case'returnLobby':this.returnLobby(p);break;}}
-  join(id,m){if(this.phase!=='lobby')return this.send(id,{type:'error',message:'ゲーム進行中のため参加できません。'});if(this.players.size>=10)return this.send(id,{type:'error',message:'ルームは満員です。'});const i=this.players.size,[x,z]=SPAWNS[i%SPAWNS.length];this.players.set(id,{id,name:cleanName(m.name),color:COLORS[i%COLORS.length],x,z,rotation:0,alive:true,connected:true,role:'crew',tasks:[],completedTasks:new Set(),tasksDone:0,emergencyUsed:false,lastKillAt:0,reported:false});if(!this.hostId)this.hostId=id;this.syncAll();}
-  updateSettings(p,s={}){if(p.id!==this.hostId||this.phase!=='lobby')return;this.settings={impostors:clamp(Number(s.impostors)||1,1,3),tasks:clamp(Number(s.tasks)||4,3,5),speed:clamp(Number(s.speed)||1,.75,1.3),killCooldown:clamp(Number(s.killCooldown)||15,8,45),meetingTime:clamp(Number(s.meetingTime)||45,20,90),revealRoles:s.revealRoles!==false};this.syncAll();}
-  move(p,m){if(this.phase!=='playing')return;const x=Number(m.x),z=Number(m.z);if(!Number.isFinite(x)||!Number.isFinite(z))return;const allowed=(p.alive?1.25:1.9)*this.settings.speed;if(Math.hypot(x-p.x,z-p.z)>allowed)return;p.x=clamp(x,-11,11);p.z=clamp(z,-7,8);p.rotation=Number.isFinite(Number(m.rotation))?Number(m.rotation):p.rotation;this.broadcast({type:'playerMoved',id:p.id,x:p.x,z:p.z,rotation:p.rotation},p.id);}
-  start(p){if(p.id!==this.hostId||this.phase!=='lobby')return;if(this.players.size<2)return this.send(p.id,{type:'error',message:'2人以上で開始してください。'});const list=[...this.players.values()];const count=Math.min(this.settings.impostors,Math.max(1,list.length-1));const shuffled=[...list].sort(()=>Math.random()-.5);const bad=new Set(shuffled.slice(0,count).map(x=>x.id));list.forEach((q,i)=>{const[x,z]=SPAWNS[i%SPAWNS.length];Object.assign(q,{x,z,rotation:0,alive:true,role:bad.has(q.id)?'impostor':'crew',tasks:[...TASKS].sort(()=>Math.random()-.5).slice(0,this.settings.tasks),completedTasks:new Set(),tasksDone:0,emergencyUsed:false,lastKillAt:Date.now(),reported:false})});this.phase='playing';this.winner=null;this.sabotage=null;this.votes.clear();this.syncAll();}
-  completeTask(p,m){if(this.phase!=='playing'||!p.alive||p.role!=='crew')return;const t=String(m.task||'');if(!p.tasks.includes(t)||p.completedTasks.has(t))return;p.completedTasks.add(t);p.tasksDone=p.completedTasks.size;this.syncAll();this.checkWin();}
-  kill(p,m){if(this.phase!=='playing'||!p.alive||p.role!=='impostor')return;if(Date.now()-p.lastKillAt<this.settings.killCooldown*1000)return;const t=this.players.get(String(m.targetId||''));if(!t||!t.alive||t.role==='impostor'||dist(p,t)>2.15)return;t.alive=false;t.reported=false;p.lastKillAt=Date.now();this.broadcast({type:'killEffect',killerId:p.id,targetId:t.id});this.syncAll();this.checkWin();}
-  report(p,m){if(this.phase!=='playing'||!p.alive)return;const b=this.players.get(String(m.bodyId||''));if(!b||b.alive||b.reported||dist(p,b)>2.8)return;b.reported=true;this.startMeeting(p,`${b.name}が倒れているのを発見`);}
-  startMeeting(p,reason){if(this.phase!=='playing'||!p.alive)return;if(reason==='緊急会議'){if(p.emergencyUsed)return;p.emergencyUsed=true;}this.phase='meeting';this.votes.clear();this.meetingEndsAt=Date.now()+this.settings.meetingTime*1000;this.broadcast({type:'meetingStarted',reason});this.state.storage.setAlarm(this.meetingEndsAt);this.syncAll();}
-  vote(p,m){if(this.phase!=='meeting'||!p.alive||this.votes.has(p.id))return;const t=String(m.targetId||'skip');if(t!=='skip'&&!this.players.get(t)?.alive)return;this.votes.set(p.id,t);this.broadcast({type:'voteCount',count:this.votes.size,total:[...this.players.values()].filter(x=>x.alive).length});if(this.votes.size>=[...this.players.values()].filter(x=>x.alive).length)this.finishMeeting();}
-  finishMeeting(){if(this.phase!=='meeting')return;const tally=new Map();for(const t of this.votes.values())tally.set(t,(tally.get(t)||0)+1);let top='skip',max=-1,tie=false;for(const[t,c]of tally){if(c>max){top=t;max=c;tie=false}else if(c===max)tie=true}let ejected=null;if(!tie&&top!=='skip'){const q=this.players.get(top);if(q?.alive){q.alive=false;ejected={id:q.id,name:q.name,role:this.settings.revealRoles?q.role:undefined}}}this.phase='playing';this.meetingEndsAt=0;this.votes.clear();for(const q of this.players.values())if(!q.alive)q.reported=true;this.broadcast({type:'meetingEnded',ejected});this.syncAll();this.checkWin();}
-  chat(p,m){if(this.phase!=='meeting')return;const text=String(m.text||'').replace(/[<>]/g,'').trim().slice(0,120);if(!text)return;this.broadcast({type:'chat',from:p.name,text,alive:p.alive});}
-  startSabotage(p,m){if(this.phase!=='playing'||!p.alive||p.role!=='impostor'||this.sabotage)return;const kind=['lights','reactor','comms','doors'].includes(m.kind)?m.kind:'lights';const duration=kind==='reactor'?30:kind==='doors'?12:25;this.sabotage={kind,endsAt:Date.now()+duration*1000};this.broadcast({type:'sabotage',sabotage:this.sabotage});this.state.storage.setAlarm(this.sabotage.endsAt);this.syncAll();}
-  fixSabotage(p,m){if(this.phase!=='playing'||!p.alive||!this.sabotage)return;if(this.sabotage.kind==='reactor'&&m.station!=='reactor')return;this.sabotage=null;this.broadcast({type:'sabotageFixed'});this.syncAll();}
-  checkWin(){if(this.phase==='finished')return;const alive=[...this.players.values()].filter(x=>x.alive),imp=alive.filter(x=>x.role==='impostor').length,crew=alive.filter(x=>x.role==='crew').length,crewAll=[...this.players.values()].filter(x=>x.role==='crew');const tasks=crewAll.length>0&&crewAll.every(x=>x.tasksDone>=x.tasks.length);if(imp===0||tasks)return this.finish('crew');if(imp>=crew)return this.finish('impostor');}
-  finish(winner){this.phase='finished';this.winner=winner;this.sabotage=null;this.broadcast({type:'gameFinished',winner});this.syncAll();}
-  returnLobby(p){if(p.id!==this.hostId||this.phase!=='finished')return;this.phase='lobby';this.winner=null;this.sabotage=null;for(const q of this.players.values())Object.assign(q,{alive:true,role:'crew',tasks:[],completedTasks:new Set(),tasksDone:0,reported:false});this.syncAll();}
-  disconnect(id){this.sessions.delete(id);if(!this.players.has(id))return;this.players.delete(id);if(this.hostId===id)this.hostId=this.players.keys().next().value||null;if(!this.players.size){this.phase='lobby';this.winner=null;this.sabotage=null}this.syncAll();if(this.phase==='playing')this.checkWin();}
-  async alarm(){if(this.phase==='meeting'&&this.meetingEndsAt&&Date.now()>=this.meetingEndsAt)this.finishMeeting();if(this.sabotage&&Date.now()>=this.sabotage.endsAt){if(this.sabotage.kind==='reactor')this.finish('impostor');else{this.sabotage=null;this.broadcast({type:'sabotageFixed'});this.syncAll();}}}
+const COLORS = ['red','blue','green','pink','orange','yellow','cyan','purple','white','lime'];
+const SPAWNS = [[-5,-2],[-2,-2],[1,-2],[4,-2],[-5,1],[-2,1],[1,1],[4,1],[-3,4],[3,4]];
+const TASKS = ['reactor','wires','scanner','cargo','fuel','align'];
+const DEFAULT_SETTINGS = { impostors:1, tasks:4, speed:1, killCooldown:15, meetingTime:45, revealRoles:true };
+const uid = () => crypto.randomUUID();
+const cleanName = value => String(value || 'Player').replace(/[<>]/g, '').trim().slice(0, 16) || 'Player';
+const dist = (a,b) => Math.hypot(a.x-b.x, a.z-b.z);
+const clamp = (value,min,max) => Math.max(min, Math.min(max,value));
+
+export class GameRoom extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.ctx = ctx;
+    this.env = env;
+    this.sessions = new Map();
+    this.players = new Map();
+    this.votes = new Map();
+    this.roomCode = '';
+    this.phase = 'lobby';
+    this.hostId = null;
+    this.winner = null;
+    this.sabotage = null;
+    this.meetingEndsAt = 0;
+    this.settings = { ...DEFAULT_SETTINGS };
+
+    for (const ws of this.ctx.getWebSockets()) {
+      const attachment = ws.deserializeAttachment();
+      if (attachment?.id) this.sessions.set(attachment.id, ws);
+    }
+  }
+
+  async fetch(request) {
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+      return new Response('Expected WebSocket', { status: 426 });
+    }
+
+    const url = new URL(request.url);
+    const requestedRoom = String(url.searchParams.get('room') || '').toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(requestedRoom)) {
+      return new Response('Invalid room code', { status: 400 });
+    }
+    this.roomCode ||= requestedRoom;
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    const id = uid();
+
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ id });
+    this.sessions.set(id, server);
+    this.send(id, { type:'hello', id, room:this.roomCode });
+
+    return new Response(null, { status:101, webSocket:client });
+  }
+
+  async webSocketMessage(ws, message) {
+    const attachment = ws.deserializeAttachment();
+    const id = attachment?.id;
+    if (!id) return;
+    this.sessions.set(id, ws);
+    await this.onMessage(id, typeof message === 'string' ? message : new TextDecoder().decode(message));
+  }
+
+  async webSocketClose(ws, code, reason) {
+    const id = ws.deserializeAttachment()?.id;
+    if (id) this.disconnect(id);
+    try { ws.close(code, reason); } catch {}
+  }
+
+  async webSocketError(ws, error) {
+    console.error('GameRoom WebSocket error', error);
+    const id = ws.deserializeAttachment()?.id;
+    if (id) this.disconnect(id);
+  }
+
+  send(id, payload) {
+    const ws = this.sessions.get(id);
+    if (!ws) return;
+    try { ws.send(JSON.stringify(payload)); } catch { this.sessions.delete(id); }
+  }
+
+  broadcast(payload, except = null) {
+    const encoded = JSON.stringify(payload);
+    for (const [id, ws] of this.sessions) {
+      if (id === except) continue;
+      try { ws.send(encoded); } catch { this.sessions.delete(id); }
+    }
+  }
+
+  publicState(forId = null) {
+    return {
+      room:this.roomCode,
+      phase:this.phase,
+      hostId:this.hostId,
+      winner:this.winner,
+      sabotage:this.sabotage,
+      meetingEndsAt:this.meetingEndsAt,
+      settings:this.settings,
+      serverTime:Date.now(),
+      players:[...this.players.values()].map(p => ({
+        id:p.id, name:p.name, color:p.color, x:p.x, z:p.z, rotation:p.rotation,
+        alive:p.alive, connected:p.connected, host:p.id===this.hostId,
+        role:p.id===forId || !p.alive || this.phase==='finished' ? p.role : undefined,
+        tasks:p.id===forId ? p.tasks : undefined,
+        completedTasks:p.id===forId ? [...(p.completedTasks || [])] : undefined,
+        tasksDone:p.id===forId ? p.tasksDone : undefined,
+        taskTotal:p.id===forId ? p.tasks.length : undefined,
+        emergencyUsed:p.id===forId ? p.emergencyUsed : undefined,
+        lastKillAt:p.id===forId ? p.lastKillAt : undefined,
+        reported:p.reported || false,
+        ghost:!p.alive
+      }))
+    };
+  }
+
+  syncAll() {
+    for (const id of this.sessions.keys()) this.send(id, { type:'state', state:this.publicState(id) });
+  }
+
+  async onMessage(id, raw) {
+    let m;
+    try { m = JSON.parse(raw); } catch { return; }
+    if (m.type === 'join') return this.join(id, m);
+    const p = this.players.get(id);
+    if (!p) return;
+    switch (m.type) {
+      case 'move': this.move(p,m); break;
+      case 'start': this.start(p); break;
+      case 'settings': this.updateSettings(p,m.settings); break;
+      case 'taskComplete': this.completeTask(p,m); break;
+      case 'kill': this.kill(p,m); break;
+      case 'report': this.report(p,m); break;
+      case 'meeting': this.startMeeting(p,'緊急会議'); break;
+      case 'vote': this.vote(p,m); break;
+      case 'chat': this.chat(p,m); break;
+      case 'sabotage': this.startSabotage(p,m); break;
+      case 'fixSabotage': this.fixSabotage(p,m); break;
+      case 'returnLobby': this.returnLobby(p); break;
+    }
+  }
+
+  join(id,m) {
+    if (this.phase !== 'lobby') return this.send(id,{type:'error',message:'ゲーム進行中のため参加できません。'});
+    if (this.players.size >= 10) return this.send(id,{type:'error',message:'ルームは満員です。'});
+    const i=this.players.size;
+    const [x,z]=SPAWNS[i%SPAWNS.length];
+    this.players.set(id,{id,name:cleanName(m.name),color:COLORS[i%COLORS.length],x,z,rotation:0,alive:true,connected:true,role:'crew',tasks:[],completedTasks:new Set(),tasksDone:0,emergencyUsed:false,lastKillAt:0,reported:false});
+    if (!this.hostId) this.hostId=id;
+    this.syncAll();
+  }
+
+  updateSettings(p,s={}) {
+    if (p.id!==this.hostId || this.phase!=='lobby') return;
+    this.settings={impostors:clamp(Number(s.impostors)||1,1,3),tasks:clamp(Number(s.tasks)||4,3,5),speed:clamp(Number(s.speed)||1,.75,1.3),killCooldown:clamp(Number(s.killCooldown)||15,8,45),meetingTime:clamp(Number(s.meetingTime)||45,20,90),revealRoles:s.revealRoles!==false};
+    this.syncAll();
+  }
+
+  move(p,m) {
+    if (this.phase!=='playing') return;
+    const x=Number(m.x), z=Number(m.z);
+    if (!Number.isFinite(x)||!Number.isFinite(z)) return;
+    const allowed=(p.alive?1.25:1.9)*this.settings.speed;
+    if (Math.hypot(x-p.x,z-p.z)>allowed) return;
+    p.x=clamp(x,-11,11); p.z=clamp(z,-7,8);
+    p.rotation=Number.isFinite(Number(m.rotation))?Number(m.rotation):p.rotation;
+    this.broadcast({type:'playerMoved',id:p.id,x:p.x,z:p.z,rotation:p.rotation},p.id);
+  }
+
+  start(p) {
+    if (p.id!==this.hostId || this.phase!=='lobby') return;
+    if (this.players.size<2) return this.send(p.id,{type:'error',message:'2人以上で開始してください。'});
+    const list=[...this.players.values()];
+    const count=Math.min(this.settings.impostors,Math.max(1,list.length-1));
+    const shuffled=[...list].sort(()=>Math.random()-.5);
+    const bad=new Set(shuffled.slice(0,count).map(x=>x.id));
+    list.forEach((q,i)=>{const[x,z]=SPAWNS[i%SPAWNS.length];Object.assign(q,{x,z,rotation:0,alive:true,role:bad.has(q.id)?'impostor':'crew',tasks:[...TASKS].sort(()=>Math.random()-.5).slice(0,this.settings.tasks),completedTasks:new Set(),tasksDone:0,emergencyUsed:false,lastKillAt:Date.now(),reported:false})});
+    this.phase='playing'; this.winner=null; this.sabotage=null; this.votes.clear(); this.syncAll();
+  }
+
+  completeTask(p,m) { if(this.phase!=='playing'||!p.alive||p.role!=='crew')return;const t=String(m.task||'');if(!p.tasks.includes(t)||p.completedTasks.has(t))return;p.completedTasks.add(t);p.tasksDone=p.completedTasks.size;this.syncAll();this.checkWin(); }
+  kill(p,m) { if(this.phase!=='playing'||!p.alive||p.role!=='impostor')return;if(Date.now()-p.lastKillAt<this.settings.killCooldown*1000)return;const t=this.players.get(String(m.targetId||''));if(!t||!t.alive||t.role==='impostor'||dist(p,t)>2.15)return;t.alive=false;t.reported=false;p.lastKillAt=Date.now();this.broadcast({type:'killEffect',killerId:p.id,targetId:t.id});this.syncAll();this.checkWin(); }
+  report(p,m) { if(this.phase!=='playing'||!p.alive)return;const b=this.players.get(String(m.bodyId||''));if(!b||b.alive||b.reported||dist(p,b)>2.8)return;b.reported=true;this.startMeeting(p,`${b.name}が倒れているのを発見`); }
+  startMeeting(p,reason) { if(this.phase!=='playing'||!p.alive)return;if(reason==='緊急会議'){if(p.emergencyUsed)return;p.emergencyUsed=true;}this.phase='meeting';this.votes.clear();this.meetingEndsAt=Date.now()+this.settings.meetingTime*1000;this.broadcast({type:'meetingStarted',reason});this.ctx.storage.setAlarm(this.meetingEndsAt);this.syncAll(); }
+  vote(p,m) { if(this.phase!=='meeting'||!p.alive||this.votes.has(p.id))return;const t=String(m.targetId||'skip');if(t!=='skip'&&!this.players.get(t)?.alive)return;this.votes.set(p.id,t);this.broadcast({type:'voteCount',count:this.votes.size,total:[...this.players.values()].filter(x=>x.alive).length});if(this.votes.size>=[...this.players.values()].filter(x=>x.alive).length)this.finishMeeting(); }
+  finishMeeting() { if(this.phase!=='meeting')return;const tally=new Map();for(const t of this.votes.values())tally.set(t,(tally.get(t)||0)+1);let top='skip',max=-1,tie=false;for(const[t,c]of tally){if(c>max){top=t;max=c;tie=false}else if(c===max)tie=true}let ejected=null;if(!tie&&top!=='skip'){const q=this.players.get(top);if(q?.alive){q.alive=false;ejected={id:q.id,name:q.name,role:this.settings.revealRoles?q.role:undefined}}}this.phase='playing';this.meetingEndsAt=0;this.votes.clear();for(const q of this.players.values())if(!q.alive)q.reported=true;this.broadcast({type:'meetingEnded',ejected});this.syncAll();this.checkWin(); }
+  chat(p,m) { if(this.phase!=='meeting')return;const text=String(m.text||'').replace(/[<>]/g,'').trim().slice(0,120);if(!text)return;this.broadcast({type:'chat',from:p.name,text,alive:p.alive}); }
+  startSabotage(p,m) { if(this.phase!=='playing'||!p.alive||p.role!=='impostor'||this.sabotage)return;const kind=['lights','reactor','comms','doors'].includes(m.kind)?m.kind:'lights';const duration=kind==='reactor'?30:kind==='doors'?12:25;this.sabotage={kind,endsAt:Date.now()+duration*1000};this.broadcast({type:'sabotage',sabotage:this.sabotage});this.ctx.storage.setAlarm(this.sabotage.endsAt);this.syncAll(); }
+  fixSabotage(p,m) { if(this.phase!=='playing'||!p.alive||!this.sabotage)return;if(this.sabotage.kind==='reactor'&&m.station!=='reactor')return;this.sabotage=null;this.broadcast({type:'sabotageFixed'});this.syncAll(); }
+  checkWin() { if(this.phase==='finished')return;const alive=[...this.players.values()].filter(x=>x.alive),imp=alive.filter(x=>x.role==='impostor').length,crew=alive.filter(x=>x.role==='crew').length,crewAll=[...this.players.values()].filter(x=>x.role==='crew');const tasks=crewAll.length>0&&crewAll.every(x=>x.tasksDone>=x.tasks.length);if(imp===0||tasks)return this.finish('crew');if(imp>=crew)return this.finish('impostor'); }
+  finish(winner) { this.phase='finished';this.winner=winner;this.sabotage=null;this.broadcast({type:'gameFinished',winner});this.syncAll(); }
+  returnLobby(p) { if(p.id!==this.hostId||this.phase!=='finished')return;this.phase='lobby';this.winner=null;this.sabotage=null;for(const q of this.players.values())Object.assign(q,{alive:true,role:'crew',tasks:[],completedTasks:new Set(),tasksDone:0,reported:false});this.syncAll(); }
+  disconnect(id) { this.sessions.delete(id);if(!this.players.has(id))return;this.players.delete(id);if(this.hostId===id)this.hostId=this.players.keys().next().value||null;if(!this.players.size){this.phase='lobby';this.winner=null;this.sabotage=null}this.syncAll();if(this.phase==='playing')this.checkWin(); }
+  async alarm() { if(this.phase==='meeting'&&this.meetingEndsAt&&Date.now()>=this.meetingEndsAt)this.finishMeeting();if(this.sabotage&&Date.now()>=this.sabotage.endsAt){if(this.sabotage.kind==='reactor')this.finish('impostor');else{this.sabotage=null;this.broadcast({type:'sabotageFixed'});this.syncAll();}} }
 }
