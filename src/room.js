@@ -52,6 +52,23 @@ export class GameRoom extends DurableObject {
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       const saved = await this.ctx.storage.get("gameState");
       if (saved) this.restoreState(saved);
+
+      // Durable Objectの再起動後に、切断済みプレイヤーだけが保存状態へ
+      // 残ることがあります。現在接続中のWebSocketを基準に整理します。
+      const connectedIds = new Set(this.sessions.keys());
+      for (const playerId of [...this.players.keys()]) {
+        if (!connectedIds.has(playerId)) this.players.delete(playerId);
+      }
+
+      if (this.hostId && !this.players.has(this.hostId)) {
+        this.hostId = this.players.keys().next().value || null;
+      }
+
+      if (this.players.size === 0) {
+        await this.resetEmptyRoom();
+      } else {
+        await this.persist();
+      }
     });
   }
 
@@ -98,8 +115,29 @@ export class GameRoom extends DurableObject {
     await this.ctx.storage.put("gameState", this.serializableState());
   }
 
+  async resetEmptyRoom() {
+    this.players.clear();
+    this.votes.clear();
+    this.phase = "lobby";
+    this.hostId = null;
+    this.winner = null;
+    this.sabotage = null;
+    this.meetingEndsAt = 0;
+    this.practiceMode = false;
+    this.settings = { ...DEFAULT_SETTINGS };
+    await this.ctx.storage.deleteAlarm();
+    await this.persist();
+  }
+
   async fetch(request) {
     await this.ready;
+
+    // 誰も接続していないのに前回の進行状態が残っている場合は、
+    // 新しい参加者を受け入れる前にロビーへ自動復帰します。
+    if (this.sessions.size === 0 && this.players.size === 0 && this.phase !== "lobby") {
+      await this.resetEmptyRoom();
+    }
+
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
@@ -622,16 +660,10 @@ export class GameRoom extends DurableObject {
     if (this.hostId === id) this.hostId = this.players.keys().next().value || null;
 
     if (this.players.size === 0) {
-      this.phase = "lobby";
-      this.winner = null;
-      this.sabotage = null;
-      this.meetingEndsAt = 0;
-      this.practiceMode = false;
-      this.votes.clear();
-      await this.ctx.storage.deleteAlarm();
+      await this.resetEmptyRoom();
+    } else {
+      await this.persist();
     }
-
-    await this.persist();
     this.syncAll();
     if (this.phase === "playing") await this.checkWin();
     if (this.phase === "meeting") {
