@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "wide-map-v4-controls";
-const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
+const MAP_VERSION = "wide-map-v5-movement-fix";
+const SPAWNS = [[-4,-2.4],[4,-2.4],[-4,3.4],[4,3.4],[-10,0],[10,0],[-10,8],[10,8],[-10,-8],[10,-8]];
 const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
 const DEFAULT_SETTINGS = {
   impostors: 1,
