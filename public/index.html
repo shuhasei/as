@@ -30,7 +30,7 @@
     <header id="topBar" class="glass">
       <div><b>ROOM</b> <button id="copyRoomButton" class="link-button"><span id="roomCode">------</span></button></div>
       <div id="roleText">役職：---</div><div id="statusText">ロビー</div>
-      <button id="cameraButton" class="small">視点切替</button>
+      <button id="cameraButton" class="small">近い視点へ切替</button>
     </header>
 
     <aside id="playerPanel" class="glass panel">
@@ -57,6 +57,7 @@
     </div>
 
     <div id="joystick" class="hidden"><div id="stick"></div></div>
+    <div id="controlHint" class="glass">移動：WASD／矢印キー　使用：E　通報：R　視点：右上ボタン</div>
     <div id="notice"></div>
   </section>
 
@@ -72,9 +73,9 @@
 
   <dialog id="taskDialog"><div class="dialog-card"><button class="close" data-close="taskDialog">×</button><h2 id="taskTitle">TASK</h2><div id="taskGame"></div></div></dialog>
   <dialog id="sabotageDialog"><div class="dialog-card"><button class="close" data-close="sabotageDialog">×</button><h2>妨害を選択</h2><div class="sabotage-grid"><button data-sabotage="lights">照明停止</button><button data-sabotage="comms">通信妨害</button><button data-sabotage="doors">ドア封鎖</button><button data-sabotage="reactor" class="danger">リアクター暴走</button></div></div></dialog>
-  <dialog id="meetingDialog"><div class="dialog-card meeting-card"><h2 id="meetingReason">緊急会議</h2><div class="meeting-columns"><section><h3>投票</h3><div id="voteList"></div><button id="skipVoteButton">スキップ</button><p id="meetingTimer"></p></section><section><h3>チャット</h3><div id="chatLog"></div><form id="chatForm"><input id="chatInput" maxlength="120" placeholder="メッセージ"><button>送信</button></form></section></div></div></dialog>
+  <dialog id="meetingDialog"><div class="dialog-card meeting-card"><h2 id="meetingReason">緊急会議</h2><div class="meeting-columns"><section><h3>投票</h3><div id="voteList"></div><button id="skipVoteButton">スキップ</button><p id="meetingTimer"></p></section><section><div class="voice-header"><h3>通話・チャット</h3><button id="micButton" type="button">🎙 マイクON</button></div><p id="voiceStatus" class="voice-status">会議開始後に音声通話へ接続します。</p><div id="remoteAudio" aria-live="polite"></div><div id="chatLog"></div><form id="chatForm"><input id="chatInput" maxlength="120" placeholder="メッセージ"><button>送信</button></form></section></div></div></dialog>
   <dialog id="resultDialog"><div class="dialog-card result-card"><h2 id="resultTitle">GAME OVER</h2><p id="resultText"></p><div id="resultPlayers"></div><button id="returnLobbyButton" class="primary">ロビーへ戻る</button></div></dialog>
 </div>
-<script type="module" src="/game.js?v=20260724-2"></script>
+<script type="module" src="/game.js?v=20260724-voice-1"></script>
 </body>
 </html>
