@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "wide-map-v3";
+const MAP_VERSION = "wide-map-v4-controls";
 const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
 const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
 const DEFAULT_SETTINGS = {
@@ -460,10 +460,28 @@ export class GameRoom extends DurableObject {
   }
 
   async kill(player, message) {
-    if (this.phase !== "playing" || !player.alive || player.role !== "impostor") return;
-    if (Date.now() - player.lastKillAt < this.settings.killCooldown * 1000) return;
+    if (this.phase !== "playing") {
+      this.send(player.id, { type: "error", message: "ゲーム中だけ攻撃できます。" });
+      return;
+    }
+    if (!player.alive || player.role !== "impostor") {
+      this.send(player.id, { type: "error", message: "攻撃は生存中の侵入者だけが使えます。" });
+      return;
+    }
+    const remaining = this.settings.killCooldown * 1000 - (Date.now() - player.lastKillAt);
+    if (remaining > 0) {
+      this.send(player.id, { type: "error", message: `攻撃可能まであと${Math.ceil(remaining / 1000)}秒です。` });
+      return;
+    }
     const target = this.players.get(String(message.targetId || ""));
-    if (!target || !target.alive || target.role === "impostor" || dist(player, target) > 2.15) return;
+    if (!target || !target.alive || target.role === "impostor") {
+      this.send(player.id, { type: "error", message: "攻撃できる対象が見つかりません。" });
+      return;
+    }
+    if (dist(player, target) > 2.35) {
+      this.send(player.id, { type: "error", message: "対象から離れすぎています。" });
+      return;
+    }
 
     target.alive = false;
     target.reported = false;
