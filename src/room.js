@@ -170,14 +170,50 @@ export class GameRoom extends DurableObject {
   }
 
   start(p) {
-    if (p.id!==this.hostId || this.phase!=='lobby') return;
-    if (this.players.size<2) return this.send(p.id,{type:'error',message:'2人以上で開始してください。'});
-    const list=[...this.players.values()];
-    const count=Math.min(this.settings.impostors,Math.max(1,list.length-1));
-    const shuffled=[...list].sort(()=>Math.random()-.5);
-    const bad=new Set(shuffled.slice(0,count).map(x=>x.id));
-    list.forEach((q,i)=>{const[x,z]=SPAWNS[i%SPAWNS.length];Object.assign(q,{x,z,rotation:0,alive:true,role:bad.has(q.id)?'impostor':'crew',tasks:[...TASKS].sort(()=>Math.random()-.5).slice(0,this.settings.tasks),completedTasks:new Set(),tasksDone:0,emergencyUsed:false,lastKillAt:Date.now(),reported:false})});
-    this.phase='playing'; this.winner=null; this.sabotage=null; this.votes.clear(); this.syncAll();
+    if (p.id !== this.hostId) {
+      return this.send(p.id, { type:'error', message:'ホストだけがゲームを開始できます。' });
+    }
+    if (this.phase !== 'lobby') {
+      return this.send(p.id, { type:'error', message:'現在はゲームを開始できません。' });
+    }
+
+    const list = [...this.players.values()];
+    if (list.length === 0) {
+      return this.send(p.id, { type:'error', message:'参加者が見つかりません。' });
+    }
+
+    // 1人のときは動作確認用の練習モードとして開始する。
+    const practiceMode = list.length === 1;
+    const count = practiceMode
+      ? 0
+      : Math.min(this.settings.impostors, Math.max(1, list.length - 1));
+
+    const shuffled = [...list].sort(() => Math.random() - 0.5);
+    const impostorIds = new Set(shuffled.slice(0, count).map(player => player.id));
+
+    list.forEach((player, index) => {
+      const [x, z] = SPAWNS[index % SPAWNS.length];
+      Object.assign(player, {
+        x,
+        z,
+        rotation: 0,
+        alive: true,
+        role: impostorIds.has(player.id) ? 'impostor' : 'crew',
+        tasks: [...TASKS].sort(() => Math.random() - 0.5).slice(0, this.settings.tasks),
+        completedTasks: new Set(),
+        tasksDone: 0,
+        emergencyUsed: false,
+        lastKillAt: Date.now(),
+        reported: false
+      });
+    });
+
+    this.phase = 'playing';
+    this.winner = null;
+    this.sabotage = null;
+    this.votes.clear();
+    this.broadcast({ type:'gameStarted', practiceMode });
+    this.syncAll();
   }
 
   completeTask(p,m) { if(this.phase!=='playing'||!p.alive||p.role!=='crew')return;const t=String(m.task||'');if(!p.tasks.includes(t)||p.completedTasks.has(t))return;p.completedTasks.add(t);p.tasksDone=p.completedTasks.size;this.syncAll();this.checkWin(); }
