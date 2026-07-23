@@ -135,6 +135,7 @@ export class GameRoom extends DurableObject {
       case 'meeting': this.startMeeting(p,'緊急会議'); break;
       case 'vote': this.vote(p,m); break;
       case 'chat': this.chat(p,m); break;
+      case 'voiceSignal': this.voiceSignal(p,m); break;
       case 'sabotage': this.startSabotage(p,m); break;
       case 'fixSabotage': this.fixSabotage(p,m); break;
       case 'returnLobby': this.returnLobby(p); break;
@@ -186,6 +187,7 @@ export class GameRoom extends DurableObject {
   vote(p,m) { if(this.phase!=='meeting'||!p.alive||this.votes.has(p.id))return;const t=String(m.targetId||'skip');if(t!=='skip'&&!this.players.get(t)?.alive)return;this.votes.set(p.id,t);this.broadcast({type:'voteCount',count:this.votes.size,total:[...this.players.values()].filter(x=>x.alive).length});if(this.votes.size>=[...this.players.values()].filter(x=>x.alive).length)this.finishMeeting(); }
   finishMeeting() { if(this.phase!=='meeting')return;const tally=new Map();for(const t of this.votes.values())tally.set(t,(tally.get(t)||0)+1);let top='skip',max=-1,tie=false;for(const[t,c]of tally){if(c>max){top=t;max=c;tie=false}else if(c===max)tie=true}let ejected=null;if(!tie&&top!=='skip'){const q=this.players.get(top);if(q?.alive){q.alive=false;ejected={id:q.id,name:q.name,role:this.settings.revealRoles?q.role:undefined}}}this.phase='playing';this.meetingEndsAt=0;this.votes.clear();for(const q of this.players.values())if(!q.alive)q.reported=true;this.broadcast({type:'meetingEnded',ejected});this.syncAll();this.checkWin(); }
   chat(p,m) { if(this.phase!=='meeting')return;const text=String(m.text||'').replace(/[<>]/g,'').trim().slice(0,120);if(!text)return;this.broadcast({type:'chat',from:p.name,text,alive:p.alive}); }
+  voiceSignal(p,m) { if(this.phase!=='meeting')return;const targetId=String(m.targetId||'');const target=this.players.get(targetId);if(!target?.alive||!p.alive||!m.signal)return;this.send(targetId,{type:'voiceSignal',fromId:p.id,signal:m.signal}); }
   startSabotage(p,m) { if(this.phase!=='playing'||!p.alive||p.role!=='impostor'||this.sabotage)return;const kind=['lights','reactor','comms','doors'].includes(m.kind)?m.kind:'lights';const duration=kind==='reactor'?30:kind==='doors'?12:25;this.sabotage={kind,endsAt:Date.now()+duration*1000};this.broadcast({type:'sabotage',sabotage:this.sabotage});this.ctx.storage.setAlarm(this.sabotage.endsAt);this.syncAll(); }
   fixSabotage(p,m) { if(this.phase!=='playing'||!p.alive||!this.sabotage)return;if(this.sabotage.kind==='reactor'&&m.station!=='reactor')return;this.sabotage=null;this.broadcast({type:'sabotageFixed'});this.syncAll(); }
   checkWin() { if(this.phase==='finished')return;const alive=[...this.players.values()].filter(x=>x.alive),imp=alive.filter(x=>x.role==='impostor').length,crew=alive.filter(x=>x.role==='crew').length,crewAll=[...this.players.values()].filter(x=>x.role==='crew');const tasks=crewAll.length>0&&crewAll.every(x=>x.tasksDone>=x.tasks.length);if(imp===0||tasks)return this.finish('crew');if(imp>=crew)return this.finish('impostor'); }
