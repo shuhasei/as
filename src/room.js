@@ -1,13 +1,29 @@
 import { DurableObject } from "cloudflare:workers";
 
-const COLORS = ['red','blue','green','pink','orange','yellow','cyan','purple','white','lime'];
+const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const SPAWNS = [[-5,-2],[-2,-2],[1,-2],[4,-2],[-5,1],[-2,1],[1,1],[4,1],[-3,4],[3,4]];
-const TASKS = ['reactor','wires','scanner','cargo','fuel','align'];
-const DEFAULT_SETTINGS = { impostors:1, tasks:4, speed:1, killCooldown:15, meetingTime:45, revealRoles:true };
+const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
+const DEFAULT_SETTINGS = {
+  impostors: 1,
+  tasks: 4,
+  speed: 1,
+  killCooldown: 15,
+  meetingTime: 45,
+  revealRoles: true,
+};
+
 const uid = () => crypto.randomUUID();
-const cleanName = value => String(value || 'Player').replace(/[<>]/g, '').trim().slice(0, 16) || 'Player';
-const dist = (a,b) => Math.hypot(a.x-b.x, a.z-b.z);
-const clamp = (value,min,max) => Math.max(min, Math.min(max,value));
+const cleanName = (value) => String(value || "Player").replace(/[<>]/g, "").trim().slice(0, 16) || "Player";
+const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const shuffled = (items) => {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+};
 
 export class GameRoom extends DurableObject {
   constructor(ctx, env) {
@@ -17,29 +33,82 @@ export class GameRoom extends DurableObject {
     this.sessions = new Map();
     this.players = new Map();
     this.votes = new Map();
-    this.roomCode = '';
-    this.phase = 'lobby';
+    this.roomCode = "";
+    this.phase = "lobby";
     this.hostId = null;
     this.winner = null;
     this.sabotage = null;
     this.meetingEndsAt = 0;
+    this.practiceMode = false;
     this.settings = { ...DEFAULT_SETTINGS };
 
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment();
       if (attachment?.id) this.sessions.set(attachment.id, ws);
     }
+
+    this.ready = this.ctx.blockConcurrencyWhile(async () => {
+      const saved = await this.ctx.storage.get("gameState");
+      if (saved) this.restoreState(saved);
+    });
+  }
+
+  restoreState(saved) {
+    this.roomCode = saved.roomCode || "";
+    this.phase = saved.phase || "lobby";
+    this.hostId = saved.hostId || null;
+    this.winner = saved.winner || null;
+    this.sabotage = saved.sabotage || null;
+    this.meetingEndsAt = Number(saved.meetingEndsAt) || 0;
+    this.practiceMode = Boolean(saved.practiceMode);
+    this.settings = { ...DEFAULT_SETTINGS, ...(saved.settings || {}) };
+    this.players = new Map((saved.players || []).map((p) => [p.id, {
+      ...p,
+      completedTasks: new Set(p.completedTasks || []),
+    }]));
+    this.votes = new Map(saved.votes || []);
+
+    if (this.hostId && !this.players.has(this.hostId)) {
+      this.hostId = this.players.keys().next().value || null;
+    }
+  }
+
+  serializableState() {
+    return {
+      roomCode: this.roomCode,
+      phase: this.phase,
+      hostId: this.hostId,
+      winner: this.winner,
+      sabotage: this.sabotage,
+      meetingEndsAt: this.meetingEndsAt,
+      practiceMode: this.practiceMode,
+      settings: this.settings,
+      players: [...this.players.values()].map((p) => ({
+        ...p,
+        completedTasks: [...(p.completedTasks || [])],
+      })),
+      votes: [...this.votes.entries()],
+    };
+  }
+
+  async persist() {
+    await this.ctx.storage.put("gameState", this.serializableState());
   }
 
   async fetch(request) {
-    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
-      return new Response('Expected WebSocket', { status: 426 });
+    await this.ready;
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("Expected WebSocket", { status: 426 });
     }
 
     const url = new URL(request.url);
-    const requestedRoom = String(url.searchParams.get('room') || '').toUpperCase();
+    const requestedRoom = String(url.searchParams.get("room") || "").toUpperCase();
     if (!/^[A-Z0-9]{6}$/.test(requestedRoom)) {
-      return new Response('Invalid room code', { status: 400 });
+      return new Response("Invalid room code", { status: 400 });
+    }
+
+    if (this.roomCode && this.roomCode !== requestedRoom) {
+      return new Response("Room mismatch", { status: 409 });
     }
     this.roomCode ||= requestedRoom;
 
@@ -50,185 +119,527 @@ export class GameRoom extends DurableObject {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ id });
     this.sessions.set(id, server);
-    this.send(id, { type:'hello', id, room:this.roomCode });
+    this.send(id, { type: "hello", id, room: this.roomCode });
 
-    return new Response(null, { status:101, webSocket:client });
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws, message) {
-    const attachment = ws.deserializeAttachment();
-    const id = attachment?.id;
+    await this.ready;
+    const id = ws.deserializeAttachment()?.id;
     if (!id) return;
     this.sessions.set(id, ws);
-    await this.onMessage(id, typeof message === 'string' ? message : new TextDecoder().decode(message));
+    const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
+    await this.onMessage(id, raw);
   }
 
-  async webSocketClose(ws, code, reason) {
+  async webSocketClose(ws) {
+    await this.ready;
     const id = ws.deserializeAttachment()?.id;
-    if (id) this.disconnect(id);
-    try { ws.close(code, reason); } catch {}
+    if (id) await this.disconnect(id);
   }
 
   async webSocketError(ws, error) {
-    console.error('GameRoom WebSocket error', error);
+    console.error("GameRoom WebSocket error", error);
+    await this.ready;
     const id = ws.deserializeAttachment()?.id;
-    if (id) this.disconnect(id);
+    if (id) await this.disconnect(id);
   }
 
   send(id, payload) {
     const ws = this.sessions.get(id);
     if (!ws) return;
-    try { ws.send(JSON.stringify(payload)); } catch { this.sessions.delete(id); }
+    try {
+      ws.send(JSON.stringify(payload));
+    } catch (error) {
+      console.error("WebSocket send failed", error);
+      this.sessions.delete(id);
+    }
   }
 
   broadcast(payload, except = null) {
     const encoded = JSON.stringify(payload);
     for (const [id, ws] of this.sessions) {
       if (id === except) continue;
-      try { ws.send(encoded); } catch { this.sessions.delete(id); }
+      try {
+        ws.send(encoded);
+      } catch (error) {
+        console.error("WebSocket broadcast failed", error);
+        this.sessions.delete(id);
+      }
     }
   }
 
   publicState(forId = null) {
     return {
-      room:this.roomCode,
-      phase:this.phase,
-      hostId:this.hostId,
-      winner:this.winner,
-      sabotage:this.sabotage,
-      meetingEndsAt:this.meetingEndsAt,
-      settings:this.settings,
-      serverTime:Date.now(),
-      players:[...this.players.values()].map(p => ({
-        id:p.id, name:p.name, color:p.color, x:p.x, z:p.z, rotation:p.rotation,
-        alive:p.alive, connected:p.connected, host:p.id===this.hostId,
-        role:p.id===forId || !p.alive || this.phase==='finished' ? p.role : undefined,
-        tasks:p.id===forId ? p.tasks : undefined,
-        completedTasks:p.id===forId ? [...(p.completedTasks || [])] : undefined,
-        tasksDone:p.id===forId ? p.tasksDone : undefined,
-        taskTotal:p.id===forId ? p.tasks.length : undefined,
-        emergencyUsed:p.id===forId ? p.emergencyUsed : undefined,
-        lastKillAt:p.id===forId ? p.lastKillAt : undefined,
-        reported:p.reported || false,
-        ghost:!p.alive
-      }))
+      room: this.roomCode,
+      phase: this.phase,
+      hostId: this.hostId,
+      winner: this.winner,
+      sabotage: this.sabotage,
+      meetingEndsAt: this.meetingEndsAt,
+      practiceMode: this.practiceMode,
+      settings: this.settings,
+      serverTime: Date.now(),
+      players: [...this.players.values()].map((p) => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        x: p.x,
+        z: p.z,
+        rotation: p.rotation,
+        alive: p.alive,
+        connected: this.sessions.has(p.id),
+        host: p.id === this.hostId,
+        role: p.id === forId || !p.alive || this.phase === "finished" ? p.role : undefined,
+        tasks: p.id === forId ? p.tasks : undefined,
+        completedTasks: p.id === forId ? [...(p.completedTasks || [])] : undefined,
+        tasksDone: p.id === forId ? p.tasksDone : undefined,
+        taskTotal: p.id === forId ? p.tasks.length : undefined,
+        emergencyUsed: p.id === forId ? p.emergencyUsed : undefined,
+        lastKillAt: p.id === forId ? p.lastKillAt : undefined,
+        reported: p.reported || false,
+        ghost: !p.alive,
+      })),
     };
   }
 
   syncAll() {
-    for (const id of this.sessions.keys()) this.send(id, { type:'state', state:this.publicState(id) });
+    for (const id of this.sessions.keys()) {
+      this.send(id, { type: "state", state: this.publicState(id) });
+    }
   }
 
   async onMessage(id, raw) {
-    let m;
-    try { m = JSON.parse(raw); } catch { return; }
-    if (m.type === 'join') return this.join(id, m);
-    const p = this.players.get(id);
-    if (!p) return;
-    switch (m.type) {
-      case 'move': this.move(p,m); break;
-      case 'start': this.start(p); break;
-      case 'settings': this.updateSettings(p,m.settings); break;
-      case 'taskComplete': this.completeTask(p,m); break;
-      case 'kill': this.kill(p,m); break;
-      case 'report': this.report(p,m); break;
-      case 'meeting': this.startMeeting(p,'緊急会議'); break;
-      case 'vote': this.vote(p,m); break;
-      case 'chat': this.chat(p,m); break;
-      case 'voiceSignal': this.voiceSignal(p,m); break;
-      case 'sabotage': this.startSabotage(p,m); break;
-      case 'fixSabotage': this.fixSabotage(p,m); break;
-      case 'returnLobby': this.returnLobby(p); break;
+    let message;
+    try {
+      message = JSON.parse(raw);
+    } catch {
+      return this.send(id, { type: "error", message: "不正な通信データです。" });
+    }
+
+    if (message.type === "join") {
+      await this.join(id, message);
+      return;
+    }
+
+    const player = this.players.get(id);
+    if (!player) {
+      this.send(id, { type: "error", message: "プレイヤー情報が見つかりません。入り直してください。" });
+      return;
+    }
+
+    switch (message.type) {
+      case "move":
+        this.move(player, message);
+        break;
+      case "start":
+        await this.start(player);
+        break;
+      case "settings":
+        await this.updateSettings(player, message.settings);
+        break;
+      case "taskComplete":
+        await this.completeTask(player, message);
+        break;
+      case "kill":
+        await this.kill(player, message);
+        break;
+      case "report":
+        await this.report(player, message);
+        break;
+      case "meeting":
+        await this.startMeeting(player, "緊急会議");
+        break;
+      case "vote":
+        await this.vote(player, message);
+        break;
+      case "chat":
+        this.chat(player, message);
+        break;
+      case "voiceSignal":
+        this.voiceSignal(player, message);
+        break;
+      case "sabotage":
+        await this.startSabotage(player, message);
+        break;
+      case "fixSabotage":
+        await this.fixSabotage(player, message);
+        break;
+      case "returnLobby":
+        await this.returnLobby(player);
+        break;
+      default:
+        this.send(id, { type: "error", message: "未対応の操作です。" });
     }
   }
 
-  join(id,m) {
-    if (this.phase !== 'lobby') return this.send(id,{type:'error',message:'ゲーム進行中のため参加できません。'});
-    if (this.players.size >= 10) return this.send(id,{type:'error',message:'ルームは満員です。'});
-    const i=this.players.size;
-    const [x,z]=SPAWNS[i%SPAWNS.length];
-    this.players.set(id,{id,name:cleanName(m.name),color:COLORS[i%COLORS.length],x,z,rotation:0,alive:true,connected:true,role:'crew',tasks:[],completedTasks:new Set(),tasksDone:0,emergencyUsed:false,lastKillAt:0,reported:false});
-    if (!this.hostId) this.hostId=id;
-    this.syncAll();
-  }
-
-  updateSettings(p,s={}) {
-    if (p.id!==this.hostId || this.phase!=='lobby') return;
-    this.settings={impostors:clamp(Number(s.impostors)||1,1,3),tasks:clamp(Number(s.tasks)||4,3,5),speed:clamp(Number(s.speed)||1,.75,1.3),killCooldown:clamp(Number(s.killCooldown)||15,8,45),meetingTime:clamp(Number(s.meetingTime)||45,20,90),revealRoles:s.revealRoles!==false};
-    this.syncAll();
-  }
-
-  move(p,m) {
-    if (this.phase!=='playing') return;
-    const x=Number(m.x), z=Number(m.z);
-    if (!Number.isFinite(x)||!Number.isFinite(z)) return;
-    const allowed=(p.alive?1.25:1.9)*this.settings.speed;
-    if (Math.hypot(x-p.x,z-p.z)>allowed) return;
-    p.x=clamp(x,-11,11); p.z=clamp(z,-7,8);
-    p.rotation=Number.isFinite(Number(m.rotation))?Number(m.rotation):p.rotation;
-    this.broadcast({type:'playerMoved',id:p.id,x:p.x,z:p.z,rotation:p.rotation},p.id);
-  }
-
-  start(p) {
-    if (p.id !== this.hostId) {
-      return this.send(p.id, { type:'error', message:'ホストだけがゲームを開始できます。' });
+  async join(id, message) {
+    if (this.players.has(id)) {
+      this.syncAll();
+      return;
     }
-    if (this.phase !== 'lobby') {
-      return this.send(p.id, { type:'error', message:'現在はゲームを開始できません。' });
+    if (this.phase !== "lobby") {
+      this.send(id, { type: "error", message: "ゲーム進行中のため参加できません。" });
+      return;
+    }
+    if (this.players.size >= 10) {
+      this.send(id, { type: "error", message: "ルームは満員です。" });
+      return;
+    }
+
+    const index = this.players.size;
+    const [x, z] = SPAWNS[index % SPAWNS.length];
+    this.players.set(id, {
+      id,
+      name: cleanName(message.name),
+      color: COLORS[index % COLORS.length],
+      x,
+      z,
+      rotation: 0,
+      alive: true,
+      role: "crew",
+      tasks: [],
+      completedTasks: new Set(),
+      tasksDone: 0,
+      emergencyUsed: false,
+      lastKillAt: 0,
+      reported: false,
+    });
+    if (!this.hostId) this.hostId = id;
+    await this.persist();
+    this.syncAll();
+  }
+
+  async updateSettings(player, settings = {}) {
+    if (player.id !== this.hostId || this.phase !== "lobby") {
+      this.send(player.id, { type: "error", message: "ホストだけがロビーでルールを変更できます。" });
+      return;
+    }
+    this.settings = {
+      impostors: clamp(Number(settings.impostors) || 1, 1, 3),
+      tasks: clamp(Number(settings.tasks) || 4, 3, 5),
+      speed: clamp(Number(settings.speed) || 1, 0.75, 1.3),
+      killCooldown: clamp(Number(settings.killCooldown) || 15, 8, 45),
+      meetingTime: clamp(Number(settings.meetingTime) || 45, 20, 90),
+      revealRoles: settings.revealRoles !== false,
+    };
+    await this.persist();
+    this.syncAll();
+  }
+
+  move(player, message) {
+    if (this.phase !== "playing") return;
+    const x = Number(message.x);
+    const z = Number(message.z);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+
+    const allowed = (player.alive ? 1.25 : 1.9) * this.settings.speed;
+    if (Math.hypot(x - player.x, z - player.z) > allowed) return;
+
+    player.x = clamp(x, -11, 11);
+    player.z = clamp(z, -7, 8);
+    const rotation = Number(message.rotation);
+    if (Number.isFinite(rotation)) player.rotation = rotation;
+    this.broadcast({ type: "playerMoved", id: player.id, x: player.x, z: player.z, rotation: player.rotation }, player.id);
+  }
+
+  async start(player) {
+    if (player.id !== this.hostId) {
+      this.send(player.id, { type: "error", message: "ゲームを開始できるのはホストだけです。" });
+      return;
+    }
+    if (this.phase !== "lobby") {
+      this.send(player.id, { type: "error", message: "現在はゲームを開始できません。" });
+      return;
     }
 
     const list = [...this.players.values()];
     if (list.length === 0) {
-      return this.send(p.id, { type:'error', message:'参加者が見つかりません。' });
+      this.send(player.id, { type: "error", message: "参加者がいません。" });
+      return;
     }
 
-    // 1人のときは動作確認用の練習モードとして開始する。
-    const practiceMode = list.length === 1;
-    const count = practiceMode
+    this.practiceMode = list.length === 1;
+    const impostorCount = this.practiceMode
       ? 0
       : Math.min(this.settings.impostors, Math.max(1, list.length - 1));
+    const impostorIds = new Set(shuffled(list).slice(0, impostorCount).map((item) => item.id));
 
-    const shuffled = [...list].sort(() => Math.random() - 0.5);
-    const impostorIds = new Set(shuffled.slice(0, count).map(player => player.id));
-
-    list.forEach((player, index) => {
+    list.forEach((item, index) => {
       const [x, z] = SPAWNS[index % SPAWNS.length];
-      Object.assign(player, {
+      Object.assign(item, {
         x,
         z,
         rotation: 0,
         alive: true,
-        role: impostorIds.has(player.id) ? 'impostor' : 'crew',
-        tasks: [...TASKS].sort(() => Math.random() - 0.5).slice(0, this.settings.tasks),
+        role: impostorIds.has(item.id) ? "impostor" : "crew",
+        tasks: shuffled(TASKS).slice(0, this.settings.tasks),
         completedTasks: new Set(),
         tasksDone: 0,
         emergencyUsed: false,
         lastKillAt: Date.now(),
-        reported: false
+        reported: false,
       });
     });
 
-    this.phase = 'playing';
+    this.phase = "playing";
     this.winner = null;
     this.sabotage = null;
+    this.meetingEndsAt = 0;
     this.votes.clear();
-    this.broadcast({ type:'gameStarted', practiceMode });
+    await this.ctx.storage.deleteAlarm();
+    await this.persist();
+    this.broadcast({ type: "gameStarted", practiceMode: this.practiceMode });
     this.syncAll();
   }
 
-  completeTask(p,m) { if(this.phase!=='playing'||!p.alive||p.role!=='crew')return;const t=String(m.task||'');if(!p.tasks.includes(t)||p.completedTasks.has(t))return;p.completedTasks.add(t);p.tasksDone=p.completedTasks.size;this.syncAll();this.checkWin(); }
-  kill(p,m) { if(this.phase!=='playing'||!p.alive||p.role!=='impostor')return;if(Date.now()-p.lastKillAt<this.settings.killCooldown*1000)return;const t=this.players.get(String(m.targetId||''));if(!t||!t.alive||t.role==='impostor'||dist(p,t)>2.15)return;t.alive=false;t.reported=false;p.lastKillAt=Date.now();this.broadcast({type:'killEffect',killerId:p.id,targetId:t.id});this.syncAll();this.checkWin(); }
-  report(p,m) { if(this.phase!=='playing'||!p.alive)return;const b=this.players.get(String(m.bodyId||''));if(!b||b.alive||b.reported||dist(p,b)>2.8)return;b.reported=true;this.startMeeting(p,`${b.name}が倒れているのを発見`); }
-  startMeeting(p,reason) { if(this.phase!=='playing'||!p.alive)return;if(reason==='緊急会議'){if(p.emergencyUsed)return;p.emergencyUsed=true;}this.phase='meeting';this.votes.clear();this.meetingEndsAt=Date.now()+this.settings.meetingTime*1000;this.broadcast({type:'meetingStarted',reason});this.ctx.storage.setAlarm(this.meetingEndsAt);this.syncAll(); }
-  vote(p,m) { if(this.phase!=='meeting'||!p.alive||this.votes.has(p.id))return;const t=String(m.targetId||'skip');if(t!=='skip'&&!this.players.get(t)?.alive)return;this.votes.set(p.id,t);this.broadcast({type:'voteCount',count:this.votes.size,total:[...this.players.values()].filter(x=>x.alive).length});if(this.votes.size>=[...this.players.values()].filter(x=>x.alive).length)this.finishMeeting(); }
-  finishMeeting() { if(this.phase!=='meeting')return;const tally=new Map();for(const t of this.votes.values())tally.set(t,(tally.get(t)||0)+1);let top='skip',max=-1,tie=false;for(const[t,c]of tally){if(c>max){top=t;max=c;tie=false}else if(c===max)tie=true}let ejected=null;if(!tie&&top!=='skip'){const q=this.players.get(top);if(q?.alive){q.alive=false;ejected={id:q.id,name:q.name,role:this.settings.revealRoles?q.role:undefined}}}this.phase='playing';this.meetingEndsAt=0;this.votes.clear();for(const q of this.players.values())if(!q.alive)q.reported=true;this.broadcast({type:'meetingEnded',ejected});this.syncAll();this.checkWin(); }
-  chat(p,m) { if(this.phase!=='meeting')return;const text=String(m.text||'').replace(/[<>]/g,'').trim().slice(0,120);if(!text)return;this.broadcast({type:'chat',from:p.name,text,alive:p.alive}); }
-  voiceSignal(p,m) { if(this.phase!=='meeting')return;const targetId=String(m.targetId||'');const target=this.players.get(targetId);if(!target?.alive||!p.alive||!m.signal)return;this.send(targetId,{type:'voiceSignal',fromId:p.id,signal:m.signal}); }
-  startSabotage(p,m) { if(this.phase!=='playing'||!p.alive||p.role!=='impostor'||this.sabotage)return;const kind=['lights','reactor','comms','doors'].includes(m.kind)?m.kind:'lights';const duration=kind==='reactor'?30:kind==='doors'?12:25;this.sabotage={kind,endsAt:Date.now()+duration*1000};this.broadcast({type:'sabotage',sabotage:this.sabotage});this.ctx.storage.setAlarm(this.sabotage.endsAt);this.syncAll(); }
-  fixSabotage(p,m) { if(this.phase!=='playing'||!p.alive||!this.sabotage)return;if(this.sabotage.kind==='reactor'&&m.station!=='reactor')return;this.sabotage=null;this.broadcast({type:'sabotageFixed'});this.syncAll(); }
-  checkWin() { if(this.phase==='finished')return;const alive=[...this.players.values()].filter(x=>x.alive),imp=alive.filter(x=>x.role==='impostor').length,crew=alive.filter(x=>x.role==='crew').length,crewAll=[...this.players.values()].filter(x=>x.role==='crew');const tasks=crewAll.length>0&&crewAll.every(x=>x.tasksDone>=x.tasks.length);if(imp===0||tasks)return this.finish('crew');if(imp>=crew)return this.finish('impostor'); }
-  finish(winner) { this.phase='finished';this.winner=winner;this.sabotage=null;this.broadcast({type:'gameFinished',winner});this.syncAll(); }
-  returnLobby(p) { if(p.id!==this.hostId||this.phase!=='finished')return;this.phase='lobby';this.winner=null;this.sabotage=null;for(const q of this.players.values())Object.assign(q,{alive:true,role:'crew',tasks:[],completedTasks:new Set(),tasksDone:0,reported:false});this.syncAll(); }
-  disconnect(id) { this.sessions.delete(id);if(!this.players.has(id))return;this.players.delete(id);if(this.hostId===id)this.hostId=this.players.keys().next().value||null;if(!this.players.size){this.phase='lobby';this.winner=null;this.sabotage=null}this.syncAll();if(this.phase==='playing')this.checkWin(); }
-  async alarm() { if(this.phase==='meeting'&&this.meetingEndsAt&&Date.now()>=this.meetingEndsAt)this.finishMeeting();if(this.sabotage&&Date.now()>=this.sabotage.endsAt){if(this.sabotage.kind==='reactor')this.finish('impostor');else{this.sabotage=null;this.broadcast({type:'sabotageFixed'});this.syncAll();}} }
+  async completeTask(player, message) {
+    if (this.phase !== "playing" || !player.alive || player.role !== "crew") return;
+    const task = String(message.task || "");
+    if (!player.tasks.includes(task) || player.completedTasks.has(task)) return;
+    player.completedTasks.add(task);
+    player.tasksDone = player.completedTasks.size;
+    await this.persist();
+    this.syncAll();
+    await this.checkWin();
+  }
+
+  async kill(player, message) {
+    if (this.phase !== "playing" || !player.alive || player.role !== "impostor") return;
+    if (Date.now() - player.lastKillAt < this.settings.killCooldown * 1000) return;
+    const target = this.players.get(String(message.targetId || ""));
+    if (!target || !target.alive || target.role === "impostor" || dist(player, target) > 2.15) return;
+
+    target.alive = false;
+    target.reported = false;
+    player.lastKillAt = Date.now();
+    await this.persist();
+    this.broadcast({ type: "killEffect", killerId: player.id, targetId: target.id });
+    this.syncAll();
+    await this.checkWin();
+  }
+
+  async report(player, message) {
+    if (this.phase !== "playing" || !player.alive) return;
+    const body = this.players.get(String(message.bodyId || ""));
+    if (!body || body.alive || body.reported || dist(player, body) > 2.8) return;
+    body.reported = true;
+    await this.startMeeting(player, `${body.name}が倒れているのを発見`);
+  }
+
+  async startMeeting(player, reason) {
+    if (this.phase !== "playing" || !player.alive) return;
+    if (reason === "緊急会議") {
+      if (player.emergencyUsed) {
+        this.send(player.id, { type: "error", message: "緊急会議はすでに使用済みです。" });
+        return;
+      }
+      player.emergencyUsed = true;
+    }
+
+    this.phase = "meeting";
+    this.votes.clear();
+    this.meetingEndsAt = Date.now() + this.settings.meetingTime * 1000;
+    await this.ctx.storage.setAlarm(this.meetingEndsAt);
+    await this.persist();
+    this.broadcast({ type: "meetingStarted", reason });
+    this.syncAll();
+  }
+
+  async vote(player, message) {
+    if (this.phase !== "meeting" || !player.alive || this.votes.has(player.id)) return;
+    const targetId = String(message.targetId || "skip");
+    if (targetId !== "skip" && !this.players.get(targetId)?.alive) return;
+
+    this.votes.set(player.id, targetId);
+    await this.persist();
+    const aliveCount = [...this.players.values()].filter((item) => item.alive).length;
+    this.broadcast({ type: "voteCount", count: this.votes.size, total: aliveCount });
+    if (this.votes.size >= aliveCount) await this.finishMeeting();
+  }
+
+  async finishMeeting() {
+    if (this.phase !== "meeting") return;
+    const tally = new Map();
+    for (const target of this.votes.values()) tally.set(target, (tally.get(target) || 0) + 1);
+
+    let top = "skip";
+    let max = -1;
+    let tie = false;
+    for (const [target, count] of tally) {
+      if (count > max) {
+        top = target;
+        max = count;
+        tie = false;
+      } else if (count === max) {
+        tie = true;
+      }
+    }
+
+    let ejected = null;
+    if (!tie && top !== "skip") {
+      const target = this.players.get(top);
+      if (target?.alive) {
+        target.alive = false;
+        ejected = {
+          id: target.id,
+          name: target.name,
+          role: this.settings.revealRoles ? target.role : undefined,
+        };
+      }
+    }
+
+    this.phase = "playing";
+    this.meetingEndsAt = 0;
+    this.votes.clear();
+    for (const item of this.players.values()) {
+      if (!item.alive) item.reported = true;
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.persist();
+    this.broadcast({ type: "meetingEnded", ejected });
+    this.syncAll();
+    await this.checkWin();
+  }
+
+  chat(player, message) {
+    if (this.phase !== "meeting") return;
+    const text = String(message.text || "").replace(/[<>]/g, "").trim().slice(0, 120);
+    if (!text) return;
+    this.broadcast({ type: "chat", from: player.name, text, alive: player.alive });
+  }
+
+  voiceSignal(player, message) {
+    if (this.phase !== "meeting" || !player.alive || !message.signal) return;
+    const targetId = String(message.targetId || "");
+    const target = this.players.get(targetId);
+    if (!target?.alive || !this.sessions.has(targetId)) return;
+    this.send(targetId, { type: "voiceSignal", fromId: player.id, signal: message.signal });
+  }
+
+  async startSabotage(player, message) {
+    if (this.phase !== "playing" || !player.alive || player.role !== "impostor" || this.sabotage) return;
+    const kind = ["lights", "reactor", "comms", "doors"].includes(message.kind) ? message.kind : "lights";
+    const duration = kind === "reactor" ? 30 : kind === "doors" ? 12 : 25;
+    this.sabotage = { kind, endsAt: Date.now() + duration * 1000 };
+    await this.ctx.storage.setAlarm(this.sabotage.endsAt);
+    await this.persist();
+    this.broadcast({ type: "sabotage", sabotage: this.sabotage });
+    this.syncAll();
+  }
+
+  async fixSabotage(player, message) {
+    if (this.phase !== "playing" || !player.alive || !this.sabotage) return;
+    if (this.sabotage.kind === "reactor" && message.station !== "reactor") return;
+    this.sabotage = null;
+    await this.ctx.storage.deleteAlarm();
+    await this.persist();
+    this.broadcast({ type: "sabotageFixed" });
+    this.syncAll();
+  }
+
+  async checkWin() {
+    if (this.phase === "finished") return;
+    const allPlayers = [...this.players.values()];
+    const crewAll = allPlayers.filter((item) => item.role === "crew");
+    const tasksComplete = crewAll.length > 0 && crewAll.every((item) => item.tasksDone >= item.tasks.length);
+
+    if (this.practiceMode) {
+      if (tasksComplete) await this.finish("crew");
+      return;
+    }
+
+    const alive = allPlayers.filter((item) => item.alive);
+    const impostors = alive.filter((item) => item.role === "impostor").length;
+    const crew = alive.filter((item) => item.role === "crew").length;
+    if (impostors === 0 || tasksComplete) {
+      await this.finish("crew");
+    } else if (impostors >= crew) {
+      await this.finish("impostor");
+    }
+  }
+
+  async finish(winner) {
+    if (this.phase === "finished") return;
+    this.phase = "finished";
+    this.winner = winner;
+    this.sabotage = null;
+    this.meetingEndsAt = 0;
+    await this.ctx.storage.deleteAlarm();
+    await this.persist();
+    this.broadcast({ type: "gameFinished", winner });
+    this.syncAll();
+  }
+
+  async returnLobby(player) {
+    if (player.id !== this.hostId || this.phase !== "finished") return;
+    this.phase = "lobby";
+    this.winner = null;
+    this.sabotage = null;
+    this.meetingEndsAt = 0;
+    this.practiceMode = false;
+    this.votes.clear();
+    for (const item of this.players.values()) {
+      Object.assign(item, {
+        alive: true,
+        role: "crew",
+        tasks: [],
+        completedTasks: new Set(),
+        tasksDone: 0,
+        emergencyUsed: false,
+        lastKillAt: 0,
+        reported: false,
+      });
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.persist();
+    this.syncAll();
+  }
+
+  async disconnect(id) {
+    this.sessions.delete(id);
+    if (!this.players.has(id)) return;
+
+    this.players.delete(id);
+    this.votes.delete(id);
+    if (this.hostId === id) this.hostId = this.players.keys().next().value || null;
+
+    if (this.players.size === 0) {
+      this.phase = "lobby";
+      this.winner = null;
+      this.sabotage = null;
+      this.meetingEndsAt = 0;
+      this.practiceMode = false;
+      this.votes.clear();
+      await this.ctx.storage.deleteAlarm();
+    }
+
+    await this.persist();
+    this.syncAll();
+    if (this.phase === "playing") await this.checkWin();
+    if (this.phase === "meeting") {
+      const aliveCount = [...this.players.values()].filter((item) => item.alive).length;
+      if (this.votes.size >= aliveCount) await this.finishMeeting();
+    }
+  }
+
+  async alarm() {
+    await this.ready;
+    if (this.phase === "meeting" && this.meetingEndsAt && Date.now() >= this.meetingEndsAt) {
+      await this.finishMeeting();
+      return;
+    }
+
+    if (this.sabotage && Date.now() >= this.sabotage.endsAt) {
+      if (this.sabotage.kind === "reactor") {
+        await this.finish("impostor");
+      } else {
+        this.sabotage = null;
+        await this.persist();
+        this.broadcast({ type: "sabotageFixed" });
+        this.syncAll();
+      }
+    }
+  }
 }
