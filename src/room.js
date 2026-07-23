@@ -576,10 +576,18 @@ export class GameRoom extends DurableObject {
   }
 
   chat(player, message) {
-    if (this.phase !== "meeting") return;
     const text = String(message.text || "").replace(/[<>]/g, "").trim().slice(0, 120);
-    if (!text) return;
-    this.broadcast({ type: "chat", from: player.name, text, alive: player.alive });
+    if (!text || !this.sessions.has(player.id)) return;
+    const now = Date.now();
+    if (player.lastChatAt && now - player.lastChatAt < 450) return;
+    player.lastChatAt = now;
+    this.broadcast({
+      type: "chat",
+      from: player.name,
+      text,
+      alive: player.alive,
+      phase: this.phase,
+    });
   }
 
   voiceSignal(player, message) {
