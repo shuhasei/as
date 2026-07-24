@@ -31,12 +31,12 @@
     <header id="topBar" class="glass">
       <div><b>ROOM</b> <button id="copyRoomButton" class="link-button"><span id="roomCode">------</span></button></div>
       <div id="roleText">役職：---</div><div id="statusText">ロビー</div>
-      <button id="cameraButton" class="small">近い視点へ切替</button>
+      <button id="cameraButton" class="small">一人称視点へ切替</button>
     </header>
 
     <aside id="playerPanel" class="glass panel">
       <div class="panel-title"><h2>PLAYERS</h2><span id="playerCount">0/10</span></div>
-      <div id="playerList"></div><div class="call-controls"><button id="hangupCallButton" class="danger small" type="button">📴 通話終了</button><span id="callHelp">📞を押して個別通話</span></div>
+      <div id="playerList"></div><div class="call-controls"><button id="hangupCallButton" class="danger small hidden" type="button" disabled>📴 通話終了</button><span id="callHelp">📞を押して個別通話</span></div>
       <button id="startButton" class="primary hidden">ゲーム開始</button>
       <button id="settingsButton" class="secondary hidden">ルール設定</button>
     </aside>
@@ -94,10 +94,10 @@
 
   <dialog id="taskDialog"><div class="dialog-card"><button class="close" data-close="taskDialog">×</button><h2 id="taskTitle">TASK</h2><div id="taskGame"></div></div></dialog>
   <dialog id="sabotageDialog"><div class="dialog-card"><button class="close" data-close="sabotageDialog">×</button><h2>妨害を選択</h2><div class="sabotage-grid"><button data-sabotage="lights">照明停止</button><button data-sabotage="comms">通信妨害</button><button data-sabotage="doors">ドア封鎖</button><button data-sabotage="reactor" class="danger">リアクター暴走</button></div></div></dialog>
-  <dialog id="meetingDialog"><div class="dialog-card meeting-card"><h2 id="meetingReason">緊急会議</h2><div class="meeting-columns"><section><h3>投票</h3><div id="voteList"></div><button id="skipVoteButton">スキップ</button><p id="meetingTimer"></p></section><section><div class="voice-header"><h3>通話・チャット</h3><button id="micButton" type="button">🎙 マイクON</button></div><p id="voiceStatus" class="voice-status">会議開始後に音声通話へ接続します。</p><div id="remoteAudio" aria-live="polite"></div><div id="meetingChatLog" class="chat-log"></div><form id="meetingChatForm" class="chat-form"><input id="meetingChatInput" maxlength="120" placeholder="会議チャット"><button>送信</button></form></section></div></div></dialog>
+  <dialog id="meetingDialog"><div class="dialog-card meeting-card"><h2 id="meetingReason">緊急会議</h2><div class="meeting-columns"><section><h3>投票</h3><div id="voteList"></div><button id="skipVoteButton">スキップ</button><p id="meetingTimer"></p></section><section><div class="voice-header"><h3>通話・チャット</h3><button id="micButton" type="button" disabled>🎙 通話相手なし</button></div><p id="voiceStatus" class="voice-status">メンバー一覧の📞から通話相手を選んでください。</p><div id="remoteAudio" aria-live="polite"></div><div id="meetingChatLog" class="chat-log"></div><form id="meetingChatForm" class="chat-form"><input id="meetingChatInput" maxlength="120" placeholder="会議チャット"><button>送信</button></form></section></div></div></dialog>
   <dialog id="incomingCallDialog"><div class="dialog-card call-dialog"><h2>着信</h2><p id="incomingCallerName">メンバーから着信です</p><div class="call-answer-row"><button id="acceptCallButton" class="primary" type="button">📞 応答</button><button id="declineCallButton" class="danger" type="button">拒否</button></div></div></dialog>
   <dialog id="resultDialog"><div class="dialog-card result-card"><h2 id="resultTitle">GAME OVER</h2><p id="resultText"></p><div id="resultPlayers"></div><button id="returnLobbyButton" class="primary">ロビーへ戻る</button></div></dialog>
 </div>
-<script type="module" src="/game.js?v=20260724-v13-compatible"></script>
+<script type="module" src="/game.js?v=20260724-camera-call-fix"></script>
 </body>
 </html>
