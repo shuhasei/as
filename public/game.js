@@ -797,7 +797,87 @@ addEventListener('beforeunload',()=>{hangUpCall(false);clearIncomingCall(false)}
 
 function openResult(w){$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'INTRUDER VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'侵入者の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
 function openDialog(id){const d=$(id);if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(d?.open)d.close()}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
-function setupJoystick(){let active=false;const move=e=>{if(!active)return;const r=ui.joystick.getBoundingClientRect(),x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2),m=Math.min(45,Math.hypot(x,y)),a=Math.atan2(y,x);joy={x:Math.cos(a)*m/45,y:Math.sin(a)*m/45};ui.stick.style.transform=`translate(${joy.x*36}px,${joy.y*36}px)`};ui.joystick.onpointerdown=e=>{active=true;ui.joystick.setPointerCapture(e.pointerId);move(e)};ui.joystick.onpointermove=move;ui.joystick.onpointerup=()=>{active=false;joy={x:0,y:0};ui.stick.style.transform=''}}function resize(){const canvas=$('gameCanvas');if(!canvas)return;const width=Math.max(1,innerWidth),height=Math.max(1,innerHeight);if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(width*ratio));canvas.height=Math.max(1,Math.floor(height*ratio));canvas.style.width=width+'px';canvas.style.height=height+'px';return}if(!camera||!renderer)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setSize(width,height,false)}
+function setupJoystick(){
+  if(!ui.joystick||!ui.stick)return;
+  let active=false;
+  let activePointerId=null;
+
+  // スマホではブラウザのスクロール操作よりジョイスティック入力を優先する。
+  ui.joystick.style.touchAction='none';
+  ui.joystick.style.userSelect='none';
+  ui.joystick.style.webkitUserSelect='none';
+  ui.joystick.style.pointerEvents='auto';
+  ui.joystick.style.zIndex='80';
+
+  const reset=()=>{
+    active=false;
+    activePointerId=null;
+    joy={x:0,y:0};
+    ui.stick.style.transform='translate(0px,0px)';
+  };
+  const applyPoint=(clientX,clientY)=>{
+    if(!active)return;
+    const r=ui.joystick.getBoundingClientRect();
+    const x=clientX-(r.left+r.width/2);
+    const y=clientY-(r.top+r.height/2);
+    const distance=Math.hypot(x,y);
+    if(distance<1){joy={x:0,y:0};ui.stick.style.transform='translate(0px,0px)';return}
+    const amount=Math.min(45,distance);
+    const angle=Math.atan2(y,x);
+    joy={x:Math.cos(angle)*amount/45,y:Math.sin(angle)*amount/45};
+    ui.stick.style.transform=`translate(${joy.x*36}px,${joy.y*36}px)`;
+  };
+  const pointerDown=e=>{
+    if(active)return;
+    e.preventDefault();
+    active=true;
+    activePointerId=e.pointerId;
+    try{ui.joystick.setPointerCapture?.(e.pointerId)}catch{}
+    applyPoint(e.clientX,e.clientY);
+  };
+  const pointerMove=e=>{
+    if(!active||e.pointerId!==activePointerId)return;
+    e.preventDefault();
+    applyPoint(e.clientX,e.clientY);
+  };
+  const pointerEnd=e=>{
+    if(!active||e.pointerId!==activePointerId)return;
+    e.preventDefault();
+    try{ui.joystick.releasePointerCapture?.(e.pointerId)}catch{}
+    reset();
+  };
+
+  if(window.PointerEvent){
+    ui.joystick.addEventListener('pointerdown',pointerDown,{passive:false});
+    document.addEventListener('pointermove',pointerMove,{passive:false});
+    document.addEventListener('pointerup',pointerEnd,{passive:false});
+    document.addEventListener('pointercancel',pointerEnd,{passive:false});
+  }else{
+    let touchId=null;
+    const findTouch=list=>Array.from(list).find(t=>t.identifier===touchId);
+    ui.joystick.addEventListener('touchstart',e=>{
+      if(active||!e.changedTouches.length)return;
+      e.preventDefault();
+      const t=e.changedTouches[0];
+      active=true;touchId=t.identifier;
+      applyPoint(t.clientX,t.clientY);
+    },{passive:false});
+    document.addEventListener('touchmove',e=>{
+      const t=findTouch(e.touches);
+      if(!active||!t)return;
+      e.preventDefault();
+      applyPoint(t.clientX,t.clientY);
+    },{passive:false});
+    const touchEnd=e=>{
+      if(!active||!findTouch(e.changedTouches))return;
+      e.preventDefault();
+      touchId=null;reset();
+    };
+    document.addEventListener('touchend',touchEnd,{passive:false});
+    document.addEventListener('touchcancel',touchEnd,{passive:false});
+  }
+}
+function resize(){const canvas=$('gameCanvas');if(!canvas)return;const width=Math.max(1,innerWidth),height=Math.max(1,innerHeight);if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(width*ratio));canvas.height=Math.max(1,Math.floor(height*ratio));canvas.style.width=width+'px';canvas.style.height=height+'px';return}if(!camera||!renderer)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setSize(width,height,false)}
 setInterval(()=>{if(state?.phase==='meeting')$('meetingTimer').textContent=`残り ${Math.max(0,Math.ceil((state.meetingEndsAt-Date.now())/1000))}秒`},500);
 
 $('profileSummary').textContent=profileText();
