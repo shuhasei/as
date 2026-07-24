@@ -1,20 +1,25 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "wide-map-v13-compatible";
-const LOCKERS = [{ id: "medical", x: -15.8, z: -10.7, exitX: -14.2, exitZ: -11.85 },{ id: "security", x: -15.8, z: 2.6, exitX: -14.1, exitZ: 2.6 },{ id: "electrical", x: 15.8, z: 10.6, exitX: 14.2, exitZ: 11.85 },{ id: "cargo", x: 15.8, z: -10.6, exitX: 14.2, exitZ: -11.85 }];
-const EMERGENCY_BUTTON = { x: 0, z: 0.5 };
-const SPAWNS = [
-  [-4, -2.5], [0, -2.5], [4, -2.5],
-  [-4, 0.5], [4, 0.5],
-  [-4, 3], [0, 3.5], [4, 3],
-  [-9, 0.5], [9, 0.5],
-  [-9, -2.5], [9, -2.5],
+const MAP_VERSION = "aurora-branch-map-v14";
+const LOCKERS = [
+  { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
+  { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
+  { id: "weapons", x: 27, z: 17.2, exitX: 25.4, exitZ: 17.2 },
+  { id: "storage", x: -12, z: -19.5, exitX: -10.4, exitZ: -19.5 },
 ];
-const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
+const EMERGENCY_BUTTON = { x: 0, z: 0 };
+const SPAWNS = [
+  [-4.5, -3.5], [0, -4.5], [4.5, -3.5],
+  [-5, 0], [5, 0],
+  [-4.5, 3.5], [0, 4.5], [4.5, 3.5],
+  [-2.5, -4.5], [2.5, -4.5],
+  [-2.5, 4.5], [2.5, 4.5],
+];
+const TASKS = ["reactor", "engine", "scanner", "security", "wires", "cargo", "comms", "shield", "align", "weapons", "oxygen", "fuel"];
 const DEFAULT_SETTINGS = {
   impostors: 1,
-  tasks: 4,
+  tasks: 6,
   speed: 1,
   killCooldown: 15,
   meetingTime: 45,
@@ -422,7 +427,7 @@ export class GameRoom extends DurableObject {
     }
     this.settings = {
       impostors: clamp(Number(settings.impostors) || 1, 1, 3),
-      tasks: clamp(Number(settings.tasks) || 4, 3, 5),
+      tasks: clamp(Number(settings.tasks) || 6, 4, 10),
       speed: clamp(Number(settings.speed) || 1, 0.75, 1.3),
       killCooldown: clamp(Number(settings.killCooldown) || 15, 8, 45),
       meetingTime: clamp(Number(settings.meetingTime) || 45, 20, 90),
@@ -445,8 +450,8 @@ export class GameRoom extends DurableObject {
       return;
     }
 
-    player.x = clamp(x, -17.2, 17.2);
-    player.z = clamp(z, -12.2, 12.2);
+    player.x = clamp(x, -33.2, 35.2);
+    player.z = clamp(z, -22.2, 23.2);
     const rotation = Number(message.rotation);
     if (Number.isFinite(rotation)) player.rotation = rotation;
 
