@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const MAP_VERSION = "wide-map-v13-compatible";
-const LOCKERS = [{ id: "medical", x: -15.8, z: -10.7, exitX: -14.1, exitZ: -10.7 },{ id: "security", x: -15.8, z: 2.6, exitX: -14.1, exitZ: 2.6 },{ id: "electrical", x: 15.8, z: 10.6, exitX: 14.1, exitZ: 10.6 },{ id: "cargo", x: 15.8, z: -10.6, exitX: 14.1, exitZ: -10.6 }];
+const LOCKERS = [{ id: "medical", x: -15.8, z: -10.7, exitX: -14.2, exitZ: -11.85 },{ id: "security", x: -15.8, z: 2.6, exitX: -14.1, exitZ: 2.6 },{ id: "electrical", x: 15.8, z: 10.6, exitX: 14.2, exitZ: 11.85 },{ id: "cargo", x: 15.8, z: -10.6, exitX: 14.2, exitZ: -11.85 }];
 const EMERGENCY_BUTTON = { x: 0, z: 0.5 };
 const SPAWNS = [
   [-4, -2.5], [0, -2.5], [4, -2.5],
