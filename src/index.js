@@ -22,7 +22,7 @@ export default {
     }
 
     if (url.pathname === '/ws') {
-      if (request.headers.get('Upgrade') !== 'websocket') {
+      if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
         return json({ error: 'WebSocket upgrade required' }, 426);
       }
 
