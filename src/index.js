@@ -34,6 +34,18 @@ export default {
       return stub.fetch(request);
     }
 
-    return env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+    const headers = new Headers(assetResponse.headers);
+    const isEntryFile = url.pathname === '/' || url.pathname.endsWith('/index.html') || url.pathname.endsWith('/game.js');
+    if (isEntryFile) {
+      headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+      headers.set('Pragma', 'no-cache');
+      headers.set('Expires', '0');
+    }
+    return new Response(assetResponse.body, {
+      status: assetResponse.status,
+      statusText: assetResponse.statusText,
+      headers
+    });
   }
 };
