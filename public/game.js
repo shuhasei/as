@@ -285,7 +285,7 @@ function clearFirstPersonDirection(yaw){
   }
   return best;
 }
-function updateCamera(){
+function updateCamera(dt=.016){
   if(!localModel||!camera)return;
   const pos=localModel.position;
   if(cameraMode===2){
@@ -297,11 +297,37 @@ function updateCamera(){
     camera.lookAt(eye.clone().addScaledVector(forward,10));
     return;
   }
-  camera.fov=cameraMode===0?58:66;camera.near=.08;camera.updateProjectionMatrix();
-  const p=me();localModel.visible=p?!p.reported&&!p.hidden:true;
-  const target=new THREE.Vector3(pos.x,pos.y+1,pos.z);
-  const desired=cameraMode===0?new THREE.Vector3(pos.x,12,pos.z+12):new THREE.Vector3(pos.x,5.8,pos.z+7.8);
-  camera.position.lerp(desired,.11);camera.lookAt(target);
+
+  camera.fov=cameraMode===0?60:70;
+  camera.near=.08;
+  camera.updateProjectionMatrix();
+  const p=me();
+  localModel.visible=p?!p.reported&&!p.hidden:true;
+
+  // キャラクターの正面は +Z。カメラを正面側ではなく背後へ置き、
+  // 進行方向の少し先を見ることで「前が見えない」状態を防ぐ。
+  const yaw=Number(localModel.rotation.y)||0;
+  const forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+  const distance=cameraMode===0?10.5:5.8;
+  const height=cameraMode===0?10.5:4.2;
+  const lookAhead=cameraMode===0?3.2:4.8;
+  const target=new THREE.Vector3(pos.x,pos.y+1.05,pos.z).addScaledVector(forward,lookAhead);
+  const desired=new THREE.Vector3(pos.x,pos.y+height,pos.z).addScaledVector(forward,-distance);
+
+  // 壁の向こうへカメラが抜ける場合は、プレイヤー側へ段階的に寄せる。
+  for(let d=distance;d>1.8;d-=.45){
+    const testX=pos.x-forward.x*d;
+    const testZ=pos.z-forward.z*d;
+    if(!collidesWithMap(testX,testZ,.18)){
+      desired.x=testX;
+      desired.z=testZ;
+      break;
+    }
+  }
+
+  const follow=1-Math.exp(-(cameraMode===0?7:10)*dt);
+  camera.position.lerp(desired,follow);
+  camera.lookAt(target);
 }
 function updateNearest(){
   nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};
