@@ -20,7 +20,7 @@ const SOLID_PROPS=[
   {x:-13.8,z:9.8,w:1.6,d:1.6},{x:13.8,z:9.8,w:1.6,d:1.6},
   {x:-15.8,z:-10.7,w:1.15,d:.9},{x:-15.8,z:2.6,w:1.15,d:.9},{x:15.8,z:10.6,w:1.15,d:.9},{x:15.8,z:-10.6,w:1.15,d:.9}
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=1,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false;
 const randomRoom=()=>Array.from({length:6},()=>('ABCDEFGHJKLMNPQRSTUVWXYZ23456789')[Math.floor(Math.random()*32)]).join('');
 const escapeHtml=s=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function send(type,data={}){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type,...data}))}
@@ -129,29 +129,47 @@ function replaceGameCanvas(){
   oldCanvas.replaceWith(canvas);
   return canvas;
 }
-function init2DFallback(originalError){
-  renderMode='2d';
-  // WebGLコンテキストを一度取得したcanvasは、同じ要素で2Dへ切り替えられない。
-  // 必ず新しいcanvas要素へ置き換えてからCanvas 2Dを初期化する。
-  try{renderer?.dispose?.()}catch(error){console.warn('renderer dispose failed',error)}
-  renderer=null;scene=null;camera=null;
-  const canvas=replaceGameCanvas();
-  canvas.style.display='block';
-  canvas2d=canvas.getContext('2d',{alpha:false,desynchronized:true})||canvas.getContext('2d');
-  if(!canvas2d)throw new Error('Canvas 2Dの初期化に失敗しました');
-  clock=new THREE.Clock();
-  resize();
+function installRuntimeHandlers(){
+  if(runtimeHandlersInstalled)return;
+  runtimeHandlersInstalled=true;
   addEventListener('resize',resize);
   addEventListener('keydown',handleKeyDown,{passive:false});
   addEventListener('keyup',handleKeyUp,{passive:false});
   addEventListener('blur',clearKeys);
   document.addEventListener('visibilitychange',()=>{if(document.hidden)clearKeys()});
   setupJoystick();
-  syncModels();
+}
+function startAnimationLoop(){
+  if(animationStarted)return;
+  animationStarted=true;
+  if(!clock)clock=new THREE.Clock();
   animate();
-  const panel=$('loadErrorPanel');if(panel)panel.remove();
-  showNotice('3D表示を利用できないため、軽量マップで開始しました。');
-  console.warn('[Hidden Crew] 2D fallback enabled:',originalError);
+}
+function init2DFallback(originalError){
+  if(renderMode==='2d'&&canvas2d)return;
+  if(fallbackSwitching)return;
+  fallbackSwitching=true;
+  try{
+    renderMode='2d';cameraMode=0;
+    const cameraButton=$('cameraButton');if(cameraButton){cameraButton.disabled=true;cameraButton.textContent='軽量マップ表示';}
+    // WebGLコンテキストを取得したcanvasは、そのままCanvas 2Dへ切り替えられないため置き換える。
+    try{renderer?.dispose?.()}catch(error){console.warn('renderer dispose failed',error)}
+    renderer=null;scene=null;camera=null;
+    const canvas=replaceGameCanvas();
+    canvas.style.display='block';
+    canvas2d=canvas.getContext('2d',{alpha:false,desynchronized:true})||canvas.getContext('2d');
+    if(!canvas2d)throw new Error('Canvas 2Dの初期化に失敗しました');
+    if(!clock)clock=new THREE.Clock();else clock.getDelta();
+    installRuntimeHandlers();
+    resize();
+    syncModels();
+    startAnimationLoop();
+    const panel=$('loadErrorPanel');if(panel)panel.remove();
+    showNotice('3D表示を利用できないため、見える軽量マップへ切り替えました。');
+    console.warn('[Hidden Crew] 2D fallback enabled:',originalError);
+  }finally{
+    fallbackSwitching=false;
+  }
 }
 function makeFallbackModel(player){
   return {position:new THREE.Vector3(player.x||0,0,player.z||0),rotation:{y:player.rotation||0},visible:true,userData:{target:new THREE.Vector3(player.x||0,0,player.z||0),rotation:player.rotation||0,hidden:Boolean(player.hidden)}};
@@ -226,7 +244,39 @@ function drawMiniMap(){
   }
   ctx.globalAlpha=1;
 }
-function isTypingTarget(target){return target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||target?.isContentEditable}function isDown(...codes){return codes.some(code=>keyCodes.has(code))}function handleKeyDown(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.add(code);keys.add(key);if(e.repeat)return;if(code==='KeyE')useAction();if(code==='KeyR')reportAction();if(code==='KeyQ'||code==='Space')attackAction();if(code==='KeyM')meetingAction()}function handleKeyUp(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.delete(code);keys.delete(key)}function clearKeys(){keyCodes.clear();keys.clear();localVelocity.set(0,0);joy={x:0,y:0}}function init3D(){if(renderer)return;scene=new THREE.Scene();scene.background=new THREE.Color(0x020711);scene.fog=new THREE.FogExp2(0x020711,.026);camera=new THREE.PerspectiveCamera(68,innerWidth/innerHeight,.03,160);scene.add(camera);const canvas=$('gameCanvas');if(!canvas)throw new Error('gameCanvas が見つかりません');renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;clock=new THREE.Clock();buildWorld();addEventListener('resize',resize);addEventListener('keydown',handleKeyDown,{passive:false});addEventListener('keyup',handleKeyUp,{passive:false});addEventListener('blur',clearKeys);document.addEventListener('visibilitychange',()=>{if(document.hidden)clearKeys()});setupJoystick();animate();showNotice('移動: 矢印キー/WASD　攻撃: Q/Space　使用: E　通報: R')}
+function isTypingTarget(target){return target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||target?.isContentEditable}function isDown(...codes){return codes.some(code=>keyCodes.has(code))}function handleKeyDown(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.add(code);keys.add(key);if(e.repeat)return;if(code==='KeyE')useAction();if(code==='KeyR')reportAction();if(code==='KeyQ'||code==='Space')attackAction();if(code==='KeyM')meetingAction()}function handleKeyUp(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.delete(code);keys.delete(key)}function clearKeys(){keyCodes.clear();keys.clear();localVelocity.set(0,0);joy={x:0,y:0}}function init3D(){
+  if(renderer)return;
+  renderMode='3d';canvas2d=null;
+  const cameraButton=$('cameraButton');if(cameraButton){cameraButton.disabled=false;cameraButton.textContent=cameraMode===0?'近い視点へ切替':cameraMode===1?'一人称視点へ切替':'見下ろし視点へ切替';}
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x020711);
+  scene.fog=new THREE.FogExp2(0x020711,.018);
+  camera=new THREE.PerspectiveCamera(54,Math.max(1,innerWidth)/Math.max(1,innerHeight),.06,180);
+  camera.position.set(0,15,10);
+  camera.lookAt(0,.8,0);
+  scene.add(camera);
+  const canvas=$('gameCanvas');
+  if(!canvas)throw new Error('gameCanvas が見つかりません');
+  canvas.style.display='block';
+  renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+  renderer.setSize(Math.max(1,innerWidth),Math.max(1,innerHeight),false);
+  renderer.setClearColor(0x020711,1);
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure=1.28;
+  clock=new THREE.Clock();
+  buildWorld();
+  installRuntimeHandlers();
+  canvas.addEventListener('webglcontextlost',event=>{
+    event.preventDefault();
+    console.error('[Hidden Crew] WebGL context lost');
+    try{init2DFallback(new Error('WebGLの描画が停止しました'))}catch(error){console.error('[Hidden Crew] WebGL recovery failed',error);showFatalLoadError(error)}
+  },{once:true});
+  startAnimationLoop();
+  showNotice('移動: 矢印キー/WASD（画面の方向どおり）　使用: E　通報: R');
+}
 function buildWorld(){
   scene.add(new THREE.HemisphereLight(0xb9efff,0x101927,3.15));
   const cameraLight=new THREE.PointLight(0xc8f3ff,2.8,13,1.4);cameraLight.position.set(0,.15,.15);camera.add(cameraLight);
@@ -255,6 +305,22 @@ function buildWorld(){
 function createCrewmate(c){const group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[c]||0xffffff,roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=true;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=true;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=true;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);group.userData.target=new THREE.Vector3();group.userData.rotation=0;return group}
 function syncModels(){if(!state)return;const active=new Set();for(const p of state.players){active.add(p.id);let m=models.get(p.id);const created=!m;if(created){m=renderMode==='2d'?makeFallbackModel(p):createCrewmate(p.color);models.set(p.id,m);if(renderMode==='3d')scene.add(m)}const hiddenChanged=m.userData.hidden!==Boolean(p.hidden);m.userData.hidden=Boolean(p.hidden);m.userData.target.set(p.x,0,p.z);m.userData.rotation=p.rotation;if(created||p.id===myId&&(!localModel||hiddenChanged)){m.position.set(p.x,0,p.z);m.rotation.y=p.rotation||0}m.visible=!p.reported&&!p.hidden;if(renderMode==='3d')m.traverse(o=>{if(o.material){o.material.transparent=!p.alive;o.material.opacity=p.alive?1:.28}});if(p.id===myId){localModel=m;if(!p.hidden&&collidesWithMap(m.position.x,m.position.z)){m.position.set(p.x,0,p.z);m.userData.target.copy(m.position);localVelocity.set(0,0)}}}for(const[id,m]of models)if(!active.has(id)){if(renderMode==='3d')scene.remove(m);models.delete(id)}}
 function me(){return state?.players.find(p=>p.id===myId)}
+function killCooldownRemainingMs(){
+  const p=me();
+  if(!p||p.role!=='impostor')return 0;
+  const cooldownSeconds=Math.max(0,Number(state?.settings?.killCooldown)||15);
+  const lastKillAt=Math.max(0,Number(p.lastKillAt)||0);
+  return Math.max(0,cooldownSeconds*1000-(Date.now()-lastKillAt));
+}
+function canKill(){
+  const p=me();
+  return !!p&&state?.phase==='playing'&&p.alive&&!p.spectator&&p.role==='impostor'&&killCooldownRemainingMs()<=0;
+}
+function updateCooldown(){
+  const remaining=killCooldownRemainingMs();
+  if(ui.killCooldown)ui.killCooldown.textContent=remaining>0?`${Math.ceil(remaining/1000)}秒`:'';
+  if(ui.kill&&me()?.role==='impostor')ui.kill.disabled=!canKill()||!nearest.player;
+}
 function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'侵入者':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は侵入者だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${TASKS[t]?.[0]||t}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();}
 function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;if(ui.sabotageTitle)ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind]||'妨害発生';if(ui.sabotageTimer)ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
 let animationFrameId=0;
@@ -277,6 +343,10 @@ function animate(){
     if(renderMode==='3d'&&renderer&&scene&&camera){
       updateLockerVisuals(dt);
       updateCamera(dt);
+      // HUD側で問題が起きても、ゲーム画面だけは先に描画して見える状態を保つ。
+      renderer.render(scene,camera);
+    }else if(renderMode==='2d'){
+      draw2DMap();
     }
     if(miniMapEnabled){
       try{drawMiniMap()}catch(error){
@@ -288,11 +358,6 @@ function animate(){
     }
     updateCooldown();
     updateSabotage();
-    if(renderMode==='3d'){
-      if(renderer&&scene&&camera)renderer.render(scene,camera);
-    }else{
-      draw2DMap();
-    }
     animationErrorShown=false;
   }catch(error){
     console.error('[Hidden Crew] Animation frame error',error);
@@ -309,23 +374,47 @@ function collidesWithMap(x,z,r=.62){
   return false;
 }
 function moveLocal(dt){
-  const p=me();if(!p||p.hidden)return;if(collidesWithMap(localModel.position.x,localModel.position.z)){localModel.position.set(p.x,0,p.z);localModel.userData.target.copy(localModel.position);localVelocity.set(0,0)}let inputX=0,inputZ=0;
-  // 矢印キーとWASDは、すべての視点で画面の向きどおりに移動します。
-  // 上＝画面の奥、下＝手前、左・右＝画面の左右です。
+  const p=me();
+  if(!p||p.hidden)return;
+  if(collidesWithMap(localModel.position.x,localModel.position.z)){
+    localModel.position.set(p.x,0,p.z);
+    localModel.userData.target.copy(localModel.position);
+    localVelocity.set(0,0);
+  }
+
+  // 俯瞰表示と軽量表示では、キーをワールド座標へ直接対応させる。
+  // ↑/W=画面上、↓/S=画面下、←/A=画面左、→/D=画面右。
   const screenForward=(isDown('KeyW','ArrowUp')?1:0)-(isDown('KeyS','ArrowDown')?1:0)-joy.y;
   const screenRight=(isDown('KeyD','ArrowRight')?1:0)-(isDown('KeyA','ArrowLeft')?1:0)+joy.x;
-  const movementYaw=cameraMode===2?firstPersonYaw:(Number(localModel.rotation.y)||0);
-  inputX=Math.sin(movementYaw)*screenForward+Math.cos(movementYaw)*screenRight;
-  inputZ=Math.cos(movementYaw)*screenForward-Math.sin(movementYaw)*screenRight;
-  const inputLen=Math.hypot(inputX,inputZ);if(inputLen>1){inputX/=inputLen;inputZ/=inputLen}
-  const sprint=isDown('ShiftLeft','ShiftRight')?1.18:1;const maxSpeed=(p.alive?4.6:6.0)*(state.settings?.speed||1)*sprint,accel=20,friction=14;
-  if(inputLen>.04){localVelocity.x+=(inputX*maxSpeed-localVelocity.x)*Math.min(1,accel*dt);localVelocity.y+=(inputZ*maxSpeed-localVelocity.y)*Math.min(1,accel*dt)}else{const f=Math.exp(-friction*dt);localVelocity.multiplyScalar(f)}
+  let inputX=screenRight;
+  let inputZ=-screenForward;
+
+  // 一人称表示だけは、見ている方向を基準に前後左右へ動く。
+  if(renderMode==='3d'&&cameraMode===2){
+    inputX=Math.sin(firstPersonYaw)*screenForward+Math.cos(firstPersonYaw)*screenRight;
+    inputZ=Math.cos(firstPersonYaw)*screenForward-Math.sin(firstPersonYaw)*screenRight;
+  }
+
+  const inputLen=Math.hypot(inputX,inputZ);
+  if(inputLen>1){inputX/=inputLen;inputZ/=inputLen}
+  const sprint=isDown('ShiftLeft','ShiftRight')?1.18:1;
+  const maxSpeed=(p.alive?4.6:6.0)*(state.settings?.speed||1)*sprint,accel=20,friction=14;
+  if(inputLen>.04){
+    localVelocity.x+=(inputX*maxSpeed-localVelocity.x)*Math.min(1,accel*dt);
+    localVelocity.y+=(inputZ*maxSpeed-localVelocity.y)*Math.min(1,accel*dt);
+  }else{
+    const f=Math.exp(-friction*dt);localVelocity.multiplyScalar(f);
+  }
   const nx=localModel.position.x+localVelocity.x*dt,nz=localModel.position.z+localVelocity.y*dt;
   if(!collidesWithMap(nx,localModel.position.z))localModel.position.x=nx;else localVelocity.x=0;
   if(!collidesWithMap(localModel.position.x,nz))localModel.position.z=nz;else localVelocity.y=0;
-  if(localVelocity.lengthSq()>.03)localModel.rotation.y=cameraMode===2?firstPersonYaw:Math.atan2(localVelocity.x,localVelocity.y);else if(cameraMode===2)localModel.rotation.y=firstPersonYaw;
+  if(localVelocity.lengthSq()>.03)localModel.rotation.y=cameraMode===2?firstPersonYaw:Math.atan2(localVelocity.x,localVelocity.y);
+  else if(cameraMode===2)localModel.rotation.y=firstPersonYaw;
   localModel.userData.target.copy(localModel.position);
-  if(performance.now()-lastMove>40){lastMove=performance.now();send('move',{x:localModel.position.x,z:localModel.position.z,rotation:localModel.rotation.y,clientTime:Date.now()})}
+  if(performance.now()-lastMove>40){
+    lastMove=performance.now();
+    send('move',{x:localModel.position.x,z:localModel.position.z,rotation:localModel.rotation.y,clientTime:Date.now()});
+  }
 }
 function clearFirstPersonDirection(yaw){
   const pos=localModel?.position;if(!pos)return yaw;
@@ -351,33 +440,52 @@ function cameraPointBlocked(x,y,z,r=.18){
   if(y-r<1.35&&Math.hypot(x,z-.5)<2.05+r)return true;
   return false;
 }
-function updateCamera(){
-  if(!localModel||!camera)return;
+function getThirdPersonCameraPose(pos,mode=cameraMode){
+  const wide=mode===0;
+  return {
+    fov:wide?54:62,
+    position:new THREE.Vector3(pos.x,pos.y+(wide?14.5:10.2),pos.z+(wide?9.5:6.4)),
+    target:new THREE.Vector3(pos.x,pos.y+(wide?.75:1.0),pos.z-(wide?1.8:1.15))
+  };
+}
+function snapCameraToCurrentMode(){
+  if(!camera||!localModel||cameraMode===2)return;
+  const pose=getThirdPersonCameraPose(localModel.position);
+  camera.fov=pose.fov;camera.near=.06;camera.updateProjectionMatrix();
+  camera.position.copy(pose.position);camera.lookAt(pose.target);
+}
+function updateCamera(dt=.016){
+  if(!camera)return;
+  if(!localModel){
+    camera.fov=54;camera.near=.06;camera.updateProjectionMatrix();
+    const idlePosition=new THREE.Vector3(0,15,10);
+    if(!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z))camera.position.copy(idlePosition);
+    else camera.position.lerp(idlePosition,1-Math.exp(-5*Math.max(.001,dt)));
+    camera.lookAt(0,.8,0);
+    return;
+  }
+
   const pos=localModel.position;
-  const yaw=Number(localModel.rotation.y)||0;
+  if(!Number.isFinite(pos.x)||!Number.isFinite(pos.y)||!Number.isFinite(pos.z)){
+    const p=me();pos.set(Number(p?.x)||0,0,Number(p?.z)||0);localVelocity.set(0,0);
+  }
+
   if(cameraMode===2){
     localModel.visible=false;
-    camera.fov=74;camera.near=.03;camera.updateProjectionMatrix();
+    camera.fov=74;camera.near=.045;camera.updateProjectionMatrix();
     const eye=new THREE.Vector3(pos.x,pos.y+1.72,pos.z);
-    const forward=new THREE.Vector3(Math.sin(firstPersonYaw),-.04,Math.cos(firstPersonYaw)).normalize();
-    camera.position.copy(eye);camera.lookAt(eye.clone().addScaledVector(forward,12));return;
+    const forward=new THREE.Vector3(Math.sin(firstPersonYaw),-.035,Math.cos(firstPersonYaw)).normalize();
+    camera.position.copy(eye);camera.lookAt(eye.clone().addScaledVector(forward,12));
+    return;
   }
-  camera.fov=cameraMode===0?58:68;camera.near=.06;camera.updateProjectionMatrix();
+
   const p=me();localModel.visible=p?!p.reported&&!p.hidden:true;
-  const forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
-  const distance=cameraMode===0?11:6.2,height=cameraMode===0?10.5:4.6;
-  const wantedLookAhead=cameraMode===0?2.4:2.2;let clearLookAhead=0;
-  for(let d=.3;d<=wantedLookAhead+.001;d+=.3){const x=pos.x+forward.x*d,z=pos.z+forward.z*d;if(collidesWithMap(x,z,.14))break;clearLookAhead=d}
-  const target=new THREE.Vector3(pos.x,pos.y+(cameraMode===0?.9:1.15),pos.z).addScaledVector(forward,clearLookAhead);
-  const desired=new THREE.Vector3(pos.x,pos.y+height,pos.z).addScaledVector(forward,-distance);
-  const direction=desired.clone().sub(target);
-  let safe=target.clone().addScaledVector(direction,.16);
-  for(let t=.16;t<=1.001;t+=.04){
-    const test=target.clone().addScaledVector(direction,t);
-    if(cameraPointBlocked(test.x,test.y,test.z,.16))break;
-    safe.copy(test);
-  }
-  camera.position.lerp(safe,.2);camera.lookAt(target);
+  const pose=getThirdPersonCameraPose(pos);
+  camera.fov=pose.fov;camera.near=.06;camera.updateProjectionMatrix();
+  const invalidCamera=!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z);
+  if(invalidCamera||camera.position.distanceToSquared(pose.position)>900)camera.position.copy(pose.position);
+  else camera.position.lerp(pose.position,1-Math.exp(-(cameraMode===0?7:10)*Math.max(.001,dt)));
+  camera.lookAt(pose.target);
 }
 
 function updateNearest(){
@@ -403,7 +511,7 @@ function updateNearest(){
 function updateLockerVisuals(dt){const p=me();for(const locker of LOCKERS){const visual=lockerVisuals.get(locker.id);if(!visual)continue;const occupied=(state?.players||[]).some(x=>x.hidden&&x.hiddenAt===locker.id);const nearby=nearest.locker?.id===locker.id;const target=occupied?1:(nearby?.22:0);visual.userData.open+=(target-visual.userData.open)*(1-Math.exp(-10*dt));visual.userData.doorPivot.rotation.y=-visual.userData.open*1.45;visual.userData.lamp.material.color.setHex(occupied?0xffb347:nearby?0x77ff9c:0x63f4ff)}}
 function useAction(){const p=me();if(!p)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(!nearest.task)return;if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}if(p.role!=='impostor'&&!p.spectator&&(p.tasks||[]).includes(nearest.task)&&!(p.completedTasks||[]).includes(nearest.task))openTask(nearest.task);else showNotice('この端末に用事はありません')}
 function reportAction(){if(nearest.body)send('report',{bodyId:nearest.body});else showNotice('近くに通報できる対象がありません')}function attackAction(){const p=me();if(!p||state?.phase!=='playing')return;if(p.role!=='impostor'){showNotice('攻撃は侵入者だけが使えます');return}if(!canKill()){showNotice('攻撃のクールダウン中です');return}if(!nearest.player){showNotice('攻撃できる相手に近づいてください');return}send('kill',{targetId:nearest.player})}function meetingAction(){if(!nearest.emergency){showNotice('中央の緊急ボタンに近づいてください');return}send('meeting')}
-ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{cameraMode=(cameraMode+1)%3;if(cameraMode===2&&localModel){firstPersonYaw=clearFirstPersonDirection(Number(localModel.rotation.y)||0);camera.position.set(localModel.position.x,localModel.position.y+1.72,localModel.position.z)}const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(labels[cameraMode]);$('cameraButton').textContent=`${labels[(cameraMode+1)%3]}へ切替`};
+ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{if(renderMode!=='3d'||!camera){showNotice('軽量マップでは見下ろし視点で固定されます。');return}cameraMode=(cameraMode+1)%3;if(cameraMode===2&&localModel){const currentYaw=Number(localModel.rotation.y);firstPersonYaw=clearFirstPersonDirection(Number.isFinite(currentYaw)?currentYaw:Math.PI);camera.position.set(localModel.position.x,localModel.position.y+1.72,localModel.position.z)}else{const p=me();if(localModel)localModel.visible=p?!p.reported&&!p.hidden:true;snapCameraToCurrentMode()}const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(labels[cameraMode]);$('cameraButton').textContent=`${labels[(cameraMode+1)%3]}へ切替`};
 ui.settings.onclick=()=>{const s=state.settings||{};$('settingImpostors').value=s.impostors;$('settingTasks').value=s.tasks;$('settingSpeed').value=s.speed;$('settingKillCooldown').value=s.killCooldown;$('settingMeeting').value=s.meetingTime;$('settingReveal').value=s.revealRoles?'yes':'no';openDialog('settingsDialog')};$('saveSettingsButton').onclick=()=>{send('settings',{settings:{impostors:+$('settingImpostors').value,tasks:+$('settingTasks').value,speed:+$('settingSpeed').value,killCooldown:+$('settingKillCooldown').value,meetingTime:+$('settingMeeting').value,revealRoles:$('settingReveal').value==='yes'}});closeDialog('settingsDialog')};document.querySelectorAll('[data-sabotage]').forEach(b=>b.onclick=()=>{send('sabotage',{kind:b.dataset.sabotage});closeDialog('sabotageDialog')});document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog(b.dataset.close));
 
 const ROLE_LABELS={crew:'クルー',impostor:'侵入者',doctor:'医者',detective:'探偵',guard:'警備員',spectator:'観戦者'};
@@ -492,7 +600,7 @@ addEventListener('beforeunload',()=>{hangUpCall(false);clearIncomingCall(false)}
 
 function openResult(w){$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'INTRUDER VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'侵入者の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
 function openDialog(id){const d=$(id);if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(d?.open)d.close()}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
-function setupJoystick(){let active=false;const move=e=>{if(!active)return;const r=ui.joystick.getBoundingClientRect(),x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2),m=Math.min(45,Math.hypot(x,y)),a=Math.atan2(y,x);joy={x:Math.cos(a)*m/45,y:Math.sin(a)*m/45};ui.stick.style.transform=`translate(${joy.x*36}px,${joy.y*36}px)`};ui.joystick.onpointerdown=e=>{active=true;ui.joystick.setPointerCapture(e.pointerId);move(e)};ui.joystick.onpointermove=move;ui.joystick.onpointerup=()=>{active=false;joy={x:0,y:0};ui.stick.style.transform=''}}function resize(){const canvas=$('gameCanvas');if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(innerWidth*ratio));canvas.height=Math.max(1,Math.floor(innerHeight*ratio));canvas.style.width=innerWidth+'px';canvas.style.height=innerHeight+'px';return}camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}
+function setupJoystick(){let active=false;const move=e=>{if(!active)return;const r=ui.joystick.getBoundingClientRect(),x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2),m=Math.min(45,Math.hypot(x,y)),a=Math.atan2(y,x);joy={x:Math.cos(a)*m/45,y:Math.sin(a)*m/45};ui.stick.style.transform=`translate(${joy.x*36}px,${joy.y*36}px)`};ui.joystick.onpointerdown=e=>{active=true;ui.joystick.setPointerCapture(e.pointerId);move(e)};ui.joystick.onpointermove=move;ui.joystick.onpointerup=()=>{active=false;joy={x:0,y:0};ui.stick.style.transform=''}}function resize(){const canvas=$('gameCanvas');if(!canvas)return;const width=Math.max(1,innerWidth),height=Math.max(1,innerHeight);if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(width*ratio));canvas.height=Math.max(1,Math.floor(height*ratio));canvas.style.width=width+'px';canvas.style.height=height+'px';return}if(!camera||!renderer)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setSize(width,height,false)}
 setInterval(()=>{if(state?.phase==='meeting')$('meetingTimer').textContent=`残り ${Math.max(0,Math.ceil((state.meetingEndsAt-Date.now())/1000))}秒`},500);
 
 $('profileSummary').textContent=profileText();
@@ -502,7 +610,8 @@ $('profileSummary').textContent=profileText();
   const style=document.createElement('style');
   style.id='hiddenCrewHudLayoutFix';
   style.textContent=`
-    #gameScreen{overflow:hidden}
+    #gameScreen{overflow:hidden;isolation:isolate;background:#020711}
+    #gameCanvas{position:absolute;inset:0;z-index:0;width:100%;height:100%;display:block;background:#020711}
 
     #topBar{
       z-index:40;
