@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='wide-map-v9-minimap-fix';
+const MAP_VERSION='wide-map-v10-forward-call';
 const TASKS={reactor:['リアクター調整',-13.8,8.8],wires:['配線修理',13.8,8.8],scanner:['生体スキャン',-13.8,-8.8],cargo:['貨物整理',13.8,-8.8],fuel:['燃料補給',0,9.2],align:['航路調整',0,-9.2]};
 const MAP_BOUNDS={minX:-18,maxX:18,minZ:-13,maxZ:13};
 const LOCKERS=[{id:'medical',x:-15.8,z:-10.7,exitX:-14.1,exitZ:-10.7,rot:Math.PI/2},{id:'security',x:-15.8,z:2.6,exitX:-14.1,exitZ:2.6,rot:Math.PI/2},{id:'electrical',x:15.8,z:10.6,exitX:14.1,exitZ:10.6,rot:-Math.PI/2},{id:'cargo',x:15.8,z:-10.6,exitX:14.1,exitZ:-10.6,rot:-Math.PI/2}];
@@ -20,7 +20,7 @@ const SOLID_PROPS=[
   {x:-13.8,z:9.8,w:1.6,d:1.6},{x:13.8,z:9.8,w:1.6,d:1.6},
   {x:-15.8,z:-10.7,w:1.15,d:.9},{x:-15.8,z:2.6,w:1.15,d:.9},{x:15.8,z:10.6,w:1.15,d:.9},{x:15.8,z:-10.6,w:1.15,d:.9}
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false;
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null;
 const randomRoom=()=>Array.from({length:6},()=>('ABCDEFGHJKLMNPQRSTUVWXYZ23456789')[Math.floor(Math.random()*32)]).join('');
 const escapeHtml=s=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function send(type,data={}){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type,...data}))}
@@ -41,7 +41,7 @@ function connect(room,name){
   socket.onclose=(event)=>showNotice(`接続が切れました（code: ${event.code}${event.reason ? ` / ${event.reason}` : ''}）。再読み込みしてください。`);
   socket.onerror=error=>{console.error('WebSocket error',error);showNotice('WebSocket接続に失敗しました。Cloudflareのログを確認してください。')};
 }
-function handle(m){if(m.type==='hello'){myId=m.id;ui.room.textContent=m.room}else if(m.type==='state'){if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){showNotice('マップ版が一致しません。全端末でCtrl+Shift+Rを押してください。');return}state=m.state;ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open)syncVoicePeers()}else if(m.type==='playerMoved'){const o=models.get(m.id);if(o){o.userData.target.set(m.x,0,m.z);o.userData.rotation=m.rotation;if(m.id===myId&&o.position.distanceTo(o.userData.target)>.9)o.position.lerp(o.userData.target,.35)}}else if(m.type==='error'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.message)}else if(m.type==='gameStarted'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.practiceMode?'練習モードを開始しました':'ゲームを開始しました')}else if(m.type==='meetingStarted')openMeeting(m.reason);else if(m.type==='meetingEnded'){stopVoiceChat();closeDialog('meetingDialog');showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}else if(m.type==='voiceSignal')handleVoiceSignal(m);else if(m.type==='chat')appendChat(m);else if(m.type==='sabotage')showNotice('妨害が発生しました');else if(m.type==='sabotageFixed')showNotice('妨害が解除されました');else if(m.type==='gameFinished'){stopVoiceChat();saveResult(m.winner);openResult(m.winner)}else if(m.type==='killEffect')flashScreen();else if(m.type==='abilityResult')showNotice(m.message);}
+function handle(m){if(m.type==='hello'){myId=m.id;ui.room.textContent=m.room}else if(m.type==='state'){if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){showNotice('マップ版が一致しません。全端末でCtrl+Shift+Rを押してください。');return}state=m.state;ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open)syncVoicePeers()}else if(m.type==='playerMoved'){const o=models.get(m.id);if(o){o.userData.target.set(m.x,0,m.z);o.userData.rotation=m.rotation;if(m.id===myId&&o.position.distanceTo(o.userData.target)>.9)o.position.lerp(o.userData.target,.35)}}else if(m.type==='error'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.message)}else if(m.type==='gameStarted'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.practiceMode?'練習モードを開始しました':'ゲームを開始しました')}else if(m.type==='meetingStarted')openMeeting(m.reason);else if(m.type==='meetingEnded'){closeDialog('meetingDialog');showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}else if(m.type==='voiceSignal')handleVoiceSignal(m);else if(m.type==='callControl')handleCallControl(m);else if(m.type==='chat')appendChat(m);else if(m.type==='sabotage')showNotice('妨害が発生しました');else if(m.type==='sabotageFixed')showNotice('妨害が解除されました');else if(m.type==='gameFinished'){hangUpCall(true);saveResult(m.winner);openResult(m.winner)}else if(m.type==='killEffect')flashScreen();else if(m.type==='abilityResult')showNotice(m.message);}
 $('createButton').onclick=()=>joinRoom(randomRoom());$('joinButton').onclick=()=>joinRoom(ui.roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g,''));
 function joinRoom(room){
   if(room.length!==6){ui.message.textContent='6桁のルームコードを入力してください。';return}
@@ -204,7 +204,7 @@ function buildWorld(){
 function createCrewmate(c){const group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[c]||0xffffff,roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=true;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=true;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=true;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);group.userData.target=new THREE.Vector3();group.userData.rotation=0;return group}
 function syncModels(){if(!state)return;const active=new Set();for(const p of state.players){active.add(p.id);let m=models.get(p.id);const created=!m;if(created){m=renderMode==='2d'?makeFallbackModel(p):createCrewmate(p.color);models.set(p.id,m);if(renderMode==='3d')scene.add(m)}const hiddenChanged=m.userData.hidden!==Boolean(p.hidden);m.userData.hidden=Boolean(p.hidden);m.userData.target.set(p.x,0,p.z);m.userData.rotation=p.rotation;if(created||p.id===myId&&(!localModel||hiddenChanged)){m.position.set(p.x,0,p.z);m.rotation.y=p.rotation||0}m.visible=!p.reported&&!p.hidden;if(renderMode==='3d')m.traverse(o=>{if(o.material){o.material.transparent=!p.alive;o.material.opacity=p.alive?1:.28}});if(p.id===myId){localModel=m;if(!p.hidden&&collidesWithMap(m.position.x,m.position.z)){m.position.set(p.x,0,p.z);m.userData.target.copy(m.position);localVelocity.set(0,0)}}}for(const[id,m]of models)if(!active.has(id)){if(renderMode==='3d')scene.remove(m);models.delete(id)}}
 function me(){return state?.players.find(p=>p.id===myId)}
-function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'侵入者':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span>${escapeHtml(x.name)}${x.host?' ★':''}</span></div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は侵入者だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${TASKS[t]?.[0]||t}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();}
+function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'侵入者':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は侵入者だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${TASKS[t]?.[0]||t}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();}
 function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;if(ui.sabotageTitle)ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind]||'妨害発生';if(ui.sabotageTimer)ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
 let animationFrameId=0;
 let miniMapEnabled=true;
@@ -285,50 +285,28 @@ function clearFirstPersonDirection(yaw){
   }
   return best;
 }
-function updateCamera(dt=.016){
+function updateCamera(){
   if(!localModel||!camera)return;
   const pos=localModel.position;
+  const yaw=Number(localModel.rotation.y)||0;
   if(cameraMode===2){
     localModel.visible=false;
     camera.fov=74;camera.near=.03;camera.updateProjectionMatrix();
     const eye=new THREE.Vector3(pos.x,pos.y+1.72,pos.z);
-    const forward=new THREE.Vector3(Math.sin(firstPersonYaw),-.075,Math.cos(firstPersonYaw)).normalize();
-    camera.position.copy(eye);
-    camera.lookAt(eye.clone().addScaledVector(forward,10));
-    return;
+    const forward=new THREE.Vector3(Math.sin(firstPersonYaw),-.04,Math.cos(firstPersonYaw)).normalize();
+    camera.position.copy(eye);camera.lookAt(eye.clone().addScaledVector(forward,12));return;
   }
-
-  camera.fov=cameraMode===0?60:70;
-  camera.near=.08;
-  camera.updateProjectionMatrix();
-  const p=me();
-  localModel.visible=p?!p.reported&&!p.hidden:true;
-
-  // キャラクターの正面は +Z。カメラを正面側ではなく背後へ置き、
-  // 進行方向の少し先を見ることで「前が見えない」状態を防ぐ。
-  const yaw=Number(localModel.rotation.y)||0;
+  camera.fov=cameraMode===0?58:68;camera.near=.06;camera.updateProjectionMatrix();
+  const p=me();localModel.visible=p?!p.reported&&!p.hidden:true;
   const forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
-  const distance=cameraMode===0?10.5:5.8;
-  const height=cameraMode===0?10.5:4.2;
-  const lookAhead=cameraMode===0?3.2:4.8;
-  const target=new THREE.Vector3(pos.x,pos.y+1.05,pos.z).addScaledVector(forward,lookAhead);
+  const distance=cameraMode===0?11:6.2,height=cameraMode===0?10.5:4.6;
+  const target=new THREE.Vector3(pos.x,pos.y+(cameraMode===0?.9:1.15),pos.z).addScaledVector(forward,cameraMode===0?2.4:3.4);
   const desired=new THREE.Vector3(pos.x,pos.y+height,pos.z).addScaledVector(forward,-distance);
-
-  // 壁の向こうへカメラが抜ける場合は、プレイヤー側へ段階的に寄せる。
-  for(let d=distance;d>1.8;d-=.45){
-    const testX=pos.x-forward.x*d;
-    const testZ=pos.z-forward.z*d;
-    if(!collidesWithMap(testX,testZ,.18)){
-      desired.x=testX;
-      desired.z=testZ;
-      break;
-    }
-  }
-
-  const follow=1-Math.exp(-(cameraMode===0?7:10)*dt);
-  camera.position.lerp(desired,follow);
-  camera.lookAt(target);
+  const direction=desired.clone().sub(target);let safe=desired.clone();
+  for(let t=1;t>=.18;t-=.06){const test=target.clone().addScaledVector(direction,t);if(!collidesWithMap(test.x,test.z,.18)){safe=test;break}}
+  camera.position.lerp(safe,.16);camera.lookAt(target);
 }
+
 function updateNearest(){
   nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};
   if(!localModel||!state)return;
@@ -364,7 +342,7 @@ function openSecurity(){if(!state)return;const rooms=[['北西区',-18,0,4.8,13]
 $('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{if(!nearest.security){showNotice('SECURITYの監視端末に近づいてください');return}openSecurity()};$('tutorialButton').onclick=()=>openDialog('tutorialDialog');$('colorSelect').onchange=$('hatSelect').onchange=()=>{if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
 function openTask(id){$('taskTitle').textContent=TASKS[id][0];const root=$('taskGame');root.innerHTML='';if(id==='wires'){root.innerHTML='<p>1→4の順に押してください</p>';let n=1;[1,2,3,4].sort(()=>Math.random()-.5).forEach(v=>{const b=document.createElement('button');b.textContent=v;b.onclick=()=>{if(v===n){b.disabled=true;n++;if(n===5)finishTask(id)}else showNotice('順番が違います')};root.append(b)})}else if(id==='scanner'){root.innerHTML='<p>スキャン完了までボタンを押し続けてください。</p><button id="scanHold">長押し</button><div class="progress"><i id="scanBar"></i></div>';let v=0,t;const b=$('scanHold');const start=()=>{t=setInterval(()=>{v+=4;$('scanBar').style.width=v+'%';if(v>=100){clearInterval(t);finishTask(id)}},60)};const stop=()=>clearInterval(t);b.onpointerdown=start;b.onpointerup=stop;b.onpointerleave=stop}else if(id==='cargo'){root.innerHTML='<p>貨物を5回整理してください。</p><button id="cargoBtn">貨物を移動</button><b id="cargoCount">0/5</b>';let n=0;$('cargoBtn').onclick=()=>{$('cargoCount').textContent=`${++n}/5`;if(n>=5)finishTask(id)}}else if(id==='fuel'){root.innerHTML='<p>燃料メーターを満タンにしてください。</p><input id="fuelRange" type="range" min="0" max="100" value="0">';$('fuelRange').oninput=e=>{if(+e.target.value>=100)finishTask(id)}}else if(id==='align'){root.innerHTML='<p>航路を中央へ合わせてください。</p><input id="alignRange" type="range" min="0" max="100" value="10">';$('alignRange').onchange=e=>{if(Math.abs(+e.target.value-50)<7)finishTask(id);else showNotice('中央に合わせてください')}}else{root.innerHTML='<p>リアクターの波形を安定させてください。</p><button id="reactBtn">安定化</button>';$('reactBtn').onclick=()=>finishTask(id)}openDialog('taskDialog')}
 function finishTask(id){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.tasks=(s.tasks||0)+1;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));send('taskComplete',{task:id});closeDialog('taskDialog');showNotice('タスク完了！')}
-function openMeeting(reason){$('meetingReason').textContent=reason;renderVotes();openDialog('meetingDialog');startVoiceChat()}
+function openMeeting(reason){$('meetingReason').textContent=reason;renderVotes();openDialog('meetingDialog');setVoiceStatus('メンバー一覧の📞から個別通話できます。')}
 function renderVotes(){if(!state)return;const root=$('voteList');root.innerHTML='';state.players.filter(p=>p.alive).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});$('skipVoteButton').onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
 function bindChatForm(formId,inputId){const form=$(formId),input=$(inputId);if(!form||!input)return;form.onsubmit=e=>{e.preventDefault();const text=input.value.trim();if(!text)return;if(socket?.readyState!==WebSocket.OPEN){showNotice('チャットサーバーへ接続されていません');return}send('chat',{text});input.value='';input.focus()}}
@@ -383,7 +361,7 @@ async function startVoiceChat(){
   try{localVoiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1,sampleRate:48000},video:false});micMuted=false;updateMicButton();setVoiceStatus('通話接続中…画面を一度クリックしてください。',true);syncVoicePeers();await unlockRemoteAudio()}
   catch(error){console.error('Microphone permission error',error);setVoiceStatus('マイクを使用できません。サイト設定でマイクを許可してください。');showNotice('マイクの使用が許可されませんでした。')}finally{voiceStarting=false}
 }
-function syncVoicePeers(){if(!localVoiceStream||state?.phase!=='meeting'||!myId)return;const aliveIds=(state.players||[]).filter(p=>p.alive&&p.id!==myId).map(p=>p.id);for(const id of [...voicePeers.keys()])if(!aliveIds.includes(id))closeVoicePeer(id);for(const id of aliveIds)if(myId.localeCompare(id)<0)ensureVoicePeer(id,true)}
+function syncVoicePeers(){if(!localVoiceStream||!activeCallPeer)return;for(const id of [...voicePeers.keys()])if(id!==activeCallPeer)closeVoicePeer(id)}
 function ensureVoicePeer(peerId,makeOffer=false){
   let pc=voicePeers.get(peerId);if(pc)return pc;pc=new RTCPeerConnection(RTC_CONFIG);voicePeers.set(peerId,pc);
   for(const track of localVoiceStream?.getAudioTracks()||[])pc.addTrack(track,localVoiceStream);
@@ -393,14 +371,35 @@ function ensureVoicePeer(peerId,makeOffer=false){
   if(makeOffer)queueMicrotask(async()=>{try{await pc.setLocalDescription(await pc.createOffer({offerToReceiveAudio:true}));send('voiceSignal',{targetId:peerId,signal:{description:pc.localDescription}})}catch(e){console.error('Voice offer failed',e)}});return pc
 }
 async function handleVoiceSignal(m){
-  if(!m.fromId||!m.signal||state?.phase!=='meeting')return;if(!localVoiceStream)await startVoiceChat();if(!localVoiceStream)return;const pc=ensureVoicePeer(m.fromId,false);
+  if(!m.fromId||!m.signal)return;if(activeCallPeer!==m.fromId)return;if(!localVoiceStream)await startVoiceChat();if(!localVoiceStream)return;const pc=ensureVoicePeer(m.fromId,false);
   try{if(m.signal.description){await pc.setRemoteDescription(m.signal.description);for(const c of pendingIce.get(m.fromId)||[])await pc.addIceCandidate(c);pendingIce.delete(m.fromId);if(m.signal.description.type==='offer'){await pc.setLocalDescription(await pc.createAnswer());send('voiceSignal',{targetId:m.fromId,signal:{description:pc.localDescription}})}}else if(m.signal.candidate){if(pc.remoteDescription)await pc.addIceCandidate(m.signal.candidate);else{const list=pendingIce.get(m.fromId)||[];list.push(m.signal.candidate);pendingIce.set(m.fromId,list)}}}catch(e){console.error('Voice signaling failed',e);setVoiceStatus('音声接続に失敗しました。別回線ではTURNが必要な場合があります。')}
 }
 function attachRemoteAudio(peerId,stream){let audio=document.getElementById(`voice-${peerId}`);if(!audio){audio=document.createElement('audio');audio.id=`voice-${peerId}`;audio.autoplay=true;audio.playsInline=true;audio.controls=false;audio.volume=1;audio.muted=false;$('remoteAudio').append(audio)}audio.srcObject=stream;audio.play().then(()=>setVoiceStatus('音声通話に接続しました。',true)).catch(()=>setVoiceStatus('相手の音声を再生するため、画面をクリックしてください。'))}
 function closeVoicePeer(peerId){const pc=voicePeers.get(peerId);if(pc){pc.ontrack=null;pc.onicecandidate=null;pc.close();voicePeers.delete(peerId)}pendingIce.delete(peerId);document.getElementById(`voice-${peerId}`)?.remove()}
-function stopVoiceChat(){for(const id of [...voicePeers.keys()])closeVoicePeer(id);for(const track of localVoiceStream?.getTracks()||[])track.stop();localVoiceStream=null;voiceStarting=false;setVoiceStatus('会議開始後に音声通話へ接続します。');updateMicButton()}
+function stopVoiceChat(){for(const id of [...voicePeers.keys()])closeVoicePeer(id);for(const track of localVoiceStream?.getTracks()||[])track.stop();localVoiceStream=null;voiceStarting=false;setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateMicButton()}
 function updateMicButton(){const b=$('micButton');if(!b)return;b.textContent=micMuted?'🔇 マイクOFF':'🎙 マイクON';b.classList.toggle('muted',micMuted)}
 $('micButton').onclick=async()=>{await unlockRemoteAudio();if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const t of localVoiceStream.getAudioTracks())t.enabled=!micMuted;updateMicButton();setVoiceStatus(micMuted?'マイクをミュートしています。':'音声通話に接続しました。',!micMuted)};
+
+async function placeCall(peerId){
+  if(!peerId||peerId===myId)return;if(activeCallPeer){showNotice('先に現在の通話を終了してください。');return}
+  const target=state?.players?.find(p=>p.id===peerId);activeCallPeer=peerId;setVoiceStatus(`${target?.name||'相手'}を呼び出しています…`,true);send('callControl',{targetId:peerId,action:'ring'});
+}
+async function acceptIncomingCall(){
+  if(!incomingCallPeer)return;activeCallPeer=incomingCallPeer;incomingCallPeer=null;closeDialog('incomingCallDialog');await startVoiceChat();if(!localVoiceStream){hangUpCall(false);return}send('callControl',{targetId:activeCallPeer,action:'accept'});ensureVoicePeer(activeCallPeer,false);setVoiceStatus('通話に接続中…',true);
+}
+function declineIncomingCall(){if(incomingCallPeer)send('callControl',{targetId:incomingCallPeer,action:'decline'});incomingCallPeer=null;closeDialog('incomingCallDialog')}
+async function handleCallControl(m){
+  const from=m.fromId,action=m.action;if(!from)return;
+  if(action==='ring'){
+    if(activeCallPeer||incomingCallPeer){send('callControl',{targetId:from,action:'busy'});return}
+    incomingCallPeer=from;const caller=state?.players?.find(p=>p.id===from);$('incomingCallerName').textContent=`${caller?.name||'メンバー'}から着信です`;openDialog('incomingCallDialog');
+  }else if(action==='accept'&&activeCallPeer===from){await startVoiceChat();if(localVoiceStream){ensureVoicePeer(from,true);setVoiceStatus('音声通話に接続中…',true)}}
+  else if(['decline','busy'].includes(action)&&activeCallPeer===from){showNotice(action==='busy'?'相手は通話中です。':'通話が拒否されました。');hangUpCall(false)}
+  else if(action==='hangup'&&activeCallPeer===from){showNotice('通話が終了しました。');hangUpCall(false)}
+}
+function hangUpCall(notify=true){const peer=activeCallPeer;if(notify&&peer)send('callControl',{targetId:peer,action:'hangup'});activeCallPeer=null;stopVoiceChat();setVoiceStatus('メンバー一覧の📞から個別通話できます。');}
+ui.players.addEventListener('click',e=>{const b=e.target.closest('.call-member');if(b)placeCall(b.dataset.callId)});
+$('acceptCallButton').onclick=acceptIncomingCall;$('declineCallButton').onclick=declineIncomingCall;$('hangupCallButton').onclick=()=>hangUpCall(true);
 addEventListener('beforeunload',stopVoiceChat);
 
 function openResult(w){$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'INTRUDER VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'侵入者の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
