@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "wide-map-v5-all-features";
+const MAP_VERSION = "wide-map-v6-movement-privacy";
 const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
 const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
 const DEFAULT_SETTINGS = {
@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = {
   speed: 1,
   killCooldown: 15,
   meetingTime: 45,
-  revealRoles: true,
+  revealRoles: false,
 };
 
 const uid = () => crypto.randomUUID();
@@ -233,7 +233,7 @@ export class GameRoom extends DurableObject {
         alive: p.alive,
         connected: this.sessions.has(p.id),
         host: p.id === this.hostId,
-        role: p.id === forId || !p.alive || this.phase === "finished" ? p.role : undefined,
+        role: p.id === forId ? p.role : undefined,
         tasks: p.id === forId ? p.tasks : undefined,
         completedTasks: p.id === forId ? [...(p.completedTasks || [])] : undefined,
         tasksDone: p.id === forId ? p.tasksDone : undefined,
@@ -399,7 +399,7 @@ export class GameRoom extends DurableObject {
       speed: clamp(Number(settings.speed) || 1, 0.75, 1.3),
       killCooldown: clamp(Number(settings.killCooldown) || 15, 8, 45),
       meetingTime: clamp(Number(settings.meetingTime) || 45, 20, 90),
-      revealRoles: settings.revealRoles !== false,
+      revealRoles: false,
     };
     await this.persist();
     this.syncAll();
@@ -610,7 +610,7 @@ export class GameRoom extends DurableObject {
         ejected = {
           id: target.id,
           name: target.name,
-          role: this.settings.revealRoles ? target.role : undefined,
+          role: undefined,
         };
       }
     }
