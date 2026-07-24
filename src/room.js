@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "wide-map-v5-movement-fix";
-const SPAWNS = [[-4,-2.4],[4,-2.4],[-4,3.4],[4,3.4],[-10,0],[10,0],[-10,8],[10,8],[-10,-8],[10,-8]];
+const MAP_VERSION = "wide-map-v5-all-features";
+const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
 const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
 const DEFAULT_SETTINGS = {
   impostors: 1,
@@ -242,6 +242,12 @@ export class GameRoom extends DurableObject {
         lastKillAt: p.id === forId ? p.lastKillAt : undefined,
         reported: p.reported || false,
         ghost: !p.alive,
+        spectator: Boolean(p.spectator),
+        hidden: Boolean(p.hidden) && p.id !== forId ? true : Boolean(p.hidden),
+        hat: p.hat || "none",
+        shielded: Boolean(p.shielded) && (p.id === forId || this.phase === "finished"),
+        abilityUsed: p.id === forId ? Boolean(p.abilityUsed) : undefined,
+        downedAt: p.id === forId || !p.alive ? Number(p.downedAt || 0) : undefined,
       })),
     };
   }
@@ -311,6 +317,24 @@ export class GameRoom extends DurableObject {
       case "returnLobby":
         await this.returnLobby(player);
         break;
+      case "customize":
+        await this.customize(player, message);
+        break;
+      case "revive":
+        await this.revive(player, message);
+        break;
+      case "protect":
+        await this.protect(player, message);
+        break;
+      case "inspect":
+        this.inspect(player, message);
+        break;
+      case "hide":
+        await this.toggleHide(player);
+        break;
+      case "moderate":
+        await this.moderate(player, message);
+        break;
       default:
         this.send(id, { type: "error", message: "未対応の操作です。" });
     }
@@ -325,11 +349,12 @@ export class GameRoom extends DurableObject {
       this.syncAll();
       return;
     }
-    if (this.phase !== "lobby") {
-      this.send(id, { type: "error", message: "ゲーム進行中のため参加できません。" });
+    const joiningAsSpectator = this.phase !== "lobby";
+    if (joiningAsSpectator && this.players.size >= 12) {
+      this.send(id, { type: "error", message: "観戦枠を含めて満員です。" });
       return;
     }
-    if (this.players.size >= 10) {
+    if ((!joiningAsSpectator && this.players.size >= 10) || (joiningAsSpectator && this.players.size >= 12)) {
       this.send(id, { type: "error", message: "ルームは満員です。" });
       return;
     }
@@ -343,16 +368,22 @@ export class GameRoom extends DurableObject {
       x,
       z,
       rotation: 0,
-      alive: true,
-      role: "crew",
+      alive: !joiningAsSpectator,
+      role: joiningAsSpectator ? "spectator" : "crew",
       tasks: [],
       completedTasks: new Set(),
       tasksDone: 0,
       emergencyUsed: false,
       lastKillAt: 0,
-      reported: false,
+      reported: joiningAsSpectator,
+      spectator: joiningAsSpectator,
+      hidden: false,
+      hat: String(message.hat || "none").slice(0, 12),
+      shielded: false,
+      abilityUsed: false,
+      downedAt: 0,
     });
-    if (!this.hostId) this.hostId = id;
+    if (!this.hostId && !joiningAsSpectator) this.hostId = id;
     await this.persist();
     this.syncAll();
   }
@@ -375,7 +406,7 @@ export class GameRoom extends DurableObject {
   }
 
   move(player, message) {
-    if (this.phase !== "playing") return;
+    if (this.phase !== "playing" || player.hidden || player.spectator) return;
     const x = Number(message.x);
     const z = Number(message.z);
     if (!Number.isFinite(x) || !Number.isFinite(z)) return;
@@ -434,7 +465,18 @@ export class GameRoom extends DurableObject {
         emergencyUsed: false,
         lastKillAt: Date.now(),
         reported: false,
+        spectator: false,
+        hidden: false,
+        shielded: false,
+        abilityUsed: false,
+        downedAt: 0,
       });
+    });
+
+    const crewPlayers = list.filter((item) => item.role === "crew" && !item.spectator);
+    const specialRoles = ["doctor", "detective", "guard"];
+    shuffled(crewPlayers).slice(0, Math.min(specialRoles.length, Math.max(0, crewPlayers.length - 1))).forEach((item, index) => {
+      item.role = specialRoles[index];
     });
 
     this.phase = "playing";
@@ -449,7 +491,7 @@ export class GameRoom extends DurableObject {
   }
 
   async completeTask(player, message) {
-    if (this.phase !== "playing" || !player.alive || player.role !== "crew") return;
+    if (this.phase !== "playing" || !player.alive || player.role === "impostor" || player.spectator) return;
     const task = String(message.task || "");
     if (!player.tasks.includes(task) || player.completedTasks.has(task)) return;
     player.completedTasks.add(task);
@@ -474,7 +516,7 @@ export class GameRoom extends DurableObject {
       return;
     }
     const target = this.players.get(String(message.targetId || ""));
-    if (!target || !target.alive || target.role === "impostor") {
+    if (!target || !target.alive || target.role === "impostor" || target.spectator || target.hidden) {
       this.send(player.id, { type: "error", message: "攻撃できる対象が見つかりません。" });
       return;
     }
@@ -483,8 +525,19 @@ export class GameRoom extends DurableObject {
       return;
     }
 
+    if (target.shielded) {
+      target.shielded = false;
+      player.lastKillAt = Date.now();
+      await this.persist();
+      this.send(player.id, { type: "error", message: "シールドに攻撃を防がれました。" });
+      this.send(target.id, { type: "abilityResult", message: "警備員のシールドが攻撃を防ぎました。" });
+      this.syncAll();
+      return;
+    }
     target.alive = false;
+    target.hidden = false;
     target.reported = false;
+    target.downedAt = Date.now();
     player.lastKillAt = Date.now();
     await this.persist();
     this.broadcast({ type: "killEffect", killerId: player.id, targetId: target.id });
@@ -619,10 +672,76 @@ export class GameRoom extends DurableObject {
     this.syncAll();
   }
 
+  async customize(player, message) {
+    if (this.phase !== "lobby") return;
+    const color = String(message.color || "");
+    if (COLORS.includes(color)) player.color = color;
+    player.hat = String(message.hat || "none").replace(/[^a-z0-9_-]/gi, "").slice(0, 12) || "none";
+    await this.persist();
+    this.syncAll();
+  }
+
+  async revive(player, message) {
+    if (this.phase !== "playing" || !player.alive || player.role !== "doctor" || player.abilityUsed) return;
+    const target = this.players.get(String(message.targetId || ""));
+    if (!target || target.alive || target.reported || target.spectator || dist(player, target) > 2.8) return;
+    if (!target.downedAt || Date.now() - target.downedAt > 20000) {
+      this.send(player.id, { type: "error", message: "救助可能時間を過ぎています。" });
+      return;
+    }
+    target.alive = true;
+    target.reported = false;
+    target.downedAt = 0;
+    player.abilityUsed = true;
+    await this.persist();
+    this.broadcast({ type: "abilityResult", message: `${player.name}が${target.name}を救助しました。` });
+    this.syncAll();
+  }
+
+  async protect(player, message) {
+    if (this.phase !== "playing" || !player.alive || player.role !== "guard" || player.abilityUsed) return;
+    const target = this.players.get(String(message.targetId || ""));
+    if (!target || !target.alive || target.spectator || dist(player, target) > 2.8) return;
+    target.shielded = true;
+    player.abilityUsed = true;
+    await this.persist();
+    this.send(player.id, { type: "abilityResult", message: `${target.name}にシールドを付与しました。` });
+    this.send(target.id, { type: "abilityResult", message: "警備員からシールドを付与されました。" });
+    this.syncAll();
+  }
+
+  inspect(player, message) {
+    if (this.phase !== "playing" || !player.alive || player.role !== "detective" || player.abilityUsed) return;
+    const target = this.players.get(String(message.targetId || ""));
+    if (!target || target.alive || target.spectator || dist(player, target) > 3.2) return;
+    player.abilityUsed = true;
+    const clue = target.role === "impostor" ? "侵入者の痕跡があります。" : "クルー側の痕跡です。";
+    this.send(player.id, { type: "abilityResult", message: clue });
+    this.persist();
+    this.syncAll();
+  }
+
+  async toggleHide(player) {
+    if (this.phase !== "playing" || !player.alive || player.spectator) return;
+    player.hidden = !player.hidden;
+    await this.persist();
+    this.send(player.id, { type: "abilityResult", message: player.hidden ? "ロッカーに隠れました。移動すると出られません。" : "ロッカーから出ました。" });
+    this.syncAll();
+  }
+
+  async moderate(player, message) {
+    if (player.id !== this.hostId) return;
+    const targetId = String(message.targetId || "");
+    if (!targetId || targetId === player.id || !this.players.has(targetId)) return;
+    this.send(targetId, { type: "error", message: "ホストによってルームから退出されました。" });
+    try { this.sessions.get(targetId)?.close(4001, "Removed by host"); } catch {}
+    await this.disconnect(targetId);
+  }
+
   async checkWin() {
     if (this.phase === "finished") return;
     const allPlayers = [...this.players.values()];
-    const crewAll = allPlayers.filter((item) => item.role === "crew");
+    const crewAll = allPlayers.filter((item) => item.role !== "impostor" && !item.spectator);
     const tasksComplete = crewAll.length > 0 && crewAll.every((item) => item.tasksDone >= item.tasks.length);
 
     if (this.practiceMode) {
@@ -630,9 +749,9 @@ export class GameRoom extends DurableObject {
       return;
     }
 
-    const alive = allPlayers.filter((item) => item.alive);
+    const alive = allPlayers.filter((item) => item.alive && !item.spectator);
     const impostors = alive.filter((item) => item.role === "impostor").length;
-    const crew = alive.filter((item) => item.role === "crew").length;
+    const crew = alive.filter((item) => item.role !== "impostor" && !item.spectator).length;
     if (impostors === 0 || tasksComplete) {
       await this.finish("crew");
     } else if (impostors >= crew) {
@@ -670,6 +789,11 @@ export class GameRoom extends DurableObject {
         emergencyUsed: false,
         lastKillAt: 0,
         reported: false,
+        spectator: false,
+        hidden: false,
+        shielded: false,
+        abilityUsed: false,
+        downedAt: 0,
       });
     }
     await this.ctx.storage.deleteAlarm();
