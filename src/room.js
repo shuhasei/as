@@ -526,7 +526,7 @@ export class GameRoom extends DurableObject {
     player.tasksDone = player.completedTasks.size;
     await this.persist();
     this.syncAll();
-    await this.checkWin();
+    await this.checkWin({ tasksOnly: true });
   }
 
   async kill(player, message) {
@@ -818,21 +818,24 @@ export class GameRoom extends DurableObject {
     await this.disconnect(targetId);
   }
 
-  async checkWin() {
+  async checkWin({ tasksOnly = false } = {}) {
     if (this.phase === "finished") return;
     const allPlayers = [...this.players.values()];
     const crewAll = allPlayers.filter((item) => item.role !== "impostor" && !item.spectator);
     const tasksComplete = crewAll.length > 0 && crewAll.every((item) => item.tasksDone >= item.tasks.length);
 
-    if (this.practiceMode) {
-      if (tasksComplete) await this.finish("crew");
+    // タスク完了メッセージでは、タスク勝利だけを判定します。
+    // 人数差による侵入者勝利は、攻撃・追放・退出などで人数が変わった時だけ判定します。
+    if (tasksComplete) {
+      await this.finish("crew");
       return;
     }
+    if (this.practiceMode || tasksOnly) return;
 
     const alive = allPlayers.filter((item) => item.alive && !item.spectator);
     const impostors = alive.filter((item) => item.role === "impostor").length;
     const crew = alive.filter((item) => item.role !== "impostor" && !item.spectator).length;
-    if (impostors === 0 || tasksComplete) {
+    if (impostors === 0) {
       await this.finish("crew");
     } else if (impostors >= crew) {
       await this.finish("impostor");
