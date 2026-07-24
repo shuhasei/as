@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#020711">
   <title>Hidden Crew 3D Pro</title>
-  <link rel="stylesheet" href="/style.css?v=20260724-chat-1">
+  <link rel="stylesheet" href="/style.css?v=20260724-all-features-1">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js"}}</script>
 </head>
 <body>
@@ -16,12 +16,13 @@
       <h1>HIDDEN CREW <span>3D PRO</span></h1>
       <p class="lead">宇宙研究施設に潜む侵入者を見つけ出そう。</p>
       <label class="field">プレイヤー名<input id="nameInput" maxlength="16" value="Player" autocomplete="nickname"></label>
+      <div class="custom-row"><label>カラー<select id="colorSelect"><option>red</option><option>blue</option><option>green</option><option>pink</option><option>orange</option><option>yellow</option><option>cyan</option><option>purple</option><option>white</option><option>lime</option></select></label><label>帽子<select id="hatSelect"><option value="none">なし</option><option value="cap">キャップ</option><option value="crown">王冠</option><option value="antenna">アンテナ</option></select></label></div>
       <div class="menu-grid">
         <button id="createButton" class="primary">新しい部屋を作る</button>
         <div class="join-row"><input id="roomInput" maxlength="6" placeholder="ROOM CODE"><button id="joinButton">参加</button></div>
       </div>
       <p id="menuMessage" class="message"></p>
-      <div class="feature-chips"><span>3D</span><span>WebSocket</span><span>会議</span><span>タスク</span><span>妨害</span></div>
+      <div class="feature-chips"><span>3D</span><span>役職</span><span>救助</span><span>観戦</span><span>監視</span><span>戦績</span></div><button id="tutorialButton" class="secondary">遊び方・チュートリアル</button><p id="profileSummary" class="profile-summary"></p>
     </div>
   </section>
 
@@ -54,6 +55,9 @@
       <button id="killButton" class="danger hidden">攻撃 <span id="killCooldown"></span></button>
       <button id="sabotageButton" class="danger hidden">妨害</button>
       <button id="meetingButton">会議</button>
+      <button id="abilityButton" class="primary hidden">能力</button>
+      <button id="hideButton" class="secondary">隠れる</button>
+      <button id="securityButton" class="secondary">監視カメラ</button>
     </div>
 
 
@@ -74,6 +78,9 @@
     <div id="notice"></div>
   </section>
 
+  <dialog id="tutorialDialog"><div class="dialog-card"><button class="close" data-close="tutorialDialog">×</button><h2>遊び方</h2><ol><li>クルー側はタスクを完了し、侵入者を投票で追放します。</li><li>侵入者は攻撃と妨害を使います。</li><li>医者は倒れた人を20秒以内に1回救助できます。</li><li>探偵は倒れた人の痕跡を1回調査できます。</li><li>警備員は近くの人を1回守れます。</li><li>途中参加者は観戦者として参加できます。</li></ol><p>操作：WASD／矢印キー、E 使用、R 通報、Q 攻撃、M 会議</p></div></dialog>
+  <dialog id="securityDialog"><div class="dialog-card"><button class="close" data-close="securityDialog">×</button><h2>監視カメラ</h2><div id="securityGrid" class="security-grid"></div></div></dialog>
+
   <dialog id="settingsDialog"><div class="dialog-card"><button class="close" data-close="settingsDialog">×</button><h2>ルール設定</h2>
     <div class="settings-grid">
       <label>侵入者<select id="settingImpostors"><option value="1">1人</option><option value="2">2人</option><option value="3">3人</option></select></label>
@@ -89,6 +96,6 @@
   <dialog id="meetingDialog"><div class="dialog-card meeting-card"><h2 id="meetingReason">緊急会議</h2><div class="meeting-columns"><section><h3>投票</h3><div id="voteList"></div><button id="skipVoteButton">スキップ</button><p id="meetingTimer"></p></section><section><div class="voice-header"><h3>通話・チャット</h3><button id="micButton" type="button">🎙 マイクON</button></div><p id="voiceStatus" class="voice-status">会議開始後に音声通話へ接続します。</p><div id="remoteAudio" aria-live="polite"></div><div id="meetingChatLog" class="chat-log"></div><form id="meetingChatForm" class="chat-form"><input id="meetingChatInput" maxlength="120" placeholder="会議チャット"><button>送信</button></form></section></div></div></dialog>
   <dialog id="resultDialog"><div class="dialog-card result-card"><h2 id="resultTitle">GAME OVER</h2><p id="resultText"></p><div id="resultPlayers"></div><button id="returnLobbyButton" class="primary">ロビーへ戻る</button></div></dialog>
 </div>
-<script type="module" src="/game.js?v=20260724-movement-fix-1"></script>
+<script type="module" src="/game.js?v=20260724-all-features-1"></script>
 </body>
 </html>
