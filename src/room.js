@@ -1,7 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "wide-map-v6-movement-privacy";
+const MAP_VERSION = "wide-map-v7-context-interactions";
+const LOCKERS = [{ id: "medical", x: -15.8, z: -10.7, exitX: -14.1, exitZ: -10.7 },{ id: "security", x: -15.8, z: 2.6, exitX: -14.1, exitZ: 2.6 },{ id: "electrical", x: 15.8, z: 10.6, exitX: 14.1, exitZ: 10.6 },{ id: "cargo", x: 15.8, z: -10.6, exitX: 14.1, exitZ: -10.6 }];
+const EMERGENCY_BUTTON = { x: 0, z: 0.5 };
 const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
 const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
 const DEFAULT_SETTINGS = {
@@ -243,7 +245,8 @@ export class GameRoom extends DurableObject {
         reported: p.reported || false,
         ghost: !p.alive,
         spectator: Boolean(p.spectator),
-        hidden: Boolean(p.hidden) && p.id !== forId ? true : Boolean(p.hidden),
+        hidden: Boolean(p.hidden),
+        hiddenAt: p.hidden ? p.hiddenAt || null : null,
         hat: p.hat || "none",
         shielded: Boolean(p.shielded) && (p.id === forId || this.phase === "finished"),
         abilityUsed: p.id === forId ? Boolean(p.abilityUsed) : undefined,
@@ -297,6 +300,10 @@ export class GameRoom extends DurableObject {
         await this.report(player, message);
         break;
       case "meeting":
+        if (Math.hypot(player.x - EMERGENCY_BUTTON.x, player.z - EMERGENCY_BUTTON.z) > 3.0) {
+          this.send(player.id, { type: "error", message: "中央の緊急ボタンに近づいてください。" });
+          break;
+        }
         await this.startMeeting(player, "緊急会議");
         break;
       case "vote":
@@ -330,7 +337,7 @@ export class GameRoom extends DurableObject {
         this.inspect(player, message);
         break;
       case "hide":
-        await this.toggleHide(player);
+        await this.toggleHide(player, message);
         break;
       case "moderate":
         await this.moderate(player, message);
@@ -378,6 +385,7 @@ export class GameRoom extends DurableObject {
       reported: joiningAsSpectator,
       spectator: joiningAsSpectator,
       hidden: false,
+      hiddenAt: null,
       hat: String(message.hat || "none").slice(0, 12),
       shielded: false,
       abilityUsed: false,
@@ -467,6 +475,7 @@ export class GameRoom extends DurableObject {
         reported: false,
         spectator: false,
         hidden: false,
+        hiddenAt: null,
         shielded: false,
         abilityUsed: false,
         downedAt: 0,
@@ -721,11 +730,37 @@ export class GameRoom extends DurableObject {
     this.syncAll();
   }
 
-  async toggleHide(player) {
+  async toggleHide(player, message = {}) {
     if (this.phase !== "playing" || !player.alive || player.spectator) return;
-    player.hidden = !player.hidden;
+    if (player.hidden) {
+      const locker = LOCKERS.find((item) => item.id === player.hiddenAt);
+      if (!locker) return;
+      player.hidden = false;
+      player.hiddenAt = null;
+      player.x = locker.exitX;
+      player.z = locker.exitZ;
+      await this.persist();
+      this.send(player.id, { type: "abilityResult", message: "ロッカーから出ました。" });
+      this.syncAll();
+      return;
+    }
+    const locker = LOCKERS.find((item) => item.id === String(message.lockerId || ""));
+    if (!locker || Math.hypot(player.x - locker.exitX, player.z - locker.exitZ) > 2.2) {
+      this.send(player.id, { type: "abilityResult", message: "ロッカーの近くまで移動してください。" });
+      return;
+    }
+    const occupied = [...this.players.values()].some((item) => item.id !== player.id && item.hidden && item.hiddenAt === locker.id);
+    if (occupied) {
+      this.send(player.id, { type: "abilityResult", message: "このロッカーには先客がいます。" });
+      return;
+    }
+    player.hidden = true;
+    player.hiddenAt = locker.id;
+    player.x = locker.x;
+    player.z = locker.z;
+    player.rotation = 0;
     await this.persist();
-    this.send(player.id, { type: "abilityResult", message: player.hidden ? "ロッカーに隠れました。移動すると出られません。" : "ロッカーから出ました。" });
+    this.send(player.id, { type: "abilityResult", message: "ロッカーの中に隠れました。外からは見えません。" });
     this.syncAll();
   }
 
@@ -791,6 +826,7 @@ export class GameRoom extends DurableObject {
         reported: false,
         spectator: false,
         hidden: false,
+        hiddenAt: null,
         shielded: false,
         abilityUsed: false,
         downedAt: 0,
