@@ -414,3 +414,138 @@ function setupJoystick(){let active=false;const move=e=>{if(!active)return;const
 setInterval(()=>{if(state?.phase==='meeting')$('meetingTimer').textContent=`残り ${Math.max(0,Math.ceil((state.meetingEndsAt-Date.now())/1000))}秒`},500);
 
 $('profileSummary').textContent=profileText();
+
+// --- Responsive HUD layout fix: prevents chat, joystick, hints and action buttons from overlapping. ---
+(function installHudLayoutFix(){
+  const style=document.createElement('style');
+  style.id='hiddenCrewHudLayoutFix';
+  style.textContent=`
+    #gameScreen{overflow:hidden}
+
+    #topBar{
+      z-index:40;
+      max-width:min(720px,calc(100vw - 420px));
+    }
+
+    #playerPanel{
+      z-index:35;
+      top:100px;
+      left:18px;
+      max-height:calc(100vh - 260px);
+      overflow:auto;
+    }
+
+    #taskPanel{
+      z-index:35;
+      top:100px;
+      right:18px;
+      max-height:calc(100vh - 310px);
+      overflow:auto;
+    }
+
+    #miniMap{
+      z-index:30;
+      right:18px !important;
+      bottom:118px !important;
+    }
+
+    #actionBar{
+      z-index:50;
+      position:fixed !important;
+      left:50% !important;
+      right:auto !important;
+      bottom:18px !important;
+      transform:translateX(-50%);
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      width:max-content;
+      max-width:calc(100vw - 520px);
+      padding:10px 12px;
+    }
+
+    #actionBar.hidden{display:none !important}
+    #actionBar button{white-space:nowrap;min-height:46px}
+
+    #controlHint{
+      z-index:45;
+      position:fixed !important;
+      left:50% !important;
+      right:auto !important;
+      bottom:88px !important;
+      transform:translateX(-50%);
+      width:max-content;
+      max-width:calc(100vw - 620px);
+      text-align:center;
+      pointer-events:none;
+    }
+
+    #globalChatPanel{
+      z-index:55;
+      position:fixed !important;
+      left:18px !important;
+      bottom:18px !important;
+      max-height:min(420px,calc(100vh - 280px));
+    }
+
+    #globalChatPanel.collapsed{
+      width:205px !important;
+      min-height:64px;
+      max-height:64px;
+      overflow:hidden;
+    }
+
+    #joystick{
+      z-index:32;
+      position:fixed !important;
+      left:30px !important;
+      bottom:118px !important;
+    }
+
+    #interactionHint{
+      z-index:60;
+      bottom:150px !important;
+      left:50% !important;
+      transform:translateX(-50%);
+      max-width:min(560px,calc(100vw - 40px));
+    }
+
+    #notice{
+      z-index:70;
+      bottom:150px !important;
+      max-width:min(620px,calc(100vw - 40px));
+      text-align:center;
+    }
+
+    @media (max-width:1200px){
+      #topBar{max-width:calc(100vw - 40px)}
+      #actionBar{max-width:calc(100vw - 380px);gap:8px}
+      #controlHint{max-width:calc(100vw - 420px)}
+      #taskPanel{max-width:280px}
+    }
+
+    @media (max-width:900px){
+      #playerPanel{top:88px;left:10px;max-width:220px}
+      #taskPanel{top:88px;right:10px;max-width:220px}
+      #miniMap{right:10px !important;bottom:150px !important;transform:scale(.85);transform-origin:bottom right}
+      #actionBar{left:10px !important;right:10px !important;bottom:10px !important;transform:none;width:auto;max-width:none}
+      #controlHint{display:none}
+      #globalChatPanel{left:10px !important;bottom:104px !important;max-width:min(320px,calc(100vw - 20px))}
+      #joystick{left:18px !important;bottom:190px !important;transform:scale(.82);transform-origin:bottom left}
+    }
+
+    @media (max-width:640px){
+      #topBar{top:8px;left:8px;right:8px;max-width:none;gap:6px;flex-wrap:wrap}
+      #playerPanel{top:118px;left:8px;width:190px;max-height:220px}
+      #taskPanel{top:118px;right:8px;width:190px;max-height:220px}
+      #miniMap{display:none}
+      #globalChatPanel{bottom:142px !important}
+      #joystick{bottom:220px !important}
+      #actionBar{padding:8px;gap:6px}
+      #actionBar button{min-height:42px;padding:8px 10px;font-size:13px}
+    }
+  `;
+  document.head.append(style);
+})();
