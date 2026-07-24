@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#020711">
   <title>ゲーム</title>
-  <link rel="stylesheet" href="/style.css?v=20260724-aurora-map-fp-controls-v11">
+  <link rel="stylesheet" href="/style.css?v=20260724-live-security-camera-v12">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js"}}</script>
 </head>
 <body>
@@ -80,7 +80,7 @@
   </section>
 
   <dialog id="tutorialDialog"><div class="dialog-card"><button class="close" data-close="tutorialDialog">×</button><h2>遊び方</h2><ol><li>クルー側はタスクを完了し、侵入者を投票で追放します。</li><li>侵入者は攻撃と妨害を使います。</li><li>医者は倒れた人を20秒以内に1回救助できます。</li><li>探偵は倒れた人の痕跡を1回調査できます。</li><li>警備員は近くの人を1回守れます。</li><li>途中参加者もクルーとして参加し、すぐに移動できます。</li></ol><p>操作：見下ろしは方向移動。一人称はW/↑で前進、S/↓で後退、A/←・D/→で左右旋回。E 使用、R 通報、Q 攻撃、M 会議</p></div></dialog>
-  <dialog id="securityDialog"><div class="dialog-card"><button class="close" data-close="securityDialog">×</button><h2>監視カメラ</h2><div id="securityGrid" class="security-grid"></div></div></dialog>
+  <dialog id="securityDialog"><div class="dialog-card"><button class="close" data-close="securityDialog">×</button><h2>監視カメラ</h2><div class="security-monitor"><div class="security-screen"><canvas id="securityFeed" aria-label="監視カメラのライブ映像"></canvas><div class="security-feed-header"><span id="securityCameraName">CAM 01　中央アトリウム</span><span id="securityCameraStatus">● LIVE</span></div><div class="security-scanlines"></div></div><div class="security-camera-controls"><button id="securityPrevButton" type="button" class="secondary">◀ 前のカメラ</button><button id="securityNextButton" type="button" class="primary">次のカメラ ▶</button></div><div id="securityCameraButtons" class="security-camera-buttons"></div><p class="security-note">映像はリアルタイムです。ロッカー内のプレイヤーは映りません。</p></div></div></dialog>
 
   <dialog id="settingsDialog"><div class="dialog-card"><button class="close" data-close="settingsDialog">×</button><h2>ルール設定</h2>
     <div class="settings-grid">
@@ -98,6 +98,6 @@
   <dialog id="incomingCallDialog"><div class="dialog-card call-dialog"><h2>着信</h2><p id="incomingCallerName">メンバーから着信です</p><div class="call-answer-row"><button id="acceptCallButton" class="primary" type="button">📞 応答</button><button id="declineCallButton" class="danger" type="button">拒否</button></div></div></dialog>
   <dialog id="resultDialog"><div class="dialog-card result-card"><h2 id="resultTitle">GAME OVER</h2><p id="resultText"></p><div id="resultPlayers"></div><button id="returnLobbyButton" class="primary">ロビーへ戻る</button></div></dialog>
 </div>
-<script type="module" src="/game.js?v=20260724-aurora-map-fp-controls-v11"></script>
+<script type="module" src="/game.js?v=20260724-live-security-camera-v12"></script>
 </body>
 </html>
