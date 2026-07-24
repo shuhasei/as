@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "wide-map-v12-arrow-buttons";
+const MAP_VERSION = "wide-map-v13-compatible";
 const LOCKERS = [{ id: "medical", x: -15.8, z: -10.7, exitX: -14.1, exitZ: -10.7 },{ id: "security", x: -15.8, z: 2.6, exitX: -14.1, exitZ: 2.6 },{ id: "electrical", x: 15.8, z: 10.6, exitX: 14.1, exitZ: 10.6 },{ id: "cargo", x: 15.8, z: -10.6, exitX: 14.1, exitZ: -10.6 }];
 const EMERGENCY_BUTTON = { x: 0, z: 0.5 };
 const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
@@ -351,9 +351,11 @@ export class GameRoom extends DurableObject {
   }
 
   async join(id, message) {
-    if (String(message.clientVersion || "") !== MAP_VERSION) {
-      this.send(id, { type: "error", message: "ゲームの版が一致しません。全端末でCtrl+Shift+Rを押して更新してください。" });
-      return;
+    // クライアントとサーバーの更新順が前後しても、参加自体は止めません。
+    // 現在の通信形式に互換性があるため、版の違いは警告扱いにします。
+    const clientVersion = String(message.clientVersion || "");
+    if (clientVersion && clientVersion !== MAP_VERSION) {
+      console.warn("Hidden Crew version mismatch", { clientVersion, serverVersion: MAP_VERSION });
     }
     if (this.players.has(id)) {
       this.syncAll();
