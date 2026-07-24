@@ -75,6 +75,14 @@ const LOCKERS=[
   {id:'storage',x:-12,z:-19.5,exitX:-10.4,exitZ:-19.5,rot:-Math.PI/2}
 ];
 const SECURITY_CONSOLE={x:-18,z:-2};
+const SECURITY_CAMERAS=[
+  {id:'hub',name:'中央アトリウム',position:[-5.5,7.2,-5.5],target:[1,.7,3.5],radius:12},
+  {id:'reactor',name:'リアクター・機関室',position:[-20.5,7.4,11.5],target:[-27,.7,12],radius:14},
+  {id:'medical',name:'セキュリティ・医療区画',position:[-13.5,7.1,-8],target:[-22,.7,-10],radius:15},
+  {id:'storage',name:'保管庫・通信室',position:[0,7.3,-10.5],target:[0,.7,-17],radius:15},
+  {id:'navigation',name:'管理室・航法管制室',position:[19.5,7.5,-2.5],target:[27,.7,1],radius:15},
+  {id:'weapons',name:'観測ラウンジ・防衛管制室',position:[12,8.2,22],target:[13,.7,15],radius:16}
+];
 const EMERGENCY_BUTTON={x:0,z:0};
 const SOLID_PROPS=[
   {x:-18,z:-2,w:1.8,d:1.6},
@@ -82,7 +90,7 @@ const SOLID_PROPS=[
   {x:18.2,z:-16.8,w:1.6,d:1.6},{x:25.5,z:13,w:1.5,d:1.5},
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false;
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;let securityOpen=false,securityCameraIndex=0,securityRenderer=null,securityCamera=null,securityLastRender=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false;
 const randomRoom=()=>Array.from({length:6},()=>('ABCDEFGHJKLMNPQRSTUVWXYZ23456789')[Math.floor(Math.random()*32)]).join('');
 const escapeHtml=s=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function send(type,data={}){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type,...data}))}
@@ -439,7 +447,7 @@ function animate(){
   try{
     if(!clock)return;
     const dt=Math.min(clock.getDelta(),.05);
-    if(state?.phase==='playing'&&localModel)moveLocal(dt);
+    if(state?.phase==='playing'&&localModel&&!securityOpen)moveLocal(dt);
     for(const m of models.values()){
       if(m!==localModel&&m?.position&&m?.userData?.target){
         const a=1-Math.exp(-12*dt);
@@ -456,6 +464,7 @@ function animate(){
     }else if(renderMode==='2d'){
       draw2DMap();
     }
+    if(securityOpen)renderSecurityFeed();
     if(miniMapEnabled){
       try{drawMiniMap()}catch(error){
         miniMapEnabled=false;
@@ -676,8 +685,96 @@ function abilityAction(){const p=me();if(!p||p.abilityUsed){showNotice('能力�
 function updateAdvancedUI(){const p=me(),b=$('abilityButton');if(!p||!b)return;const labels={doctor:'救助',detective:'調査',guard:'守る'};b.classList.toggle('hidden',!labels[p.role]||state.phase!=='playing');b.textContent=p.abilityUsed?`${labels[p.role]||'能力'}（使用済み）`:labels[p.role]||'能力';b.disabled=!!p.abilityUsed;b.classList.toggle('ability-ready',!p.abilityUsed&&!!labels[p.role]);ui.role.textContent=`役職：${ROLE_LABELS[p.role]||p.role}${p.spectator?'（途中参加）':''}`;$('hideButton').disabled=!p.alive||p.spectator||(!p.hidden&&!nearest.locker);$('profileSummary').textContent=profileText()}
 function profileText(){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');const title=s.wins>=10?'宇宙の英雄':s.wins>=3?'熟練クルー':s.games>=1?'新人隊員':'初参加';return `称号：${title}　対戦 ${s.games}　勝利 ${s.wins}　今日の目標：タスクを3回完了`}
 function saveResult(w){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.games++;const p=me();if((w==='impostor'&&p?.role==='impostor')||(w==='crew'&&p?.role!=='impostor'))s.wins++;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));$('profileSummary').textContent=profileText()}
-function openSecurity(){if(!state)return;const root=$('securityGrid');root.innerHTML='';for(const room of ROOMS){const minX=room.x-room.w/2,maxX=room.x+room.w/2,minZ=room.z-room.d/2,maxZ=room.z+room.d/2;const visible=state.players.filter(p=>p.x>=minX&&p.x<=maxX&&p.z>=minZ&&p.z<=maxZ&&!p.hidden);const d=document.createElement('div');d.className='security-card';d.innerHTML=`<b>${escapeHtml(room.name)}</b>${visible.length?visible.map(p=>escapeHtml(p.name)).join('<br>'):'異常なし'}`;root.append(d)}openDialog('securityDialog')}
-$('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{if(!nearest.security){showNotice('SECURITYの監視端末に近づいてください');return}openSecurity()};$('tutorialButton').onclick=()=>openDialog('tutorialDialog');$('colorSelect').onchange=$('hatSelect').onchange=()=>{if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
+function updateSecurityCameraUi(){
+  const preset=SECURITY_CAMERAS[securityCameraIndex]||SECURITY_CAMERAS[0];
+  const title=$('securityCameraName'),buttons=$('securityCameraButtons');
+  if(title)title.textContent=`CAM ${String(securityCameraIndex+1).padStart(2,'0')}　${preset.name}`;
+  if(buttons)buttons.querySelectorAll('[data-security-camera]').forEach((button,index)=>button.classList.toggle('active',index===securityCameraIndex));
+  const count=(state?.players||[]).filter(player=>player.alive&&!player.hidden&&Math.hypot(player.x-preset.target[0],player.z-preset.target[2])<=preset.radius).length;
+  const status=$('securityCameraStatus');if(status)status.textContent=`● LIVE　検知 ${count}人`;
+}
+function setSecurityCamera(index){
+  const length=SECURITY_CAMERAS.length;
+  securityCameraIndex=(Number(index)+length)%length;
+  const preset=SECURITY_CAMERAS[securityCameraIndex];
+  if(securityCamera){
+    securityCamera.position.set(...preset.position);
+    securityCamera.lookAt(new THREE.Vector3(...preset.target));
+  }
+  updateSecurityCameraUi();
+  securityLastRender=0;
+}
+function ensureSecurityViewer(){
+  const canvas=$('securityFeed');if(!canvas)return false;
+  if(renderMode!=='3d'||!scene)return false;
+  if(!securityRenderer){
+    try{
+      securityRenderer=new THREE.WebGLRenderer({canvas,antialias:false,alpha:false,powerPreference:'low-power'});
+      securityRenderer.setPixelRatio(Math.min(devicePixelRatio||1,1.25));
+      securityRenderer.outputColorSpace=THREE.SRGBColorSpace;
+      securityRenderer.toneMapping=THREE.ACESFilmicToneMapping;
+      securityRenderer.toneMappingExposure=1.12;
+      securityRenderer.shadowMap.enabled=false;
+      securityCamera=new THREE.PerspectiveCamera(62,16/9,.1,130);
+      const preset=SECURITY_CAMERAS[securityCameraIndex];
+      securityCamera.position.set(...preset.position);
+      securityCamera.lookAt(new THREE.Vector3(...preset.target));
+    }catch(error){
+      console.warn('[Hidden Crew] security WebGL viewer unavailable; using live map fallback',error);
+      securityRenderer=null;securityCamera=null;return false;
+    }
+  }
+  return true;
+}
+function resizeSecurityViewer(){
+  const canvas=$('securityFeed');if(!canvas||!securityRenderer||!securityCamera)return;
+  const width=Math.max(280,Math.floor(canvas.clientWidth||640));
+  const height=Math.max(158,Math.floor(canvas.clientHeight||width*9/16));
+  securityRenderer.setSize(width,height,false);
+  securityCamera.aspect=width/height;
+  securityCamera.updateProjectionMatrix();
+}
+function drawSecurityFallback(){
+  const canvas=$('securityFeed');if(!canvas)return;
+  const width=Math.max(280,Math.floor(canvas.clientWidth||640));
+  const height=Math.max(158,Math.floor(canvas.clientHeight||width*9/16));
+  const ratio=Math.min(devicePixelRatio||1,1.5);
+  if(canvas.width!==Math.floor(width*ratio)||canvas.height!==Math.floor(height*ratio)){canvas.width=Math.floor(width*ratio);canvas.height=Math.floor(height*ratio)}
+  const ctx=canvas.getContext('2d');if(!ctx)return;ctx.setTransform(ratio,0,0,ratio,0,0);
+  const preset=SECURITY_CAMERAS[securityCameraIndex],viewRadius=preset.radius;
+  const scale=Math.min(width,height)/(viewRadius*2.15),cx=width/2,cy=height/2;
+  const mapX=x=>cx+(x-preset.target[0])*scale,mapY=z=>cy-(z-preset.target[2])*scale;
+  ctx.fillStyle='#020711';ctx.fillRect(0,0,width,height);
+  ctx.save();ctx.beginPath();ctx.rect(0,0,width,height);ctx.clip();
+  for(const zone of MAP_ZONES){ctx.fillStyle=`#${Number(zone.color||0x233347).toString(16).padStart(6,'0')}`;ctx.fillRect(mapX(zone.x-zone.w/2),mapY(zone.z+zone.d/2),zone.w*scale,zone.d*scale)}
+  ctx.strokeStyle='rgba(115,220,255,.7)';ctx.lineWidth=1.5;for(const wall of WALLS)ctx.strokeRect(mapX(wall.x-wall.w/2),mapY(wall.z+wall.d/2),wall.w*scale,wall.d*scale);
+  for(const player of state?.players||[]){if(!player.alive||player.hidden)continue;const x=mapX(player.x),y=mapY(player.z);if(x<-20||x>width+20||y<-20||y>height+20)continue;ctx.beginPath();ctx.fillStyle=`#${(COLORS[player.color]||0x29cbd4).toString(16).padStart(6,'0')}`;ctx.arc(x,y,6,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.font='12px sans-serif';ctx.fillText(player.name,x+9,y+4)}
+  ctx.restore();
+  ctx.strokeStyle='rgba(84,228,255,.55)';ctx.lineWidth=2;ctx.strokeRect(2,2,width-4,height-4);
+}
+function renderSecurityFeed(){
+  const now=performance.now();if(now-securityLastRender<66)return;securityLastRender=now;
+  updateSecurityCameraUi();
+  if(renderMode==='3d'&&ensureSecurityViewer()){
+    resizeSecurityViewer();
+    const localWasVisible=localModel?.visible;
+    const localPlayer=me();
+    if(localModel&&localPlayer?.alive&&!localPlayer.hidden&&!localPlayer.reported)localModel.visible=true;
+    securityRenderer.render(scene,securityCamera);
+    if(localModel)localModel.visible=localWasVisible;
+  }else drawSecurityFallback();
+}
+function openSecurity(){
+  if(!state)return;
+  clearKeys();securityOpen=true;
+  const buttons=$('securityCameraButtons');
+  if(buttons&&!buttons.childElementCount){
+    SECURITY_CAMERAS.forEach((preset,index)=>{const button=document.createElement('button');button.type='button';button.dataset.securityCamera=String(index);button.textContent=`${index+1}. ${preset.name}`;button.onclick=()=>setSecurityCamera(index);buttons.append(button)});
+  }
+  openDialog('securityDialog');
+  requestAnimationFrame(()=>{ensureSecurityViewer();resizeSecurityViewer();setSecurityCamera(securityCameraIndex);renderSecurityFeed()});
+}
+$('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{if(!nearest.security){showNotice('SECURITYの監視端末に近づいてください');return}openSecurity()};$('securityPrevButton').onclick=()=>setSecurityCamera(securityCameraIndex-1);$('securityNextButton').onclick=()=>setSecurityCamera(securityCameraIndex+1);$('securityDialog').addEventListener('close',()=>{securityOpen=false;clearKeys()});$('tutorialButton').onclick=()=>openDialog('tutorialDialog');$('colorSelect').onchange=$('hatSelect').onchange=()=>{if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
 function openTask(id){
   $('taskTitle').textContent=TASKS[id]?.[0]||'TASK';
   const root=$('taskGame');root.innerHTML='';
@@ -943,7 +1040,7 @@ updateCallUi();
 addEventListener('beforeunload',()=>{hangUpCall(false);clearIncomingCall(false)});
 
 function openResult(w){$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'INTRUDER VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'侵入者の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
-function openDialog(id){const d=$(id);if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(d?.open)d.close()}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
+function openDialog(id){const d=$(id);if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(id==='securityDialog'){securityOpen=false;clearKeys()}if(d?.open)d.close()}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
 function setupJoystick(){
   if(!ui.joystick||!ui.stick)return;
   let active=false;
@@ -1053,6 +1150,20 @@ $('profileSummary').textContent=profileText();
     #gameScreen{overflow:hidden;isolation:isolate;background:#020711;touch-action:none}
     #gameCanvas{position:absolute;inset:0;z-index:0;width:100%;height:100%;display:block;background:#020711;touch-action:none}
     input,select,textarea,dialog{touch-action:auto}
+
+    #securityDialog .dialog-card{width:min(980px,94vw);max-width:none;padding:18px}
+    .security-monitor{display:grid;gap:12px}
+    .security-screen{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;border:2px solid rgba(76,224,255,.65);border-radius:14px;background:#020711;box-shadow:inset 0 0 35px rgba(21,186,255,.18),0 0 24px rgba(25,185,255,.12)}
+    #securityFeed{display:block;width:100%;height:100%;background:#020711}
+    .security-feed-header{position:absolute;left:10px;right:10px;top:9px;z-index:2;display:flex;justify-content:space-between;gap:10px;pointer-events:none;font-size:13px;font-weight:800;text-shadow:0 2px 4px #000}
+    #securityCameraStatus{color:#56ffb2}
+    .security-scanlines{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0,rgba(255,255,255,.025) 1px,transparent 1px,transparent 4px);mix-blend-mode:screen}
+    .security-camera-controls{display:flex;gap:10px;align-items:center;justify-content:center}
+    .security-camera-controls button{min-width:112px}
+    .security-camera-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+    .security-camera-buttons button{padding:9px 10px;font-size:13px;min-height:44px}
+    .security-camera-buttons button.active{outline:2px solid #50ddff;background:rgba(27,175,223,.3)}
+    .security-note{margin:0;text-align:center;opacity:.72;font-size:12px}
 
     #topBar{
       z-index:40;
@@ -1178,6 +1289,11 @@ $('profileSummary').textContent=profileText();
     }
 
     @media (max-width:640px){
+      #securityDialog .dialog-card{width:96vw;padding:10px;max-height:92dvh;overflow:auto}
+      .security-camera-buttons{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .security-camera-buttons button{font-size:11px;padding:7px 6px}
+      .security-feed-header{font-size:10px;top:6px;left:7px;right:7px}
+      .security-camera-controls button{min-width:94px;padding:8px}
       #topBar{top:8px;left:8px;right:8px;max-width:none;gap:6px;flex-wrap:wrap}
       #playerPanel{top:118px;left:8px;width:min(44vw,170px);max-height:210px}
       #taskPanel{top:118px;right:8px;width:min(44vw,170px);max-height:210px}
