@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-branch-map-v14';
+const MAP_VERSION='aurora-realistic-tasks-v15';
 const TASKS={
   reactor:['リアクター安定化',-28,18],
   engine:['エンジン出力調整',-28,6],
@@ -84,13 +84,49 @@ const SECURITY_CAMERAS=[
   {id:'weapons',name:'観測ラウンジ・防衛管制室',position:[12,8.2,22],target:[13,.7,15],radius:16}
 ];
 const EMERGENCY_BUTTON={x:0,z:0};
+const CARGO_DELIVERY={x:13.2,z:6.1,name:'管理室の搬入口'};
 const SOLID_PROPS=[
   {x:-18,z:-2,w:1.8,d:1.6},
   {x:-10.5,z:-14.5,w:1.6,d:1.6},{x:-5.2,z:-19.2,w:1.8,d:1.5},
   {x:18.2,z:-16.8,w:1.6,d:1.6},{x:25.5,z:13,w:1.5,d:1.5},
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;let securityOpen=false,securityCameraIndex=0,securityRenderer=null,securityCamera=null,securityLastRender=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false;
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;let securityOpen=false,securityCameraIndex=0,securityRenderer=null,securityCamera=null,securityLastRender=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;
+function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
+function createCargoParcel(scale=1){
+  const group=new THREE.Group();group.scale.setScalar(scale);
+  const box=new THREE.Mesh(new THREE.BoxGeometry(.82,.62,.72),new THREE.MeshStandardMaterial({color:0x9a6936,roughness:.72,metalness:.08}));box.castShadow=true;box.position.y=.08;group.add(box);
+  const strapMat=new THREE.MeshStandardMaterial({color:0x3b2a1c,roughness:.65});
+  const strapA=new THREE.Mesh(new THREE.BoxGeometry(.12,.64,.74),strapMat),strapB=new THREE.Mesh(new THREE.BoxGeometry(.84,.64,.12),strapMat);strapA.position.y=.09;strapB.position.y=.09;group.add(strapA,strapB);
+  const label=new THREE.Mesh(new THREE.PlaneGeometry(.4,.22),new THREE.MeshBasicMaterial({color:0xe8d7a8}));label.position.set(0,.08,.365);group.add(label);
+  return group;
+}
+function ensureCargoCarryVisual(){
+  if(renderMode!=='3d'||!scene)return null;if(cargoCarryVisual)return cargoCarryVisual;
+  cargoCarryVisual=createCargoParcel(1.05);scene.add(cargoCarryVisual);cargoCarryVisual.visible=false;return cargoCarryVisual;
+}
+function setCargoCarry(active,{persist=true,sync=true}={}){
+  const next=!!active,changed=next!==cargoCarryActive;cargoCarryActive=next;
+  const visual=ensureCargoCarryVisual();if(visual)visual.visible=cargoCarryActive&&cameraMode===2;
+  if(persist){try{if(cargoCarryActive&&state?.room&&me()?.name)sessionStorage.setItem(cargoCarryStorageKey(),JSON.stringify({room:state.room,name:me().name}));else sessionStorage.removeItem(cargoCarryStorageKey())}catch{}}
+  if(sync&&changed)send('cargoState',{active:cargoCarryActive});
+}
+function syncCargoCarryState(){
+  const p=me(),valid=state?.phase==='playing'&&p?.alive&&!p?.spectator&&(p.tasks||[]).includes('cargo')&&!(p.completedTasks||[]).includes('cargo');
+  if(!valid){if(cargoCarryActive)setCargoCarry(false,{sync:false});return}
+  if(typeof p?.carryingCargo==='boolean'){
+    if(cargoCarryActive!==p.carryingCargo)setCargoCarry(p.carryingCargo,{sync:false});
+    return;
+  }
+  if(!cargoCarryActive){try{const saved=JSON.parse(sessionStorage.getItem(cargoCarryStorageKey())||'null');if(saved?.room===state.room&&saved?.name===p.name)setCargoCarry(true,{persist:false,sync:false})}catch{}}
+}
+function updateCargoCarryVisual(){
+  const visual=ensureCargoCarryVisual(),p=me();if(!visual)return;
+  visual.visible=!!(cameraMode===2&&cargoCarryActive&&localModel&&p?.alive&&!p.hidden&&!p.reported);if(!visual.visible)return;
+  const yaw=Number(firstPersonYaw)||Number(localModel.rotation.y)||0,forwardX=Math.sin(yaw),forwardZ=Math.cos(yaw);
+  visual.position.set(localModel.position.x+forwardX*.86,1.18,localModel.position.z+forwardZ*.86);visual.rotation.y=yaw;visual.rotation.z=Math.sin(performance.now()/180)*.018;
+}
+function taskDisplayName(id){const carrying=id==='cargo'&&(cargoCarryActive||Boolean(me()?.carryingCargo));return carrying?'貨物運搬：管理室へ':TASKS[id]?.[0]||id}
 const randomRoom=()=>Array.from({length:6},()=>('ABCDEFGHJKLMNPQRSTUVWXYZ23456789')[Math.floor(Math.random()*32)]).join('');
 const escapeHtml=s=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function send(type,data={}){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type,...data}))}
@@ -144,7 +180,7 @@ function handle(m){
     if(m.id)myId=m.id;finishJoin(m.room);
   }else if(m.type==='state'){
     if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('新旧ファイルが混在していますが、互換モードで接続しました。')}
-    state=m.state;
+    state=m.state;syncCargoCarryState();
     if(joinPending&&myId&&state.players?.some(player=>player.id===myId))finishJoin(state.room);
     ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();
     if(activeCallPeer){const callTarget=state.players?.find(p=>p.id===activeCallPeer);if(!callTarget?.connected||!callTarget?.alive){showNotice('通話相手が退出したため通話を終了しました。');hangUpCall(false)}else updateCallUi()}
@@ -269,6 +305,7 @@ function draw2DMap(){
   ctx.fillStyle='#355064';ctx.beginPath();ctx.arc(sx(0),sz(0),2.25*scale,0,Math.PI*2);ctx.fill();
   ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`bold ${Math.max(8,scale*.28)}px sans-serif`;for(const room of ROOMS){ctx.fillStyle='rgba(225,248,255,.8)';ctx.fillText(room.name,sx(room.x),sz(room.z))}
   for(const [id,[name,x,z]] of Object.entries(TASKS)){ctx.fillStyle='#46dfff';ctx.fillRect(sx(x)-.35*scale,sz(z)-.35*scale,.7*scale,.7*scale)}
+  if(cargoCarryActive){ctx.fillStyle='#ffbd5a';ctx.fillRect(sx(CARGO_DELIVERY.x)-.5*scale,sz(CARGO_DELIVERY.z)-.5*scale,scale,scale)}
   for(const locker of LOCKERS){const occupied=state?.players?.some(p=>p.hidden&&p.hiddenAt===locker.id);ctx.fillStyle=occupied?'#ffb34d':'#3b6680';ctx.fillRect(sx(locker.x)-.45*scale,sz(locker.z)-.35*scale,.9*scale,.7*scale)}
   for(const p of state?.players||[]){if(p.reported||p.hidden)continue;const model=models.get(p.id),x=model?.position?.x??p.x,z=model?.position?.z??p.z;const hex=(COLORS[p.color]||0xffffff).toString(16).padStart(6,'0');ctx.globalAlpha=p.alive?1:.35;ctx.fillStyle=`#${hex}`;ctx.beginPath();ctx.arc(sx(x),sz(z),.52*scale,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.fillStyle='#ffffff';ctx.font=`bold ${Math.max(9,scale*.3)}px sans-serif`;ctx.fillText(p.name,sx(x),sz(z)-.75*scale)}
   ctx.fillStyle='rgba(2,7,17,.75)';ctx.fillRect(10,h-40,340,30);ctx.fillStyle='#dffcff';ctx.textAlign='left';ctx.font='14px sans-serif';ctx.fillText('軽量マップ表示中（操作・機能はそのまま使えます）',20,h-20);
@@ -297,6 +334,8 @@ function drawMiniMap(){
   for(const wall of WALLS)ctx.fillRect(sx(wall.x-wall.w/2),sz(wall.z-wall.d/2),wall.w*scale,wall.d*scale);
   ctx.fillStyle='#385164';
   for(const prop of SOLID_PROPS)ctx.fillRect(sx(prop.x-prop.w/2),sz(prop.z-prop.d/2),Math.max(2,prop.w*scale),Math.max(2,prop.d*scale));
+
+  if(cargoCarryActive){ctx.strokeStyle='#ffcf65';ctx.lineWidth=2;ctx.strokeRect(sx(CARGO_DELIVERY.x)-5,sz(CARGO_DELIVERY.z)-5,10,10)}
 
   const self=me();
   if(!self)return;
@@ -372,10 +411,11 @@ function buildWorld(){
   const consoleMesh=new THREE.Mesh(new THREE.BoxGeometry(1.8,1.25,1.6),new THREE.MeshStandardMaterial({color:0x26384b,metalness:.72,roughness:.3}));consoleMesh.position.set(SECURITY_CONSOLE.x,.625,SECURITY_CONSOLE.z);consoleMesh.castShadow=true;scene.add(consoleMesh);
   const table=new THREE.Mesh(new THREE.CylinderGeometry(2.15,2.3,.72,40),new THREE.MeshStandardMaterial({color:0x355064,metalness:.75,roughness:.28}));table.position.set(0,.36,0);table.castShadow=true;scene.add(table);const emergency=new THREE.Mesh(new THREE.CylinderGeometry(.52,.6,.25,32),new THREE.MeshStandardMaterial({color:0xd82e3c,emissive:0x5b0810}));emergency.position.set(0,.86,0);scene.add(emergency);
   Object.entries(TASKS).forEach(([id,[,x,z]],i)=>{const g=new THREE.Group();const base=new THREE.Mesh(new THREE.BoxGeometry(1.25,1.35,.65),new THREE.MeshStandardMaterial({color:0x26384b,metalness:.72,roughness:.3}));base.position.y=.68;base.castShadow=true;g.add(base);const screen=new THREE.Mesh(new THREE.PlaneGeometry(.86,.48),new THREE.MeshBasicMaterial({color:[0x48eaff,0x73ff93,0xffcb4e,0xff719e][i%4]}));screen.position.set(0,.88,.331);g.add(screen);g.position.set(x,0,z);scene.add(g)});
+  const cargoDock=new THREE.Group();const dockBase=new THREE.Mesh(new THREE.BoxGeometry(1.8,.25,1.5),new THREE.MeshStandardMaterial({color:0x75512f,metalness:.18,roughness:.72}));dockBase.position.y=.13;dockBase.castShadow=true;cargoDock.add(dockBase);const dockGlow=new THREE.Mesh(new THREE.PlaneGeometry(1.45,1.15),new THREE.MeshBasicMaterial({color:0xffc95c,transparent:true,opacity:.32,side:THREE.DoubleSide}));dockGlow.rotation.x=-Math.PI/2;dockGlow.position.y=.265;cargoDock.add(dockGlow);cargoDock.position.set(CARGO_DELIVERY.x,0,CARGO_DELIVERY.z);scene.add(cargoDock);
   const addLocker=(locker)=>{const group=new THREE.Group();const shellMat=new THREE.MeshStandardMaterial({color:0x28445a,metalness:.78,roughness:.3});const darkMat=new THREE.MeshStandardMaterial({color:0x07131f,metalness:.35,roughness:.55});const shell=new THREE.Mesh(new THREE.BoxGeometry(1.15,2.55,.9),shellMat);shell.position.y=1.275;shell.castShadow=true;group.add(shell);const recess=new THREE.Mesh(new THREE.BoxGeometry(.86,2.15,.08),darkMat);recess.position.set(0,1.25,.47);group.add(recess);const doorPivot=new THREE.Group();doorPivot.position.set(-.46,0,.52);const door=new THREE.Mesh(new THREE.BoxGeometry(.9,2.18,.08),new THREE.MeshStandardMaterial({color:0x3b6680,metalness:.82,roughness:.25}));door.position.set(.45,1.25,0);door.castShadow=true;doorPivot.add(door);const handle=new THREE.Mesh(new THREE.BoxGeometry(.06,.3,.07),new THREE.MeshBasicMaterial({color:0x9cecff}));handle.position.set(.78,1.2,.07);doorPivot.add(handle);group.add(doorPivot);const lamp=new THREE.Mesh(new THREE.SphereGeometry(.08,12,8),new THREE.MeshBasicMaterial({color:0x63f4ff}));lamp.position.set(0,2.38,.53);group.add(lamp);group.position.set(locker.x,0,locker.z);group.rotation.y=locker.rot;group.userData={doorPivot,lamp,open:0,lockerId:locker.id};scene.add(group);lockerVisuals.set(locker.id,group)};LOCKERS.forEach(addLocker);
   const starGeo=new THREE.BufferGeometry(),pts=[];for(let i=0;i<1500;i++)pts.push((Math.random()-.5)*150,Math.random()*52+5,(Math.random()-.5)*150);starGeo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:.09})));
 }
-function createCrewmate(c){const group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[c]||0xffffff,roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=true;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=true;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=true;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);group.userData.target=new THREE.Vector3();group.userData.rotation=0;return group}
+function createCrewmate(c){const group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[c]||0xffffff,roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=true;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=true;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=true;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);const cargoBox=createCargoParcel(.82);cargoBox.position.set(0,1.02,.94);cargoBox.visible=false;group.add(cargoBox);group.userData.cargoBox=cargoBox;group.userData.target=new THREE.Vector3();group.userData.rotation=0;return group}
 function syncModels(){
   if(!state)return;
   const active=new Set();
@@ -397,6 +437,7 @@ function syncModels(){
       m.rotation.y=p.rotation||0;
     }
     m.visible=!p.reported&&!p.hidden;
+    if(m.userData.cargoBox)m.userData.cargoBox.visible=Boolean(p.carryingCargo)&&(p.alive&&!p.hidden&&!p.reported);
     if(renderMode==='3d')m.traverse(o=>{if(o.material){o.material.transparent=!p.alive;o.material.opacity=p.alive?1:.28}});
     if(p.id===myId){
       localModel=m;
@@ -437,7 +478,7 @@ function updateCooldown(){
   if(ui.killCooldown)ui.killCooldown.textContent=remaining>0?`${Math.ceil(remaining/1000)}秒`:'';
   if(ui.kill&&me()?.role==='impostor')ui.kill.disabled=!canKill()||!nearest.player;
 }
-function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'侵入者':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は侵入者だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${TASKS[t]?.[0]||t}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();}
+function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'侵入者':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は侵入者だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();}
 function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;if(ui.sabotageTitle)ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind]||'妨害発生';if(ui.sabotageTimer)ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
 let animationFrameId=0;
 let miniMapEnabled=true;
@@ -458,6 +499,7 @@ function animate(){
     updateNearest();
     if(renderMode==='3d'&&renderer&&scene&&camera){
       updateLockerVisuals(dt);
+      updateCargoCarryVisual();
       updateCamera(dt);
       // HUD側で問題が起きても、ゲーム画面だけは先に描画して見える状態を保つ。
       renderer.render(scene,camera);
@@ -655,7 +697,7 @@ function updateCamera(dt=.016){
 }
 
 function updateNearest(){
-  nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};
+  nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};
   if(!localModel||!state)return;
   const p=me();
   let best=99;
@@ -665,17 +707,18 @@ function updateNearest(){
   if(p?.hidden&&p.hiddenAt){nearest.locker=LOCKERS.find(l=>l.id===p.hiddenAt)||null}else if(!p?.hidden){nearest.locker=LOCKERS.map(l=>({...l,d:Math.hypot(localModel.position.x-l.exitX,localModel.position.z-l.exitZ)})).filter(l=>l.d<=2.0).sort((a,b)=>a.d-b.d)[0]||null}
   nearest.security=Math.hypot(localModel.position.x-SECURITY_CONSOLE.x,localModel.position.z-SECURITY_CONSOLE.z)<=2.2;
   nearest.emergency=Math.hypot(localModel.position.x-EMERGENCY_BUTTON.x,localModel.position.z-EMERGENCY_BUTTON.z)<=2.8;
-  ui.use.disabled=!nearest.task;
+  nearest.cargoDelivery=cargoCarryActive&&Math.hypot(localModel.position.x-CARGO_DELIVERY.x,localModel.position.z-CARGO_DELIVERY.z)<=2.25;
+  ui.use.disabled=!nearest.task&&!nearest.cargoDelivery;ui.use.innerHTML=nearest.cargoDelivery?'荷物を置く <kbd>E</kbd>':'使用 <kbd>E</kbd>';
   ui.report.disabled=!nearest.body;
   ui.kill.disabled=!nearest.player||!canKill();
   const hide=$('hideButton'),security=$('securityButton');
   if(hide){hide.disabled=!p?.alive||p?.spectator||(!p?.hidden&&!nearest.locker);hide.textContent=p?.hidden?'ロッカーから出る':'ロッカーに隠れる';hide.classList.toggle('interaction-ready',!!nearest.locker)}
   if(security){security.disabled=!nearest.security||!!p?.hidden;security.classList.toggle('interaction-ready',nearest.security)}
   if(ui.meeting){ui.meeting.disabled=!nearest.emergency||!!p?.hidden;ui.meeting.classList.toggle('interaction-ready',nearest.emergency)}
-  const hint=$('interactionHint');if(hint){let text='';if(p?.hidden)text='ロッカー内：ボタンを押すと外へ出ます';else if(nearest.locker)text='ロッカーに近づきました：隠れることができます';else if(nearest.security)text='監視端末に近づきました：カメラを確認できます';else if(nearest.emergency)text='緊急ボタンに近づきました：会議を開けます';else if(nearest.task)text='端末に近づきました：使用できます';hint.textContent=text;hint.classList.toggle('show',!!text)}
+  const hint=$('interactionHint');if(hint){let text='';if(p?.hidden)text='ロッカー内：ボタンを押すと外へ出ます';else if(nearest.locker)text='ロッカーに近づきました：隠れることができます';else if(nearest.security)text='監視端末に近づきました：カメラを確認できます';else if(nearest.emergency)text='緊急ボタンに近づきました：会議を開けます';else if(nearest.cargoDelivery)text='管理室の搬入口です：運んだ荷物を置けます';else if(nearest.task)text='端末に近づきました：使用できます';hint.textContent=text;hint.classList.toggle('show',!!text)}
 }
 function updateLockerVisuals(dt){const p=me();for(const locker of LOCKERS){const visual=lockerVisuals.get(locker.id);if(!visual)continue;const occupied=(state?.players||[]).some(x=>x.hidden&&x.hiddenAt===locker.id);const nearby=nearest.locker?.id===locker.id;const target=occupied?1:(nearby?.22:0);visual.userData.open+=(target-visual.userData.open)*(1-Math.exp(-10*dt));visual.userData.doorPivot.rotation.y=-visual.userData.open*1.45;visual.userData.lamp.material.color.setHex(occupied?0xffb347:nearby?0x77ff9c:0x63f4ff)}}
-function useAction(){const p=me();if(!p)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(!nearest.task)return;if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}if(p.role!=='impostor'&&!p.spectator&&(p.tasks||[]).includes(nearest.task)&&!(p.completedTasks||[]).includes(nearest.task))openTask(nearest.task);else showNotice('この端末に用事はありません')}
+function useAction(){const p=me();if(!p)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(nearest.cargoDelivery&&cargoCarryActive){openTask('cargoDelivery');return}if(!nearest.task)return;if(nearest.task==='cargo'&&cargoCarryActive){showNotice('荷物を管理室の搬入口まで運んでください');return}if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}if(p.role!=='impostor'&&!p.spectator&&(p.tasks||[]).includes(nearest.task)&&!(p.completedTasks||[]).includes(nearest.task))openTask(nearest.task);else showNotice('この端末に用事はありません')}
 function reportAction(){if(nearest.body)send('report',{bodyId:nearest.body});else showNotice('近くに通報できる対象がありません')}function attackAction(){const p=me();if(!p||state?.phase!=='playing')return;if(p.role!=='impostor'){showNotice('攻撃は侵入者だけが使えます');return}if(!canKill()){showNotice('攻撃のクールダウン中です');return}if(!nearest.player){showNotice('攻撃できる相手に近づいてください');return}send('kill',{targetId:nearest.player})}function meetingAction(){if(!nearest.emergency){showNotice('中央の緊急ボタンに近づいてください');return}send('meeting')}
 ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{if(renderMode!=='3d'||!camera){showNotice('軽量マップでは見下ろし視点で固定されます。');return}cameraMode=(cameraMode+1)%3;if(cameraMode===2&&localModel){const currentYaw=Number(localModel.rotation.y);firstPersonYaw=clearFirstPersonDirection(Number.isFinite(currentYaw)?currentYaw:Math.PI);firstPersonTargetYaw=firstPersonYaw;firstPersonInputBaseYaw=firstPersonYaw;firstPersonInputSignature='';camera.position.set(localModel.position.x,localModel.position.y+1.72,localModel.position.z)}else{const p=me();if(localModel)localModel.visible=p?!p.reported&&!p.hidden:true;snapCameraToCurrentMode()}const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(labels[cameraMode]);$('cameraButton').textContent=`${labels[(cameraMode+1)%3]}へ切替`};
 ui.settings.onclick=()=>{const s=state.settings||{};$('settingImpostors').value=s.impostors;$('settingTasks').value=s.tasks;$('settingSpeed').value=s.speed;$('settingKillCooldown').value=s.killCooldown;$('settingMeeting').value=s.meetingTime;$('settingReveal').value=s.revealRoles?'yes':'no';openDialog('settingsDialog')};$('saveSettingsButton').onclick=()=>{send('settings',{settings:{impostors:+$('settingImpostors').value,tasks:+$('settingTasks').value,speed:+$('settingSpeed').value,killCooldown:+$('settingKillCooldown').value,meetingTime:+$('settingMeeting').value,revealRoles:$('settingReveal').value==='yes'}});closeDialog('settingsDialog')};document.querySelectorAll('[data-sabotage]').forEach(b=>b.onclick=()=>{send('sabotage',{kind:b.dataset.sabotage});closeDialog('sabotageDialog')});document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog(b.dataset.close));
@@ -775,37 +818,165 @@ function openSecurity(){
   requestAnimationFrame(()=>{ensureSecurityViewer();resizeSecurityViewer();setSecurityCamera(securityCameraIndex);renderSecurityFeed()});
 }
 $('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{if(!nearest.security){showNotice('SECURITYの監視端末に近づいてください');return}openSecurity()};$('securityPrevButton').onclick=()=>setSecurityCamera(securityCameraIndex-1);$('securityNextButton').onclick=()=>setSecurityCamera(securityCameraIndex+1);$('securityDialog').addEventListener('close',()=>{securityOpen=false;clearKeys()});$('tutorialButton').onclick=()=>openDialog('tutorialDialog');$('colorSelect').onchange=$('hatSelect').onchange=()=>{if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
+let activeTaskCleanup=()=>{},activeTaskFinished=false,activeTaskId=null,activeTaskCompletionId=null;
+function resetTaskRuntime(){
+  const cleanup=activeTaskCleanup;activeTaskCleanup=()=>{};
+  try{cleanup()}catch(error){console.warn('[Hidden Crew] task cleanup failed',error)}
+  activeTaskFinished=false;activeTaskId=null;activeTaskCompletionId=null;
+  const root=$('taskGame');if(root){root.className='';root.innerHTML=''}
+}
+function registerTaskCleanup(...cleanups){
+  const previous=activeTaskCleanup;
+  activeTaskCleanup=()=>{previous();for(const cleanup of cleanups){try{cleanup?.()}catch{}}};
+}
+function finishInteractiveTask(id){if(activeTaskFinished||activeTaskCompletionId!==id||!$('taskDialog')?.open)return;activeTaskFinished=true;finishTask(id)}
+function pointInside(element,clientX,clientY,padding=0){
+  if(!element)return false;const rect=element.getBoundingClientRect();
+  return clientX>=rect.left+padding&&clientX<=rect.right-padding&&clientY>=rect.top+padding&&clientY<=rect.bottom-padding;
+}
+function bindTaskDrag(element,{onStart,onMove,onDrop,disabled}={}){
+  let pointerId=null,grabX=0,grabY=0,startLeft=0,startTop=0;
+  const parent=element.parentElement;
+  const down=e=>{
+    if(pointerId!==null||disabled?.()||element.dataset.locked==='yes'||(e.button!==undefined&&e.button>0))return;
+    e.preventDefault();const er=element.getBoundingClientRect();pointerId=e.pointerId;grabX=e.clientX-er.left;grabY=e.clientY-er.top;
+    startLeft=element.offsetLeft;startTop=element.offsetTop;element.classList.add('dragging');
+    try{element.setPointerCapture?.(e.pointerId)}catch{}
+    onStart?.(e);
+  };
+  const move=e=>{
+    if(pointerId!==e.pointerId)return;e.preventDefault();const pr=parent.getBoundingClientRect();
+    const left=Math.max(0,Math.min(parent.clientWidth-element.offsetWidth,e.clientX-pr.left-grabX));
+    const top=Math.max(0,Math.min(parent.clientHeight-element.offsetHeight,e.clientY-pr.top-grabY));
+    element.style.left=`${left}px`;element.style.top=`${top}px`;onMove?.(e,{left,top,parentRect:pr});
+  };
+  const end=e=>{
+    if(pointerId!==e.pointerId)return;e.preventDefault();element.classList.remove('dragging');
+    try{element.releasePointerCapture?.(pointerId)}catch{}pointerId=null;
+    const keep=onDrop?.(e,{startLeft,startTop});
+    if(keep===false){element.classList.add('returning');element.style.left=`${startLeft}px`;element.style.top=`${startTop}px`;setTimeout(()=>element.classList.remove('returning'),220)}
+  };
+  element.addEventListener('pointerdown',down,{passive:false});
+  document.addEventListener('pointermove',move,{passive:false});document.addEventListener('pointerup',end,{passive:false});document.addEventListener('pointercancel',end,{passive:false});
+  return()=>{element.removeEventListener('pointerdown',down);document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.removeEventListener('pointercancel',end)};
+}
+function snapTaskElement(element,target,parent){
+  const pr=parent.getBoundingClientRect(),tr=target.getBoundingClientRect();
+  element.style.left=`${tr.left-pr.left+(tr.width-element.offsetWidth)/2}px`;
+  element.style.top=`${tr.top-pr.top+(tr.height-element.offsetHeight)/2}px`;
+}
 function openTask(id){
-  $('taskTitle').textContent=TASKS[id]?.[0]||'TASK';
-  const root=$('taskGame');root.innerHTML='';
-  if(id==='wires'){
-    root.innerHTML='<p>1→5の順に押してください</p>';let n=1;[1,2,3,4,5].sort(()=>Math.random()-.5).forEach(v=>{const b=document.createElement('button');b.textContent=v;b.onclick=()=>{if(v===n){b.disabled=true;n++;if(n===6)finishTask(id)}else showNotice('順番が違います')};root.append(b)});
-  }else if(id==='scanner'){
-    root.innerHTML='<p>スキャン完了までボタンを押し続けてください。</p><button id="scanHold">長押し</button><div class="progress"><i id="scanBar"></i></div>';let v=0,t;const b=$('scanHold');const start=()=>{if(t)return;t=setInterval(()=>{v+=4;$('scanBar').style.width=v+'%';if(v>=100){clearInterval(t);t=null;finishTask(id)}},60)};const stop=()=>{clearInterval(t);t=null};b.onpointerdown=start;b.onpointerup=stop;b.onpointercancel=stop;b.onpointerleave=stop;
+  resetTaskRuntime();activeTaskFinished=false;activeTaskId=id;activeTaskCompletionId=id==='cargoDelivery'?'cargo':id;
+  $('taskTitle').textContent=id==='cargoDelivery'?'貨物の納品':TASKS[id]?.[0]||'TASK';
+  const root=$('taskGame');root.className='task-realistic';root.innerHTML='';
+
+  if(id==='cargoDelivery'){
+    root.innerHTML=`<p class="task-guide">運んできた荷物を搬入口の黄色い枠へ置いてください。</p><div class="cargo-delivery task-board" id="cargoDeliveryBoard"><div class="delivery-shelf"><span>納品棚</span></div><div class="delivery-zone" id="deliveryZone">ここへ置く</div><button class="cargo-crate cargo-a carried" id="deliveryCrate" style="left:8%;top:58%"><span>▦</span><b>貨物</b></button></div><p class="task-status">荷物を置くとタスク完了です</p>`;
+    const board=$('cargoDeliveryBoard'),crate=$('deliveryCrate'),zone=$('deliveryZone');const cleanup=bindTaskDrag(crate,{onDrop:e=>{if(!pointInside(zone,e.clientX,e.clientY,-8)){showNotice('黄色い納品枠へ置いてください');return false}snapTaskElement(crate,zone,board);crate.dataset.locked='yes';crate.classList.add('placed');zone.classList.add('filled');setCargoCarry(false,{sync:false});updateUI();finishInteractiveTask('cargo');return true}});registerTaskCleanup(cleanup);
+
   }else if(id==='cargo'){
-    root.innerHTML='<p>貨物を6回整理してください。</p><button id="cargoBtn">貨物を移動</button> <b id="cargoCount">0/6</b>';let n=0;$('cargoBtn').onclick=()=>{$('cargoCount').textContent=`${++n}/6`;if(n>=6)finishTask(id)};
+    root.innerHTML=`<p class="task-guide">3個の荷物を運搬コンテナへ積み込みます。積み込み後は、実際に管理室まで運んでください。</p>
+      <div class="cargo-bay task-board" id="cargoBay">
+        <div class="cargo-conveyor"><span>搬入口</span></div>
+        <div class="cargo-rack-label">運搬コンテナ</div>
+        <div class="cargo-slot" data-cargo-slot="A" style="left:67%;top:13%"><b>A</b></div>
+        <div class="cargo-slot" data-cargo-slot="B" style="left:67%;top:42%"><b>B</b></div>
+        <div class="cargo-slot" data-cargo-slot="C" style="left:67%;top:71%"><b>C</b></div>
+        <button class="cargo-crate cargo-a" data-cargo="A" style="left:8%;top:13%" aria-label="荷物A"><span>▦</span><b>A</b></button>
+        <button class="cargo-crate cargo-b" data-cargo="B" style="left:25%;top:42%" aria-label="荷物B"><span>▤</span><b>B</b></button>
+        <button class="cargo-crate cargo-c" data-cargo="C" style="left:8%;top:71%" aria-label="荷物C"><span>▥</span><b>C</b></button>
+      </div><p id="cargoStatus" class="task-status">0 / 3　積み込み済み</p>`;
+    const bay=$('cargoBay');let placed=0;const cleanups=[];
+    bay.querySelectorAll('.cargo-crate').forEach(crate=>cleanups.push(bindTaskDrag(crate,{onDrop:e=>{
+      const target=bay.querySelector(`[data-cargo-slot="${crate.dataset.cargo}"]`);
+      if(!pointInside(target,e.clientX,e.clientY,-8)){showNotice('同じ記号のコンテナ枠へ運んでください');return false}
+      snapTaskElement(crate,target,bay);crate.dataset.locked='yes';crate.classList.add('placed');target.classList.add('filled');
+      $('cargoStatus').textContent=`${++placed} / 3　積み込み済み`;if(placed===3)setTimeout(()=>{if(activeTaskId!=='cargo'||!$('taskDialog')?.open)return;setCargoCarry(true);updateUI();closeDialog('taskDialog');showNotice('荷物を持ちました。管理室の黄色い搬入口まで運んでください')},450);return true;
+    }})));
+    registerTaskCleanup(...cleanups);
+
+  }else if(id==='wires'){
+    const colors=[['red','#ff5364'],['cyan','#45dfff'],['yellow','#ffd85a'],['lime','#7dff8a']];
+    const right=[...colors].sort(()=>Math.random()-.5);
+    root.innerHTML=`<p class="task-guide">左のケーブル端子を、右側の同じ色の差込口まで引いて接続してください。</p><div class="wire-board task-board" id="wireBoard"><svg id="wireSvg"></svg><div class="wire-column left"></div><div class="wire-column right"></div></div><p id="wireStatus" class="task-status">0 / 4　接続済み</p>`;
+    const board=$('wireBoard'),left=board.querySelector('.left'),rightCol=board.querySelector('.right'),svg=$('wireSvg');let connected=0;const cleanups=[];
+    colors.forEach(([name,color],index)=>{const node=document.createElement('button');node.className='wire-socket wire-source';node.dataset.wire=name;node.style.setProperty('--wire-color',color);node.style.top=`${12+index*24}%`;node.innerHTML='<span></span>';left.append(node)});
+    right.forEach(([name,color],index)=>{const node=document.createElement('div');node.className='wire-socket wire-target';node.dataset.wireTarget=name;node.style.setProperty('--wire-color',color);node.style.top=`${12+index*24}%`;node.innerHTML='<span></span>';rightCol.append(node)});
+    board.querySelectorAll('.wire-source').forEach(source=>{
+      let pointer=null,line=null;
+      const down=e=>{if(source.dataset.locked==='yes')return;e.preventDefault();pointer=e.pointerId;const br=board.getBoundingClientRect(),sr=source.getBoundingClientRect();line=document.createElementNS('http://www.w3.org/2000/svg','line');line.setAttribute('x1',String(sr.left-br.left+sr.width/2));line.setAttribute('y1',String(sr.top-br.top+sr.height/2));line.setAttribute('x2',String(e.clientX-br.left));line.setAttribute('y2',String(e.clientY-br.top));line.style.stroke=getComputedStyle(source).getPropertyValue('--wire-color');svg.append(line);try{source.setPointerCapture?.(pointer)}catch{}};
+      const move=e=>{if(pointer!==e.pointerId||!line)return;e.preventDefault();const br=board.getBoundingClientRect();line.setAttribute('x2',String(e.clientX-br.left));line.setAttribute('y2',String(e.clientY-br.top))};
+      const end=e=>{if(pointer!==e.pointerId)return;e.preventDefault();pointer=null;const hit=document.elementFromPoint(e.clientX,e.clientY)?.closest?.('.wire-target');if(hit&&hit.dataset.wireTarget===source.dataset.wire){const br=board.getBoundingClientRect(),hr=hit.getBoundingClientRect();line.setAttribute('x2',String(hr.left-br.left+hr.width/2));line.setAttribute('y2',String(hr.top-br.top+hr.height/2));source.dataset.locked='yes';source.classList.add('connected');hit.classList.add('connected');$('wireStatus').textContent=`${++connected} / 4　接続済み`;if(connected===4)setTimeout(()=>finishInteractiveTask(id),350)}else{line?.remove();showNotice('同じ色の差込口へつないでください')}line=null};
+      source.addEventListener('pointerdown',down,{passive:false});document.addEventListener('pointermove',move,{passive:false});document.addEventListener('pointerup',end,{passive:false});document.addEventListener('pointercancel',end,{passive:false});
+      cleanups.push(()=>{source.removeEventListener('pointerdown',down);document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.removeEventListener('pointercancel',end)});
+    });registerTaskCleanup(...cleanups);
+
+  }else if(id==='scanner'){
+    root.innerHTML=`<p class="task-guide">手をスキャナーに置いたまま動かさず、認証が終わるまで押し続けてください。</p><div class="scan-console"><div class="scan-hand">✋<i></i></div><div class="scan-readout"><span id="scanPercent">0%</span><div class="task-meter"><i id="scanBar"></i></div></div></div><button id="scanHold" class="primary task-hold">押したままスキャン</button>`;
+    let value=0,timer=0;const b=$('scanHold'),hand=root.querySelector('.scan-hand');
+    const stop=()=>{if(timer){clearInterval(timer);timer=0}hand.classList.remove('active')};
+    const start=e=>{e.preventDefault();if(timer)return;hand.classList.add('active');timer=setInterval(()=>{value=Math.min(100,value+1.7);$('scanBar').style.width=`${value}%`;$('scanPercent').textContent=`${Math.round(value)}%`;if(value>=100){stop();finishInteractiveTask(id)}},50)};
+    b.addEventListener('pointerdown',start,{passive:false});b.addEventListener('pointerup',stop);b.addEventListener('pointercancel',stop);b.addEventListener('pointerleave',stop);registerTaskCleanup(()=>{stop();b.removeEventListener('pointerdown',start);b.removeEventListener('pointerup',stop);b.removeEventListener('pointercancel',stop);b.removeEventListener('pointerleave',stop)});
+
   }else if(id==='fuel'){
-    root.innerHTML='<p>燃料メーターを満タンにしてください。</p><input id="fuelRange" type="range" min="0" max="100" value="0">';$('fuelRange').oninput=e=>{if(+e.target.value>=100)finishTask(id)};
+    root.innerHTML=`<p class="task-guide">給油ノズルを燃料口へ差し込み、その後レバーを押し続けて満タンにしてください。</p><div class="fuel-station task-board" id="fuelStation"><div class="fuel-tank"><div id="fuelLiquid"></div><span id="fuelPercent">0%</span></div><div class="fuel-port" id="fuelPort">給油口</div><button class="fuel-nozzle" id="fuelNozzle" style="left:8%;top:62%">⛽<small>ノズル</small></button></div><button id="fuelPump" class="primary task-hold" disabled>レバーを押して給油</button>`;
+    const station=$('fuelStation'),nozzle=$('fuelNozzle'),port=$('fuelPort'),pump=$('fuelPump');let connected=false,value=0,timer=0;
+    const dragCleanup=bindTaskDrag(nozzle,{onDrop:e=>{if(!pointInside(port,e.clientX,e.clientY,-10)){showNotice('ノズルを給油口へ差し込んでください');return false}snapTaskElement(nozzle,port,station);nozzle.dataset.locked='yes';nozzle.classList.add('connected');connected=true;pump.disabled=false;return true}});
+    const stop=()=>{if(timer){clearInterval(timer);timer=0}};const start=e=>{e.preventDefault();if(!connected||timer)return;timer=setInterval(()=>{value=Math.min(100,value+2);$('fuelLiquid').style.height=`${value}%`;$('fuelPercent').textContent=`${Math.round(value)}%`;if(value>=100){stop();finishInteractiveTask(id)}},55)};
+    pump.addEventListener('pointerdown',start,{passive:false});pump.addEventListener('pointerup',stop);pump.addEventListener('pointercancel',stop);pump.addEventListener('pointerleave',stop);registerTaskCleanup(dragCleanup,()=>{stop();pump.removeEventListener('pointerdown',start);pump.removeEventListener('pointerup',stop);pump.removeEventListener('pointercancel',stop);pump.removeEventListener('pointerleave',stop)});
+
   }else if(id==='align'){
-    root.innerHTML='<p>航路マーカーを中央へ合わせてください。</p><input id="alignRange" type="range" min="0" max="100" value="10">';$('alignRange').onchange=e=>{if(Math.abs(+e.target.value-50)<6)finishTask(id);else showNotice('中央に合わせてください')};
+    const tx=48+Math.round((Math.random()-.5)*20),ty=45+Math.round((Math.random()-.5)*18);
+    root.innerHTML=`<p class="task-guide">航路艇をドラッグし、点滅しているドッキングリングの中央へ合わせてください。</p><div class="nav-radar task-board" id="navRadar"><div class="radar-grid"></div><div class="nav-target" id="navTarget" style="left:${tx}%;top:${ty}%"></div><button class="nav-ship" id="navShip" style="left:7%;top:72%">▲</button></div><p class="task-status">リング中央で自動ロックします</p>`;
+    const radar=$('navRadar'),ship=$('navShip'),target=$('navTarget');const cleanup=bindTaskDrag(ship,{onDrop:e=>{if(!pointInside(target,e.clientX,e.clientY,-10)){showNotice('点滅するリングの中央へ合わせてください');return false}snapTaskElement(ship,target,radar);ship.dataset.locked='yes';ship.classList.add('docked');target.classList.add('locked');setTimeout(()=>finishInteractiveTask(id),650);return true}});registerTaskCleanup(cleanup);
+
   }else if(id==='engine'){
-    root.innerHTML='<p>出力を75付近に合わせてください。</p><input id="engineRange" type="range" min="0" max="100" value="20"><b id="engineValue">20%</b>';$('engineRange').oninput=e=>{$('engineValue').textContent=`${e.target.value}%`};$('engineRange').onchange=e=>{if(Math.abs(+e.target.value-75)<=5)finishTask(id);else showNotice('75付近に合わせてください')};
+    root.innerHTML=`<p class="task-guide">出力レバーを緑色の範囲へ動かし、安定するまでその位置を保ってください。</p><div class="engine-console"><div class="engine-track" id="engineTrack"><div class="engine-safe"></div><button id="engineKnob" class="engine-knob" style="bottom:12%"></button></div><div class="engine-gauge"><b id="engineValue">12%</b><span id="engineState">出力不足</span><div class="task-meter"><i id="engineStable"></i></div></div></div>`;
+    const track=$('engineTrack'),knob=$('engineKnob');let pointer=null,stableTimer=0,stableStart=0,raf=0,current=12;
+    const cancelStable=()=>{stableStart=0;$('engineStable').style.width='0%';if(raf){cancelAnimationFrame(raf);raf=0}};
+    const stabilityTick=now=>{if(!stableStart)stableStart=now;const progress=Math.min(1,(now-stableStart)/1300);$('engineStable').style.width=`${progress*100}%`;if(progress>=1){finishInteractiveTask(id);return}raf=requestAnimationFrame(stabilityTick)};
+    const setValue=e=>{const r=track.getBoundingClientRect();current=Math.round(Math.max(0,Math.min(100,(r.bottom-e.clientY)/r.height*100)));knob.style.bottom=`calc(${current}% - 15px)`;$('engineValue').textContent=`${current}%`;const good=current>=70&&current<=80;$('engineState').textContent=good?'出力安定中…':current<70?'出力不足':'出力過大';$('engineState').classList.toggle('good',good);if(good&&!raf){stableStart=0;raf=requestAnimationFrame(stabilityTick)}else if(!good)cancelStable()};
+    const down=e=>{if(pointer!==null)return;e.preventDefault();pointer=e.pointerId;setValue(e);try{knob.setPointerCapture?.(pointer)}catch{}};const move=e=>{if(pointer===e.pointerId){e.preventDefault();setValue(e)}};const end=e=>{if(pointer===e.pointerId)pointer=null};
+    knob.addEventListener('pointerdown',down,{passive:false});track.addEventListener('pointerdown',down,{passive:false});document.addEventListener('pointermove',move,{passive:false});document.addEventListener('pointerup',end);document.addEventListener('pointercancel',end);registerTaskCleanup(()=>{cancelStable();knob.removeEventListener('pointerdown',down);track.removeEventListener('pointerdown',down);document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.removeEventListener('pointercancel',end)});
+
   }else if(id==='security'){
-    root.innerHTML='<p>点灯する順番を覚えて押してください。</p><div id="securityButtons"></div>';const order=[0,1,2,3].sort(()=>Math.random()-.5),holder=$('securityButtons');let pos=0;for(let i=0;i<4;i++){const b=document.createElement('button');b.textContent='●';b.disabled=true;holder.append(b)}order.forEach((idx,i)=>setTimeout(()=>{holder.children[idx].classList.add('primary');setTimeout(()=>holder.children[idx].classList.remove('primary'),320)},350+i*520));setTimeout(()=>{[...holder.children].forEach((b,idx)=>{b.disabled=false;b.onclick=()=>{if(idx===order[pos]){b.disabled=true;pos++;if(pos===order.length)finishTask(id)}else{pos=0;showNotice('順番が違います')}}})},2600);
+    root.innerHTML='<p class="task-guide">監視ログに点灯する順番を覚え、同じ順番で端末を押してください。</p><div class="security-sequence" id="securityButtons"></div><p id="securityStatus" class="task-status">ログを再生中…</p>';const order=[0,1,2,3,4].sort(()=>Math.random()-.5),holder=$('securityButtons');let pos=0,timeouts=[];
+    for(let i=0;i<5;i++){const b=document.createElement('button');b.innerHTML=`<span>CAM ${String(i+1).padStart(2,'0')}</span><i></i>`;b.disabled=true;holder.append(b)}
+    order.forEach((idx,i)=>timeouts.push(setTimeout(()=>{holder.children[idx].classList.add('signal');timeouts.push(setTimeout(()=>holder.children[idx].classList.remove('signal'),420))},450+i*620)));
+    timeouts.push(setTimeout(()=>{ $('securityStatus').textContent='同じ順番で入力してください';[...holder.children].forEach((b,idx)=>{b.disabled=false;b.onclick=()=>{if(idx===order[pos]){b.disabled=true;b.classList.add('accepted');pos++;$('securityStatus').textContent=`${pos} / ${order.length}　確認済み`;if(pos===order.length)setTimeout(()=>finishInteractiveTask(id),350)}else{pos=0;[...holder.children].forEach(x=>{x.disabled=false;x.classList.remove('accepted')});showNotice('順番が違います。最初から入力してください')}}})},order.length*620+650));registerTaskCleanup(()=>timeouts.forEach(clearTimeout));
+
   }else if(id==='comms'){
-    const target=20+Math.floor(Math.random()*61);root.innerHTML=`<p>周波数を <b>${target}</b> に合わせてください。</p><input id="commsRange" type="range" min="0" max="100" value="0"><b id="commsValue">0</b>`;$('commsRange').oninput=e=>{$('commsValue').textContent=e.target.value};$('commsRange').onchange=e=>{if(Math.abs(+e.target.value-target)<=2)finishTask(id);else showNotice('周波数が合っていません')};
+    const targetFreq=30+Math.floor(Math.random()*41),targetPhase=25+Math.floor(Math.random()*51);
+    root.innerHTML=`<p class="task-guide">周波数と位相を調整し、2本の波形を重ねてから通信を固定してください。</p><div class="comms-scope"><div class="scope-wave target"></div><div id="scopeWave" class="scope-wave live"></div><span id="commsQuality">信号品質 0%</span></div><label class="dial-row">周波数 <input id="commsFreq" type="range" min="0" max="100" value="0"><b id="freqValue">0</b></label><label class="dial-row">位相 <input id="commsPhase" type="range" min="0" max="100" value="0"><b id="phaseValue">0</b></label><button id="commsLock" class="primary">通信を固定</button>`;
+    const freq=$('commsFreq'),phase=$('commsPhase'),wave=$('scopeWave');const update=()=>{const f=+freq.value,p=+phase.value;$('freqValue').textContent=f;$('phaseValue').textContent=p;const quality=Math.max(0,100-Math.abs(f-targetFreq)*3-Math.abs(p-targetPhase)*3);$('commsQuality').textContent=`信号品質 ${Math.round(quality)}%`;wave.style.setProperty('--freq',String(1+f/35));wave.style.transform=`translateY(${(p-targetPhase)*.35}px)`;wave.classList.toggle('matched',quality>=90)};freq.oninput=phase.oninput=update;$('commsLock').onclick=()=>{if(Math.abs(+freq.value-targetFreq)<=3&&Math.abs(+phase.value-targetPhase)<=3)finishInteractiveTask(id);else showNotice('波形がまだ一致していません')};update();
+
   }else if(id==='shield'){
-    root.innerHTML='<p>すべてのシールド区画を起動してください。</p><div id="shieldGrid"></div>';const grid=$('shieldGrid');let remaining=6;for(let i=0;i<6;i++){const b=document.createElement('button');b.textContent='OFF';b.onclick=()=>{if(b.disabled)return;b.disabled=true;b.textContent='ON';b.classList.add('primary');if(--remaining===0)finishTask(id)};grid.append(b)};
+    root.innerHTML='<p class="task-guide">点滅している区画を順番に長押しし、6区画すべてへ電力を送ってください。</p><div class="shield-core" id="shieldCore"><div class="shield-center">CORE</div></div><p id="shieldStatus" class="task-status">区画 1 を充電してください</p>';
+    const core=$('shieldCore');let current=0,timer=0;const buttons=[];
+    for(let i=0;i<6;i++){const b=document.createElement('button');b.className='shield-sector';b.style.setProperty('--angle',`${i*60}deg`);b.style.setProperty('--counter',`${-i*60}deg`);b.innerHTML=`<span>${i+1}</span><i></i>`;core.append(b);buttons.push(b)}
+    const refresh=()=>buttons.forEach((b,i)=>b.classList.toggle('active',i===current));refresh();
+    const stop=()=>{if(timer){clearInterval(timer);timer=0}buttons[current]?.style.removeProperty('--charge')};
+    buttons.forEach((b,index)=>{let charge=0;b.onpointerdown=e=>{e.preventDefault();if(index!==current||timer)return;charge=0;timer=setInterval(()=>{charge+=5;b.style.setProperty('--charge',`${charge}%`);if(charge>=100){stop();b.classList.add('powered');current++;$('shieldStatus').textContent=current>=6?'全区画同期完了':`区画 ${current+1} を充電してください`;refresh();if(current>=6)setTimeout(()=>finishInteractiveTask(id),450)}},45)};b.onpointerup=stop;b.onpointercancel=stop;b.onpointerleave=stop});registerTaskCleanup(stop);
+
   }else if(id==='weapons'){
-    root.innerHTML='<p>表示される標的を5回押してください。</p><button id="targetBtn">標的 1/5</button>';let hits=0;const b=$('targetBtn');b.onclick=()=>{hits++;if(hits>=5)finishTask(id);else{b.textContent=`標的 ${hits+1}/5`;b.style.transform=`translate(${Math.round((Math.random()-.5)*90)}px,${Math.round((Math.random()-.5)*35)}px)`}};
+    root.innerHTML='<p class="task-guide">照準を合わせ、移動する標的を5回命中させてください。</p><div class="weapon-range task-board" id="weaponRange"><div class="crosshair"></div><button id="targetBtn" class="moving-target" aria-label="標的"></button></div><p id="weaponStatus" class="task-status">命中 0 / 5</p>';
+    const range=$('weaponRange'),target=$('targetBtn');let hits=0,moveTimer=0;const relocate=()=>{target.style.left=`${8+Math.random()*78}%`;target.style.top=`${12+Math.random()*68}%`};target.onclick=e=>{e.preventDefault();hits++;$('weaponStatus').textContent=`命中 ${hits} / 5`;target.classList.add('hit');setTimeout(()=>target.classList.remove('hit'),150);if(hits>=5){clearInterval(moveTimer);setTimeout(()=>finishInteractiveTask(id),250)}else relocate()};relocate();moveTimer=setInterval(()=>{if(!activeTaskFinished)relocate()},1100);registerTaskCleanup(()=>clearInterval(moveTimer));
+
   }else if(id==='oxygen'){
-    root.innerHTML='<p>詰まったフィルターをすべて取り除いてください。</p><div id="filterGrid"></div>';const grid=$('filterGrid');let left=5;for(let i=0;i<5;i++){const b=document.createElement('button');b.textContent='フィルター';b.onclick=()=>{if(b.disabled)return;b.disabled=true;b.textContent='清掃済み';if(--left===0)finishTask(id)};grid.append(b)};
+    root.innerHTML='<p class="task-guide">フィルターに詰まった異物をつかみ、右下の廃棄ボックスまで運び出してください。</p><div class="filter-chamber task-board" id="filterChamber"><div class="airflow">AIR FLOW →</div><div class="waste-bin" id="wasteBin">廃棄</div></div><p id="filterStatus" class="task-status">異物 5個</p>';
+    const chamber=$('filterChamber'),bin=$('wasteBin');let leftCount=5;const cleanups=[];const positions=[[15,18],[39,26],[22,57],[48,66],[60,38]];
+    positions.forEach(([x,y],i)=>{const debris=document.createElement('button');debris.className=`filter-debris debris-${i%3}`;debris.style.left=`${x}%`;debris.style.top=`${y}%`;debris.textContent=['✦','●','◆'][i%3];chamber.append(debris);cleanups.push(bindTaskDrag(debris,{onDrop:e=>{if(!pointInside(bin,e.clientX,e.clientY,-8)){return false}debris.dataset.locked='yes';debris.classList.add('discarded');setTimeout(()=>debris.remove(),220);$('filterStatus').textContent=`異物 ${--leftCount}個`;if(leftCount===0)setTimeout(()=>finishInteractiveTask(id),450);return true}}))});registerTaskCleanup(...cleanups);
+
   }else{
-    root.innerHTML='<p>リアクターの波形を3回安定させてください。</p><button id="reactBtn">安定化 0/3</button>';let n=0;$('reactBtn').onclick=e=>{e.currentTarget.textContent=`安定化 ${++n}/3`;if(n>=3)finishTask(id)};
+    root.innerHTML=`<p class="task-guide">3本の制御棒を緑色の安定範囲へ合わせ、安定化ボタンを押し続けてください。</p><div class="reactor-panel"><div class="reactor-rods" id="reactorRods">${[1,2,3].map((n,i)=>`<label><span>ROD ${n}</span><input class="reactor-rod" type="range" min="0" max="100" value="${15+i*18}"><i></i></label>`).join('')}</div><div class="reactor-core"><span id="reactorReadout">不安定</span><div class="task-meter"><i id="reactorBar"></i></div></div></div><button id="reactHold" class="danger task-hold" disabled>押したまま安定化</button>`;
+    const rods=[...root.querySelectorAll('.reactor-rod')],hold=$('reactHold');let timer=0,progress=0;
+    const update=()=>{const ready=rods.every(r=>Math.abs(+r.value-50)<=7);rods.forEach(r=>r.parentElement.classList.toggle('aligned',Math.abs(+r.value-50)<=7));hold.disabled=!ready;$('reactorReadout').textContent=ready?'制御棒同期：保持してください':'制御棒を中央へ';if(!ready){progress=0;$('reactorBar').style.width='0%';if(timer){clearInterval(timer);timer=0}}};rods.forEach(r=>r.oninput=update);
+    const stop=()=>{if(timer){clearInterval(timer);timer=0}};const start=e=>{e.preventDefault();if(hold.disabled||timer)return;timer=setInterval(()=>{progress=Math.min(100,progress+3);$('reactorBar').style.width=`${progress}%`;if(progress>=100){stop();finishInteractiveTask(id)}},45)};hold.addEventListener('pointerdown',start,{passive:false});hold.addEventListener('pointerup',stop);hold.addEventListener('pointercancel',stop);hold.addEventListener('pointerleave',stop);update();registerTaskCleanup(()=>{stop();hold.removeEventListener('pointerdown',start);hold.removeEventListener('pointerup',stop);hold.removeEventListener('pointercancel',stop);hold.removeEventListener('pointerleave',stop)});
   }
   openDialog('taskDialog');
 }
 function finishTask(id){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.tasks=(s.tasks||0)+1;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));send('taskComplete',{task:id});closeDialog('taskDialog');showNotice('タスク完了！')}
+$('taskDialog').addEventListener('close',resetTaskRuntime);
 function openMeeting(reason){$('meetingReason').textContent=reason;renderVotes();openDialog('meetingDialog');setVoiceStatus('メンバー一覧の📞から個別通話できます。')}
 function renderVotes(){if(!state)return;const root=$('voteList');root.innerHTML='';state.players.filter(p=>p.alive).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});$('skipVoteButton').onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
@@ -1261,6 +1432,53 @@ $('profileSummary').textContent=profileText();
       bottom:150px !important;
       max-width:min(620px,calc(100vw - 40px));
       text-align:center;
+    }
+
+
+
+    /* Hands-on task mini games */
+    #taskDialog .dialog-card{width:min(760px,94vw);max-width:none}
+    #taskGame.task-realistic{display:grid;gap:12px;min-height:320px;user-select:none;-webkit-user-select:none}
+    .task-guide{margin:0;color:#d8ebff;line-height:1.55}
+    .task-board{position:relative;width:100%;height:300px;overflow:hidden;border:1px solid rgba(83,218,255,.45);border-radius:16px;background:radial-gradient(circle at 50% 45%,rgba(38,79,112,.38),rgba(3,11,22,.96));touch-action:none}
+    .task-status{text-align:center;margin:0;font-weight:800;color:#8eeeff}
+    .task-hold{min-height:52px;font-weight:800;touch-action:none}
+    .task-meter{height:14px;border:1px solid rgba(104,224,255,.45);border-radius:999px;overflow:hidden;background:#07111e}
+    .task-meter>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#24c9ff,#70ffac);transition:width .05s linear}
+    .dragging{z-index:20!important;transform:scale(1.09) rotate(-2deg)!important;filter:brightness(1.2);box-shadow:0 16px 28px rgba(0,0,0,.5)!important}
+    .returning{transition:left .2s ease,top .2s ease,transform .2s ease}
+
+    .cargo-bay{background:linear-gradient(90deg,rgba(45,35,27,.75) 0 49%,rgba(17,37,54,.9) 49% 100%),repeating-linear-gradient(0deg,transparent 0 28px,rgba(255,255,255,.03) 28px 30px)}
+    .cargo-conveyor{position:absolute;left:3%;top:6%;bottom:6%;width:43%;border:2px solid #81694f;border-radius:12px;background:repeating-linear-gradient(90deg,#302b28 0 20px,#45403b 20px 38px);opacity:.72}.cargo-conveyor span,.cargo-rack-label{position:absolute;top:5px;left:8px;font-size:11px;font-weight:800;color:#c7d8e7}
+    .cargo-rack-label{left:auto;right:10%;top:4%}.cargo-slot{position:absolute;width:25%;height:20%;border:2px dashed rgba(115,226,255,.65);border-radius:10px;display:grid;place-items:center;color:#7ceaff;background:rgba(18,69,94,.25)}.cargo-slot.filled{border-style:solid;background:rgba(61,212,151,.16)}
+    .cargo-crate{position:absolute;width:70px;height:58px;display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px;padding:7px;border:2px solid rgba(255,255,255,.42);border-radius:8px;color:#fff;font-size:18px;cursor:grab;touch-action:none;box-shadow:0 7px 12px rgba(0,0,0,.35)}.cargo-crate small{font-size:10px}.cargo-crate.placed{cursor:default;animation:cargoDrop .35s ease}.cargo-a{background:#a6483e}.cargo-b{background:#2e6fa7}.cargo-c{background:#95712a}@keyframes cargoDrop{50%{transform:translateY(-8px) scale(1.05)}100%{transform:none}}
+    .cargo-delivery{background:linear-gradient(135deg,#172533,#080f17)}.delivery-shelf{position:absolute;right:6%;top:8%;width:48%;height:80%;border:5px solid #65798a;border-radius:12px;background:repeating-linear-gradient(0deg,#1c2933 0 42px,#101a22 42px 48px)}.delivery-shelf span{position:absolute;top:7px;left:10px;font-size:11px;font-weight:800}.delivery-zone{position:absolute;right:13%;top:36%;width:30%;height:30%;border:3px dashed #ffc95c;border-radius:12px;background:rgba(255,190,70,.12);display:grid;place-items:center;color:#ffd784;font-weight:900}.delivery-zone.filled{border-style:solid;background:rgba(86,255,176,.16)}.cargo-crate.carried{width:92px;height:70px}
+
+    .wire-board{height:320px;background:linear-gradient(90deg,#1a242d 0 48%,#111a23 48% 52%,#1a242d 52%)}.wire-column{position:absolute;inset:0;width:50%}.wire-column.right{left:50%}.wire-socket{position:absolute;width:58px;height:58px;margin-top:-29px;border-radius:50%;border:3px solid var(--wire-color);background:#08111a;box-shadow:0 0 16px color-mix(in srgb,var(--wire-color),transparent 50%);display:grid;place-items:center;touch-action:none}.wire-source{left:12%;cursor:grab}.wire-target{right:12%}.wire-socket span{width:24px;height:24px;border-radius:50%;background:var(--wire-color)}.wire-socket.connected{filter:brightness(1.45);box-shadow:0 0 25px var(--wire-color)}#wireSvg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}#wireSvg line{stroke-width:12;stroke-linecap:round;filter:drop-shadow(0 0 4px currentColor)}
+
+    .scan-console{display:grid;grid-template-columns:minmax(160px,1fr) 1fr;gap:18px;align-items:center;padding:16px;border-radius:16px;background:#081724;border:1px solid rgba(83,218,255,.35)}.scan-hand{position:relative;height:200px;display:grid;place-items:center;font-size:108px;border-radius:14px;overflow:hidden;background:radial-gradient(circle,#143d51,#07111b)}.scan-hand i{position:absolute;left:0;right:0;top:-12px;height:8px;background:#5affc5;box-shadow:0 0 18px #5affc5;opacity:0}.scan-hand.active i{opacity:1;animation:scanBeam 1.1s linear infinite alternate}@keyframes scanBeam{to{top:calc(100% - 8px)}}.scan-readout{display:grid;gap:14px;text-align:center;font-size:32px;font-weight:900}
+
+    .fuel-station{height:290px}.fuel-tank{position:absolute;right:8%;top:11%;width:34%;height:70%;border:4px solid #8da7b7;border-radius:14px;overflow:hidden;background:#07121b;display:grid;place-items:center}.fuel-tank span{z-index:2;font-size:28px;font-weight:900;text-shadow:0 2px 3px #000}.fuel-tank #fuelLiquid{position:absolute;left:0;right:0;bottom:0;height:0;background:linear-gradient(#ffd756,#e58d1c);transition:height .06s linear}.fuel-port{position:absolute;right:34%;top:37%;width:72px;height:72px;border:7px solid #8ca3ad;border-radius:50%;display:grid;place-items:center;background:#151f24;font-size:10px}.fuel-nozzle{position:absolute;width:90px;height:70px;border-radius:12px;background:#d6a927;color:#101820;font-size:28px;display:grid;place-items:center;touch-action:none}.fuel-nozzle small{font-size:10px}.fuel-nozzle.connected{transform:rotate(-18deg)}
+
+    .nav-radar{height:330px;background:radial-gradient(circle at center,rgba(30,116,144,.3),#06101b 68%),repeating-radial-gradient(circle,transparent 0 42px,rgba(84,220,255,.18) 43px 45px)}.radar-grid{position:absolute;inset:0;background:linear-gradient(90deg,transparent 49.6%,rgba(71,215,255,.2) 50%,transparent 50.4%),linear-gradient(0deg,transparent 49.6%,rgba(71,215,255,.2) 50%,transparent 50.4%)}.nav-target{position:absolute;width:84px;height:84px;margin:-42px;border:3px dashed #73f9ff;border-radius:50%;animation:targetPulse 1s ease-in-out infinite}.nav-target.locked{border-style:solid;background:rgba(90,255,184,.18)}@keyframes targetPulse{50%{transform:scale(1.12);box-shadow:0 0 22px #55e6ff}}.nav-ship{position:absolute;width:62px;height:62px;border-radius:50%;font-size:28px;background:#ef8f3a;color:#fff;touch-action:none;transform:rotate(35deg)}.nav-ship.docked{animation:shipLock .5s ease}@keyframes shipLock{50%{transform:rotate(35deg) scale(.82)}100%{transform:rotate(35deg)}}
+
+    .engine-console{display:grid;grid-template-columns:150px 1fr;gap:30px;align-items:center;justify-content:center;padding:18px}.engine-track{position:relative;width:76px;height:300px;margin:auto;border-radius:38px;background:linear-gradient(#432229,#433a1f 25%,#214d35 20% 30%,#172232 30%);border:3px solid #71899d;touch-action:none}.engine-safe{position:absolute;left:8px;right:8px;bottom:70%;height:10%;border:2px solid #5dff9b;border-radius:16px;background:rgba(66,255,144,.2)}.engine-knob{position:absolute;left:50%;width:105px;height:34px;margin-left:-52px;border-radius:10px;background:#e4e8ec;border:4px solid #65798d;touch-action:none}.engine-gauge{display:grid;gap:14px;text-align:center}.engine-gauge b{font-size:50px}.engine-gauge span{font-weight:800;color:#ffb565}.engine-gauge span.good{color:#70ffac}
+
+    .security-sequence{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.security-sequence button{min-height:94px;display:grid;gap:8px;background:#111d2a;border:1px solid #385269}.security-sequence button i{display:block;height:18px;border-radius:999px;background:#2a3541}.security-sequence button.signal i{background:#5affbf;box-shadow:0 0 22px #5affbf}.security-sequence button.accepted{border-color:#56ffc1;background:rgba(38,142,100,.26)}
+
+    .comms-scope{position:relative;height:150px;overflow:hidden;border:2px solid #496c82;border-radius:12px;background:repeating-linear-gradient(90deg,transparent 0 31px,rgba(68,192,225,.12) 31px 32px),repeating-linear-gradient(0deg,transparent 0 29px,rgba(68,192,225,.12) 29px 30px),#03101a}.scope-wave{position:absolute;left:0;right:0;top:50%;height:4px}.scope-wave:before{content:'';position:absolute;left:0;right:0;top:-28px;height:60px;background:repeating-radial-gradient(ellipse at center,transparent 0 12px,currentColor 13px 14px,transparent 15px 24px);opacity:.75}.scope-wave.target{color:#55f4aa}.scope-wave.live{color:#44cfff;transition:transform .08s}.scope-wave.live:before{transform:scaleX(var(--freq,1));transform-origin:center}.scope-wave.live.matched{color:#fff;filter:drop-shadow(0 0 7px #63ffc0)}#commsQuality{position:absolute;right:10px;top:8px;font-weight:800}.dial-row{display:grid;grid-template-columns:80px 1fr 44px;gap:10px;align-items:center}.dial-row input{width:100%}
+
+    .shield-core{position:relative;width:min(390px,80vw);aspect-ratio:1;margin:auto;border-radius:50%;background:radial-gradient(circle,#182c40 0 23%,#07111b 24% 100%);border:2px solid #46647d}.shield-center{position:absolute;inset:36%;display:grid;place-items:center;border-radius:50%;background:#1f4760;box-shadow:0 0 25px #29d7ff;font-weight:900}.shield-sector{position:absolute;left:50%;top:50%;width:84px;height:64px;margin:-32px -42px;transform:rotate(var(--angle)) translateY(-145px) rotate(var(--counter));border-radius:12px;background:#172434;border:2px solid #4f6a7c;overflow:hidden;touch-action:none}.shield-sector i{position:absolute;left:0;bottom:0;height:6px;width:var(--charge,0%);background:#5dffad}.shield-sector.active{border-color:#ffe56d;box-shadow:0 0 16px #ffe56d}.shield-sector.powered{background:#1d7455;border-color:#66ffc1}.shield-sector.powered i{width:100%}
+
+    .weapon-range{height:330px;background:radial-gradient(circle at center,rgba(36,72,92,.5),#050b12 75%)}.weapon-range:before,.weapon-range:after{content:'';position:absolute;background:rgba(71,220,255,.18)}.weapon-range:before{left:50%;top:0;bottom:0;width:1px}.weapon-range:after{top:50%;left:0;right:0;height:1px}.crosshair{position:absolute;left:50%;top:50%;width:70px;height:70px;margin:-35px;border:2px solid rgba(72,230,255,.35);border-radius:50%}.moving-target{position:absolute;width:58px;height:58px;margin:-29px;border-radius:50%;background:radial-gradient(circle,#fff 0 15%,#ef4358 16% 35%,#fff 36% 52%,#ef4358 53%);box-shadow:0 0 18px rgba(255,78,100,.7);transition:left .18s ease,top .18s ease;touch-action:manipulation}.moving-target.hit{transform:scale(.72);filter:brightness(2)}
+
+    .filter-chamber{height:320px;background:repeating-linear-gradient(90deg,rgba(68,184,211,.08) 0 22px,transparent 22px 44px),linear-gradient(90deg,#08212b,#07111a)}.airflow{position:absolute;left:12px;top:10px;color:#66eaff;font-weight:800;letter-spacing:3px}.waste-bin{position:absolute;right:4%;bottom:7%;width:25%;height:24%;border:3px dashed #ffbe5c;border-radius:12px;background:rgba(116,74,25,.35);display:grid;place-items:center;font-weight:900;color:#ffd190}.filter-debris{position:absolute;width:48px;height:48px;border-radius:50%;font-size:22px;touch-action:none}.debris-0{background:#7c9d46}.debris-1{background:#806864}.debris-2{background:#a17d35}.filter-debris.discarded{transform:scale(.2) rotate(120deg);opacity:0;transition:.22s}
+
+    .reactor-panel{display:grid;grid-template-columns:1fr 190px;gap:18px;align-items:center}.reactor-rods{display:grid;gap:14px}.reactor-rods label{display:grid;grid-template-columns:70px 1fr 24px;gap:10px;align-items:center;padding:12px;border-radius:10px;background:#101c29;border:1px solid #344b60}.reactor-rods label i{width:18px;height:18px;border-radius:50%;background:#ff5d65}.reactor-rods label.aligned{border-color:#5cffad}.reactor-rods label.aligned i{background:#5cffad;box-shadow:0 0 14px #5cffad}.reactor-core{display:grid;gap:14px;text-align:center;padding:22px;border-radius:50%;aspect-ratio:1;background:radial-gradient(circle,#173b50,#07111a 70%);border:3px solid #467b91;place-content:center}.reactor-core span{font-weight:900}
+
+    @media(max-width:640px){
+      #taskDialog .dialog-card{width:96vw;padding:11px;max-height:94dvh;overflow:auto}
+      #taskGame.task-realistic{min-height:270px;gap:8px}.task-board{height:260px}.task-guide{font-size:13px}.cargo-crate{width:58px;height:50px;font-size:15px}.wire-board{height:275px}.wire-socket{width:48px;height:48px;margin-top:-24px}.scan-console{grid-template-columns:1fr;gap:8px}.scan-hand{height:145px;font-size:78px}.scan-readout{font-size:22px}.engine-console{grid-template-columns:105px 1fr;gap:10px;padding:6px}.engine-track{height:235px;width:60px}.engine-knob{width:82px;margin-left:-41px}.engine-gauge b{font-size:35px}.security-sequence{grid-template-columns:repeat(2,1fr)}.security-sequence button{min-height:70px}.shield-sector{width:66px;height:52px;margin:-26px -33px;transform:rotate(var(--angle)) translateY(-112px) rotate(var(--counter))}.reactor-panel{grid-template-columns:1fr}.reactor-core{width:150px;margin:auto}.nav-radar,.weapon-range,.filter-chamber{height:260px}
     }
 
     @media (max-width:1200px){
