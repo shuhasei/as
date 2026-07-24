@@ -112,7 +112,7 @@ function setCargoCarry(active,{persist=true,sync=true}={}){
   if(sync&&changed)send('cargoState',{active:cargoCarryActive});
 }
 function syncCargoCarryState(){
-  const p=me(),valid=state?.phase==='playing'&&p?.alive&&!p?.spectator&&(p.tasks||[]).includes('cargo')&&!(p.completedTasks||[]).includes('cargo');
+  const p=me(),valid=state?.phase==='playing'&&p?.alive&&!p?.spectator;
   if(!valid){if(cargoCarryActive)setCargoCarry(false,{sync:false});return}
   if(typeof p?.carryingCargo==='boolean'){
     if(cargoCarryActive!==p.carryingCargo)setCargoCarry(p.carryingCargo,{sync:false});
@@ -718,7 +718,7 @@ function updateNearest(){
   const hint=$('interactionHint');if(hint){let text='';if(p?.hidden)text='ロッカー内：ボタンを押すと外へ出ます';else if(nearest.locker)text='ロッカーに近づきました：隠れることができます';else if(nearest.security)text='監視端末に近づきました：カメラを確認できます';else if(nearest.emergency)text='緊急ボタンに近づきました：会議を開けます';else if(nearest.cargoDelivery)text='管理室の搬入口です：運んだ荷物を置けます';else if(nearest.task)text='端末に近づきました：使用できます';hint.textContent=text;hint.classList.toggle('show',!!text)}
 }
 function updateLockerVisuals(dt){const p=me();for(const locker of LOCKERS){const visual=lockerVisuals.get(locker.id);if(!visual)continue;const occupied=(state?.players||[]).some(x=>x.hidden&&x.hiddenAt===locker.id);const nearby=nearest.locker?.id===locker.id;const target=occupied?1:(nearby?.22:0);visual.userData.open+=(target-visual.userData.open)*(1-Math.exp(-10*dt));visual.userData.doorPivot.rotation.y=-visual.userData.open*1.45;visual.userData.lamp.material.color.setHex(occupied?0xffb347:nearby?0x77ff9c:0x63f4ff)}}
-function useAction(){const p=me();if(!p)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(nearest.cargoDelivery&&cargoCarryActive){openTask('cargoDelivery');return}if(!nearest.task)return;if(nearest.task==='cargo'&&cargoCarryActive){showNotice('荷物を管理室の搬入口まで運んでください');return}if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}if(p.role!=='impostor'&&!p.spectator&&(p.tasks||[]).includes(nearest.task)&&!(p.completedTasks||[]).includes(nearest.task))openTask(nearest.task);else showNotice('この端末に用事はありません')}
+function useAction(){const p=me();if(!p||!p.alive||p.spectator)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(nearest.cargoDelivery&&cargoCarryActive){openTask('cargoDelivery');return}if(!nearest.task)return;if(nearest.task==='cargo'&&cargoCarryActive){showNotice('荷物を管理室の搬入口まで運んでください');return}if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}openTask(nearest.task)}
 function reportAction(){if(nearest.body)send('report',{bodyId:nearest.body});else showNotice('近くに通報できる対象がありません')}function attackAction(){const p=me();if(!p||state?.phase!=='playing')return;if(p.role!=='impostor'){showNotice('攻撃は人狼だけが使えます');return}if(!canKill()){showNotice('攻撃のクールダウン中です');return}if(!nearest.player){showNotice('攻撃できる相手に近づいてください');return}send('kill',{targetId:nearest.player})}function meetingAction(){if(!nearest.emergency){showNotice('中央の緊急ボタンに近づいてください');return}send('meeting')}
 ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{if(renderMode!=='3d'||!camera){showNotice('軽量マップでは見下ろし視点で固定されます。');return}cameraMode=(cameraMode+1)%3;if(cameraMode===2&&localModel){const currentYaw=Number(localModel.rotation.y);firstPersonYaw=clearFirstPersonDirection(Number.isFinite(currentYaw)?currentYaw:Math.PI);firstPersonTargetYaw=firstPersonYaw;firstPersonInputBaseYaw=firstPersonYaw;firstPersonInputSignature='';camera.position.set(localModel.position.x,localModel.position.y+1.72,localModel.position.z)}else{const p=me();if(localModel)localModel.visible=p?!p.reported&&!p.hidden:true;snapCameraToCurrentMode()}const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(labels[cameraMode]);$('cameraButton').textContent=`${labels[(cameraMode+1)%3]}へ切替`};
 ui.settings.onclick=()=>{const s=state.settings||{};$('settingImpostors').value=s.impostors;$('settingTasks').value=s.tasks;$('settingSpeed').value=s.speed;$('settingKillCooldown').value=s.killCooldown;$('settingMeeting').value=s.meetingTime;$('settingReveal').value=s.revealRoles?'yes':'no';openDialog('settingsDialog')};$('saveSettingsButton').onclick=()=>{send('settings',{settings:{impostors:+$('settingImpostors').value,tasks:+$('settingTasks').value,speed:+$('settingSpeed').value,killCooldown:+$('settingKillCooldown').value,meetingTime:+$('settingMeeting').value,revealRoles:$('settingReveal').value==='yes'}});closeDialog('settingsDialog')};document.querySelectorAll('[data-sabotage]').forEach(b=>b.onclick=()=>{send('sabotage',{kind:b.dataset.sabotage});closeDialog('sabotageDialog')});document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog(b.dataset.close));
@@ -872,11 +872,11 @@ function openSecurity(){
   requestAnimationFrame(()=>{ensureSecurityViewer();resizeSecurityViewer();setSecurityCamera(securityCameraIndex);renderSecurityFeed()});
 }
 $('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{if(!nearest.security){showNotice('SECURITYの監視端末に近づいてください');return}openSecurity()};$('securityPrevButton').onclick=()=>setSecurityCamera(securityCameraIndex-1);$('securityNextButton').onclick=()=>setSecurityCamera(securityCameraIndex+1);$('securityDialog').addEventListener('close',()=>{securityOpen=false;clearKeys()});$('tutorialButton').onclick=()=>openDialog('tutorialDialog');$('colorSelect').onchange=$('hatSelect').onchange=()=>{if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
-let activeTaskCleanup=()=>{},activeTaskFinished=false,activeTaskId=null,activeTaskCompletionId=null;
+let activeTaskCleanup=()=>{},activeTaskFinished=false,activeTaskId=null,activeTaskCompletionId=null,activeTaskCountsProgress=false;
 function resetTaskRuntime(){
   const cleanup=activeTaskCleanup;activeTaskCleanup=()=>{};
   try{cleanup()}catch(error){console.warn('[Hidden Crew] task cleanup failed',error)}
-  activeTaskFinished=false;activeTaskId=null;activeTaskCompletionId=null;
+  activeTaskFinished=false;activeTaskId=null;activeTaskCompletionId=null;activeTaskCountsProgress=false;
   const root=$('taskGame');if(root){root.className='';root.innerHTML=''}
 }
 function registerTaskCleanup(...cleanups){
@@ -921,12 +921,15 @@ function snapTaskElement(element,target,parent){
 }
 function openTask(id){
   resetTaskRuntime();activeTaskFinished=false;activeTaskId=id;activeTaskCompletionId=id==='cargoDelivery'?'cargo':id;
-  $('taskTitle').textContent=id==='cargoDelivery'?'貨物の納品':TASKS[id]?.[0]||'TASK';
+  const p=me(),completionTask=activeTaskCompletionId;
+  activeTaskCountsProgress=!!(p&&p.alive&&!p.spectator&&p.role!=='impostor'&&(p.tasks||[]).includes(completionTask)&&!(p.completedTasks||[]).includes(completionTask));
+  const baseTitle=id==='cargoDelivery'?'貨物の納品':TASKS[id]?.[0]||'TASK';
+  $('taskTitle').textContent=activeTaskCountsProgress?baseTitle:`${baseTitle}（模擬操作）`;
   const root=$('taskGame');root.className='task-realistic';root.innerHTML='';
 
   if(id==='cargoDelivery'){
     root.innerHTML=`<p class="task-guide">運んできた荷物を搬入口の黄色い枠へ置いてください。</p><div class="cargo-delivery task-board" id="cargoDeliveryBoard"><div class="delivery-shelf"><span>納品棚</span></div><div class="delivery-zone" id="deliveryZone">ここへ置く</div><button class="cargo-crate cargo-a carried" id="deliveryCrate" style="left:8%;top:58%"><span>▦</span><b>貨物</b></button></div><p class="task-status">荷物を置くとタスク完了です</p>`;
-    const board=$('cargoDeliveryBoard'),crate=$('deliveryCrate'),zone=$('deliveryZone');const cleanup=bindTaskDrag(crate,{onDrop:e=>{if(!pointInside(zone,e.clientX,e.clientY,-8)){showNotice('黄色い納品枠へ置いてください');return false}snapTaskElement(crate,zone,board);crate.dataset.locked='yes';crate.classList.add('placed');zone.classList.add('filled');setCargoCarry(false,{sync:false});updateUI();finishInteractiveTask('cargo');return true}});registerTaskCleanup(cleanup);
+    const board=$('cargoDeliveryBoard'),crate=$('deliveryCrate'),zone=$('deliveryZone');const cleanup=bindTaskDrag(crate,{onDrop:e=>{if(!pointInside(zone,e.clientX,e.clientY,-8)){showNotice('黄色い納品枠へ置いてください');return false}snapTaskElement(crate,zone,board);crate.dataset.locked='yes';crate.classList.add('placed');zone.classList.add('filled');const counts=activeTaskCountsProgress;setCargoCarry(false,{sync:!counts});updateUI();finishInteractiveTask('cargo');return true}});registerTaskCleanup(cleanup);
 
   }else if(id==='cargo'){
     root.innerHTML=`<p class="task-guide">3個の荷物を運搬コンテナへ積み込みます。積み込み後は、実際に管理室まで運んでください。</p>
@@ -945,7 +948,7 @@ function openTask(id){
       const target=bay.querySelector(`[data-cargo-slot="${crate.dataset.cargo}"]`);
       if(!pointInside(target,e.clientX,e.clientY,-8)){showNotice('同じ記号のコンテナ枠へ運んでください');return false}
       snapTaskElement(crate,target,bay);crate.dataset.locked='yes';crate.classList.add('placed');target.classList.add('filled');
-      $('cargoStatus').textContent=`${++placed} / 3　積み込み済み`;if(placed===3)setTimeout(()=>{if(activeTaskId!=='cargo'||!$('taskDialog')?.open)return;setCargoCarry(true);updateUI();closeDialog('taskDialog');showNotice('荷物を持ちました。管理室の黄色い搬入口まで運んでください')},450);return true;
+      $('cargoStatus').textContent=`${++placed} / 3　積み込み済み`;if(placed===3)setTimeout(()=>{if(activeTaskId!=='cargo'||!$('taskDialog')?.open)return;const counts=activeTaskCountsProgress;setCargoCarry(true);updateUI();closeDialog('taskDialog');showNotice(counts?'荷物を持ちました。管理室の黄色い搬入口まで運んでください':'模擬用の荷物を持ちました。搬入口まで運んで偽装できます')},450);return true;
     }})));
     registerTaskCleanup(...cleanups);
 
@@ -1029,7 +1032,7 @@ function openTask(id){
   }
   openDialog('taskDialog');
 }
-function finishTask(id){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.tasks=(s.tasks||0)+1;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));send('taskComplete',{task:id});closeDialog('taskDialog');showNotice('タスク完了！')}
+function finishTask(id){const counts=activeTaskCountsProgress&&activeTaskCompletionId===id;if(counts){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.tasks=(s.tasks||0)+1;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));send('taskComplete',{task:id})}closeDialog('taskDialog');showNotice(counts?'タスク完了！':'模擬操作完了（進捗には加算されません）')}
 $('taskDialog').addEventListener('close',resetTaskRuntime);
 function openMeeting(reason){$('meetingReason').textContent=reason;renderVotes();openDialog('meetingDialog');setVoiceStatus('メンバー一覧の📞から個別通話できます。')}
 function renderVotes(){if(!state)return;const root=$('voteList');root.innerHTML='';state.players.filter(p=>p.alive).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});$('skipVoteButton').onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
