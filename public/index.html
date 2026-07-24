@@ -88,7 +88,7 @@
       <label>移動速度<select id="settingSpeed"><option value="0.85">ゆっくり</option><option value="1" selected>標準</option><option value="1.2">速い</option></select></label>
       <label>攻撃待ち時間<select id="settingKillCooldown"><option value="10">10秒</option><option value="15" selected>15秒</option><option value="25">25秒</option><option value="35">35秒</option></select></label>
       <label>会議時間<select id="settingMeeting"><option value="30">30秒</option><option value="45" selected>45秒</option><option value="60">60秒</option></select></label>
-      <label>役職表示<select id="settingReveal"><option value="yes">追放時に表示</option><option value="no">表示しない</option></select></label>
+      <label>役職表示<span class="fixed-setting">常に非公開</span><select id="settingReveal" class="hidden"><option value="no" selected>表示しない</option></select></label>
     </div><button id="saveSettingsButton" class="primary">保存</button></div></dialog>
 
   <dialog id="taskDialog"><div class="dialog-card"><button class="close" data-close="taskDialog">×</button><h2 id="taskTitle">TASK</h2><div id="taskGame"></div></div></dialog>
