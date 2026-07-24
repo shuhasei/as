@@ -535,10 +535,9 @@ export class GameRoom extends DurableObject {
   }
 
   async setCargoState(player, message) {
-    if (this.phase !== "playing" || !player.alive || player.role === "impostor" || player.spectator) return;
+    if (this.phase !== "playing" || !player.alive || player.spectator) return;
     const active = Boolean(message.active);
     if (active) {
-      if (!player.tasks.includes("cargo") || player.completedTasks.has("cargo")) return;
       if (Math.hypot(player.x - CARGO_PICKUP.x, player.z - CARGO_PICKUP.z) > 3.2) {
         this.send(player.id, { type: "error", message: "保管庫の貨物端末の近くで積み込んでください。" });
         return;
