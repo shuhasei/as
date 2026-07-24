@@ -91,7 +91,7 @@ const SOLID_PROPS=[
   {x:18.2,z:-16.8,w:1.6,d:1.6},{x:25.5,z:13,w:1.5,d:1.5},
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityLastRender=0,securityRenderTarget=null,securityPixelBuffer=null,securityImageData=null,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
   const group=new THREE.Group();group.scale.setScalar(scale);
@@ -475,8 +475,12 @@ function canKill(){
 }
 function updateCooldown(){
   const remaining=killCooldownRemainingMs();
+  const player=me();
+  const isWerewolf=player?.role==='impostor';
+  const hasTarget=!!nearest.player;
+  const ready=canKill()&&hasTarget;
   if(ui.killCooldown)ui.killCooldown.textContent=remaining>0?`${Math.ceil(remaining/1000)}秒`:'';
-  if(ui.kill&&me()?.role==='impostor')ui.kill.disabled=!canKill()||!nearest.player;
+  if(ui.kill&&isWerewolf)ui.kill.disabled=!ready;
 }
 function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();queueHudLayout();}
 function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;if(ui.sabotageTitle)ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind]||'妨害発生';if(ui.sabotageTimer)ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
@@ -748,61 +752,93 @@ function setSecurityCamera(index){
   updateSecurityCameraUi();
   securityLastRender=0;
 }
+function replaceSecurityCanvasForFallback(){
+  const oldCanvas=$('securityFeed');
+  if(!oldCanvas)return null;
+  const canvas=oldCanvas.cloneNode(false);
+  canvas.id='securityFeed';
+  canvas.setAttribute('aria-label','監視カメラのライブ映像');
+  oldCanvas.replaceWith(canvas);
+  securityRenderer=null;
+  securityFeedContext=null;
+  securityRenderWidth=0;
+  securityRenderHeight=0;
+  return canvas;
+}
 function ensureSecurityViewer(){
   const canvas=$('securityFeed');
-  if(!canvas||renderMode!=='3d'||!scene||!renderer||securityViewerFailed)return false;
+  if(!canvas||renderMode!=='3d'||!scene||securityViewerFailed)return false;
   try{
-    if(!securityFeedContext)securityFeedContext=canvas.getContext('2d',{alpha:false,willReadFrequently:true});
-    if(!securityFeedContext)return false;
     if(!securityCamera){
-      securityCamera=new THREE.PerspectiveCamera(62,16/9,.1,130);
+      securityCamera=new THREE.PerspectiveCamera(62,16/9,.08,180);
       const preset=SECURITY_CAMERAS[securityCameraIndex];
       securityCamera.position.set(...preset.position);
       securityCamera.lookAt(new THREE.Vector3(...preset.target));
       securityCamera.updateMatrixWorld(true);
     }
-    if(!securityRenderTarget){
-      securityRenderTarget=new THREE.WebGLRenderTarget(640,360,{
-        format:THREE.RGBAFormat,
-        type:THREE.UnsignedByteType,
-        depthBuffer:true,
-        stencilBuffer:false
+    if(!securityRenderer){
+      securityRenderer=new THREE.WebGLRenderer({
+        canvas,
+        antialias:true,
+        alpha:false,
+        powerPreference:'high-performance',
+        failIfMajorPerformanceCaveat:false,
+        preserveDrawingBuffer:false
       });
-      securityRenderTarget.texture.colorSpace=THREE.SRGBColorSpace;
+      securityRenderer.setClearColor(0x020711,1);
+      securityRenderer.outputColorSpace=THREE.SRGBColorSpace;
+      securityRenderer.toneMapping=THREE.ACESFilmicToneMapping;
+      securityRenderer.toneMappingExposure=1.42;
+      securityRenderer.shadowMap.enabled=true;
+      securityRenderer.shadowMap.type=THREE.PCFSoftShadowMap;
+      canvas.addEventListener('webglcontextlost',event=>{
+        event.preventDefault();
+        securityViewerFailed=true;
+        securityRenderer=null;
+        replaceSecurityCanvasForFallback();
+        drawSecurityFallback();
+      },{once:true});
     }
     return true;
   }catch(error){
     securityViewerFailed=true;
-    console.warn('[ゲーム] 監視カメラ3D映像を初期化できないため、ライブマップへ切り替えます。',error);
+    console.warn('[ゲーム] 監視カメラの3Dライブ映像を初期化できませんでした。',error);
+    replaceSecurityCanvasForFallback();
     return false;
   }
 }
 function resizeSecurityViewer(){
   const canvas=$('securityFeed');
-  if(!canvas||!ensureSecurityViewer())return;
+  if(!canvas||!ensureSecurityViewer())return false;
   const cssWidth=Math.max(280,Math.floor(canvas.clientWidth||640));
   const cssHeight=Math.max(158,Math.floor(canvas.clientHeight||cssWidth*9/16));
   const coarse=matchMedia('(pointer:coarse)').matches;
-  const maxWidth=coarse?480:720;
+  const maxWidth=coarse?520:900;
   const scale=Math.min(1,maxWidth/cssWidth);
   const width=Math.max(280,Math.round(cssWidth*scale));
   const height=Math.max(158,Math.round(cssHeight*scale));
-  if(width===securityRenderWidth&&height===securityRenderHeight)return;
-  securityRenderWidth=width;securityRenderHeight=height;
-  canvas.width=width;canvas.height=height;
-  securityRenderTarget.setSize(width,height);
-  securityCamera.aspect=width/height;
-  securityCamera.updateProjectionMatrix();
-  securityPixelBuffer=new Uint8Array(width*height*4);
-  securityImageData=securityFeedContext.createImageData(width,height);
+  if(width!==securityRenderWidth||height!==securityRenderHeight){
+    securityRenderWidth=width;
+    securityRenderHeight=height;
+    securityRenderer.setPixelRatio(Math.min(devicePixelRatio||1,coarse?1.25:1.6));
+    securityRenderer.setSize(width,height,false);
+    securityCamera.aspect=width/height;
+    securityCamera.updateProjectionMatrix();
+  }
+  return true;
 }
 function drawSecurityFallback(){
-  const canvas=$('securityFeed');if(!canvas)return;
+  let canvas=$('securityFeed');if(!canvas)return;
+  if(!securityFeedContext){
+    securityFeedContext=canvas.getContext('2d',{alpha:false});
+    if(!securityFeedContext){canvas=replaceSecurityCanvasForFallback();securityFeedContext=canvas?.getContext('2d',{alpha:false})||null}
+  }
+  const ctx=securityFeedContext;if(!ctx)return;
   const width=Math.max(280,Math.floor(canvas.clientWidth||640));
   const height=Math.max(158,Math.floor(canvas.clientHeight||width*9/16));
   const ratio=Math.min(devicePixelRatio||1,1.5);
   if(canvas.width!==Math.floor(width*ratio)||canvas.height!==Math.floor(height*ratio)){canvas.width=Math.floor(width*ratio);canvas.height=Math.floor(height*ratio)}
-  const ctx=securityFeedContext||canvas.getContext('2d',{alpha:false});if(!ctx)return;securityFeedContext=ctx;ctx.setTransform(ratio,0,0,ratio,0,0);
+  ctx.setTransform(ratio,0,0,ratio,0,0);
   const preset=SECURITY_CAMERAS[securityCameraIndex],viewRadius=preset.radius;
   const scale=Math.min(width,height)/(viewRadius*2.15),cx=width/2,cy=height/2;
   const mapX=x=>cx+(x-preset.target[0])*scale,mapY=z=>cy-(z-preset.target[2])*scale;
@@ -814,49 +850,32 @@ function drawSecurityFallback(){
   ctx.restore();ctx.strokeStyle='rgba(84,228,255,.55)';ctx.lineWidth=2;ctx.strokeRect(2,2,width-4,height-4);
   const status=$('securityCameraStatus');if(status)status.textContent=status.textContent.replace('● LIVE','● LIVE MAP');
 }
-function drawSecurityRenderTarget(){
-  if(!ensureSecurityViewer())return false;
-  resizeSecurityViewer();
-  if(!securityRenderWidth||!securityRenderHeight||!securityPixelBuffer||!securityImageData)return false;
-  const savedTarget=renderer.getRenderTarget();
-  const savedViewport=renderer.getViewport(new THREE.Vector4());
-  const savedScissor=renderer.getScissor(new THREE.Vector4());
-  const savedScissorTest=renderer.getScissorTest();
+function drawSecurityLiveScene(){
+  if(!ensureSecurityViewer()||!resizeSecurityViewer())return false;
   const localWasVisible=localModel?.visible;
   const localPlayer=me();
+  const oldFog=scene.fog;
   try{
     if(localModel&&localPlayer?.alive&&!localPlayer.hidden&&!localPlayer.reported)localModel.visible=true;
-    renderer.setRenderTarget(securityRenderTarget);
-    renderer.setViewport(0,0,securityRenderWidth,securityRenderHeight);
-    renderer.setScissorTest(false);
-    renderer.clear(true,true,true);
-    renderer.render(scene,securityCamera);
-    renderer.readRenderTargetPixels(securityRenderTarget,0,0,securityRenderWidth,securityRenderHeight,securityPixelBuffer);
+    // 監視映像では暗くなりすぎないよう、同じ3Dシーンを少し見通しよく描画します。
+    if(oldFog)scene.fog=new THREE.FogExp2(0x020711,Math.min(Number(oldFog.density)||.018,.011));
+    securityRenderer.render(scene,securityCamera);
   }finally{
-    renderer.setRenderTarget(savedTarget);
-    renderer.setViewport(savedViewport);
-    renderer.setScissor(savedScissor);
-    renderer.setScissorTest(savedScissorTest);
+    scene.fog=oldFog;
     if(localModel)localModel.visible=localWasVisible;
   }
-  const rowBytes=securityRenderWidth*4,dst=securityImageData.data;
-  for(let y=0;y<securityRenderHeight;y++){
-    const srcStart=(securityRenderHeight-1-y)*rowBytes;
-    dst.set(securityPixelBuffer.subarray(srcStart,srcStart+rowBytes),y*rowBytes);
-  }
-  securityFeedContext.setTransform(1,0,0,1,0,0);
-  securityFeedContext.putImageData(securityImageData,0,0);
   return true;
 }
 function renderSecurityFeed(){
-  const now=performance.now();if(now-securityLastRender<100)return;securityLastRender=now;
+  const now=performance.now();if(now-securityLastRender<50)return;securityLastRender=now;
   updateSecurityCameraUi();
   if(renderMode==='3d'&&!securityViewerFailed){
     try{
-      if(drawSecurityRenderTarget())return;
+      if(drawSecurityLiveScene())return;
     }catch(error){
       securityViewerFailed=true;
-      console.warn('[ゲーム] 監視カメラ3D映像を表示できないため、ライブマップへ切り替えます。',error);
+      console.warn('[ゲーム] 監視カメラの3Dライブ映像を表示できないため、ライブマップへ切り替えます。',error);
+      replaceSecurityCanvasForFallback();
     }
   }
   drawSecurityFallback();
