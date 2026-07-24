@@ -1,8 +1,7 @@
-
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "aurora-realistic-tasks-v15";
+const MAP_VERSION = "aurora-impostor-camera-v17";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -487,8 +486,10 @@ export class GameRoom extends DurableObject {
     }
 
     this.practiceMode = list.length === 1;
-    const impostorCount = this.practiceMode
-      ? 0
+    // 1人練習でも人狼役を試せるよう、必ず1人以上を人狼にします。
+    // 2人以上では最低1人のクルーを残します。
+    const impostorCount = list.length === 1
+      ? 1
       : Math.min(this.settings.impostors, Math.max(1, list.length - 1));
     const impostorIds = new Set(shuffled(list).slice(0, impostorCount).map((item) => item.id));
 
