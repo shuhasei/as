@@ -315,6 +315,9 @@ export class GameRoom extends DurableObject {
       case "voiceSignal":
         this.voiceSignal(player, message);
         break;
+      case "voiceAudio":
+        this.voiceAudio(player, message);
+        break;
       case "callControl":
         this.callControl(player, message);
         break;
@@ -662,16 +665,34 @@ export class GameRoom extends DurableObject {
   voiceSignal(player, message) {
     if (!message.signal || !this.sessions.has(player.id)) return;
     const targetId = String(message.targetId || "");
-    const target = this.players.get(targetId);
-    if (!target?.alive || !this.sessions.has(targetId)) return;
+    if (!targetId || targetId === player.id || !this.players.has(targetId) || !this.sessions.has(targetId)) {
+      this.send(player.id, { type: "callControl", fromId: targetId, action: "unavailable" });
+      return;
+    }
     this.send(targetId, { type: "voiceSignal", fromId: player.id, signal: message.signal });
+  }
+
+  voiceAudio(player, message) {
+    const targetId = String(message.targetId || "");
+    const data = typeof message.data === "string" ? message.data : "";
+    if (!targetId || targetId === player.id || !data || data.length > 16000) return;
+    if (!this.players.has(targetId) || !this.sessions.has(targetId)) {
+      this.send(player.id, { type: "callControl", fromId: targetId, action: "unavailable" });
+      return;
+    }
+    const rate = clamp(Number(message.rate) || 16000, 8000, 24000);
+    const seq = Math.max(0, Math.floor(Number(message.seq) || 0));
+    this.send(targetId, { type: "voiceAudio", fromId: player.id, rate, seq, data });
   }
 
   callControl(player, message) {
     const targetId = String(message.targetId || "");
     const action = String(message.action || "");
-    if (!targetId || targetId === player.id || !["ring", "accept", "decline", "busy", "hangup"].includes(action)) return;
-    if (!this.players.has(targetId) || !this.sessions.has(targetId)) return;
+    if (!targetId || targetId === player.id || !["ring", "accept", "decline", "busy", "hangup", "relay"].includes(action)) return;
+    if (!this.players.has(targetId) || !this.sessions.has(targetId)) {
+      if (action === "ring" || action === "accept") this.send(player.id, { type: "callControl", fromId: targetId, action: "unavailable" });
+      return;
+    }
     this.send(targetId, { type: "callControl", fromId: player.id, action });
   }
 
