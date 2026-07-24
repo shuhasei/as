@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='wide-map-v8-canvas-recovery';
+const MAP_VERSION='wide-map-v9-minimap-fix';
 const TASKS={reactor:['リアクター調整',-13.8,8.8],wires:['配線修理',13.8,8.8],scanner:['生体スキャン',-13.8,-8.8],cargo:['貨物整理',13.8,-8.8],fuel:['燃料補給',0,9.2],align:['航路調整',0,-9.2]};
 const MAP_BOUNDS={minX:-18,maxX:18,minZ:-13,maxZ:13};
 const LOCKERS=[{id:'medical',x:-15.8,z:-10.7,exitX:-14.1,exitZ:-10.7,rot:Math.PI/2},{id:'security',x:-15.8,z:2.6,exitX:-14.1,exitZ:2.6,rot:Math.PI/2},{id:'electrical',x:15.8,z:10.6,exitX:14.1,exitZ:10.6,rot:-Math.PI/2},{id:'cargo',x:15.8,z:-10.6,exitX:14.1,exitZ:-10.6,rot:-Math.PI/2}];
@@ -135,6 +135,46 @@ function draw2DMap(){
   }
   ctx.fillStyle='rgba(2,7,17,.75)';ctx.fillRect(10,h-40,310,30);ctx.fillStyle='#dffcff';ctx.textAlign='left';ctx.font='14px sans-serif';ctx.fillText('軽量マップ表示中（操作・機能はそのまま使えます）',20,h-20);
 }
+function drawMiniMap(){
+  const canvas=ui.miniMap;
+  if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  if(!ctx)return;
+  const width=canvas.width,height=canvas.height,pad=10;
+  const mapWidth=MAP_BOUNDS.maxX-MAP_BOUNDS.minX;
+  const mapHeight=MAP_BOUNDS.maxZ-MAP_BOUNDS.minZ;
+  const scale=Math.min((width-pad*2)/mapWidth,(height-pad*2)/mapHeight);
+  const offsetX=(width-mapWidth*scale)/2;
+  const offsetY=(height-mapHeight*scale)/2;
+  const sx=x=>offsetX+(x-MAP_BOUNDS.minX)*scale;
+  const sz=z=>offsetY+(z-MAP_BOUNDS.minZ)*scale;
+
+  ctx.clearRect(0,0,width,height);
+  ctx.fillStyle='rgba(2,7,17,.92)';ctx.fillRect(0,0,width,height);
+  ctx.fillStyle='#0b2948';ctx.fillRect(sx(MAP_BOUNDS.minX),sz(MAP_BOUNDS.minZ),mapWidth*scale,mapHeight*scale);
+  ctx.strokeStyle='#2d6f92';ctx.lineWidth=1;ctx.strokeRect(sx(MAP_BOUNDS.minX),sz(MAP_BOUNDS.minZ),mapWidth*scale,mapHeight*scale);
+
+  ctx.fillStyle='#1b3147';
+  for(const wall of WALLS)ctx.fillRect(sx(wall.x-wall.w/2),sz(wall.z-wall.d/2),wall.w*scale,wall.d*scale);
+  ctx.fillStyle='#385164';
+  for(const prop of SOLID_PROPS)ctx.fillRect(sx(prop.x-prop.w/2),sz(prop.z-prop.d/2),Math.max(2,prop.w*scale),Math.max(2,prop.d*scale));
+
+  const self=me();
+  if(!self)return;
+  for(const player of state?.players||[]){
+    if(player.reported||player.hidden)continue;
+    if(player.id!==myId&&state?.phase==='playing')continue;
+    const model=models.get(player.id);
+    const x=model?.position?.x??player.x;
+    const z=model?.position?.z??player.z;
+    const color=(COLORS[player.color]||0xffffff).toString(16).padStart(6,'0');
+    ctx.globalAlpha=player.alive?1:.45;
+    ctx.fillStyle=`#${color}`;
+    ctx.beginPath();ctx.arc(sx(x),sz(z),player.id===myId?5:3.5,0,Math.PI*2);ctx.fill();
+    if(player.id===myId){ctx.strokeStyle='#ffffff';ctx.lineWidth=1.5;ctx.stroke()}
+  }
+  ctx.globalAlpha=1;
+}
 function isTypingTarget(target){return target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||target?.isContentEditable}function isDown(...codes){return codes.some(code=>keyCodes.has(code))}function handleKeyDown(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.add(code);keys.add(key);if(e.repeat)return;if(code==='KeyE')useAction();if(code==='KeyR')reportAction();if(code==='KeyQ'||code==='Space')attackAction();if(code==='KeyM')meetingAction()}function handleKeyUp(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.delete(code);keys.delete(key)}function clearKeys(){keyCodes.clear();keys.clear();localVelocity.set(0,0);joy={x:0,y:0}}function init3D(){if(renderer)return;scene=new THREE.Scene();scene.background=new THREE.Color(0x020711);scene.fog=new THREE.FogExp2(0x020711,.026);camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,140);const canvas=$('gameCanvas');if(!canvas)throw new Error('gameCanvas が見つかりません');renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;clock=new THREE.Clock();buildWorld();addEventListener('resize',resize);addEventListener('keydown',handleKeyDown,{passive:false});addEventListener('keyup',handleKeyUp,{passive:false});addEventListener('blur',clearKeys);document.addEventListener('visibilitychange',()=>{if(document.hidden)clearKeys()});setupJoystick();animate();showNotice('移動: 矢印キー/WASD　攻撃: Q/Space　使用: E　通報: R')}
 function buildWorld(){
   scene.add(new THREE.HemisphereLight(0x9be4ff,0x050b12,2.2));
@@ -164,34 +204,6 @@ function syncModels(){if(!state)return;const active=new Set();for(const p of sta
 function me(){return state?.players.find(p=>p.id===myId)}
 function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'侵入者':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span>${escapeHtml(x.name)}${x.host?' ★':''}</span></div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は侵入者だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${TASKS[t]?.[0]||t}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();}
 function updateSabotage(){const s=state?.sabotage;ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind];ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
-function drawMiniMap(){
-  const canvas=ui.miniMap;
-  if(!canvas)return;
-  const ctx=canvas.getContext('2d');
-  if(!ctx)return;
-  const width=canvas.width||220,height=canvas.height||160,padding=8;
-  const mapWidth=MAP_BOUNDS.maxX-MAP_BOUNDS.minX,mapDepth=MAP_BOUNDS.maxZ-MAP_BOUNDS.minZ;
-  const scale=Math.min((width-padding*2)/mapWidth,(height-padding*2)/mapDepth);
-  const offsetX=(width-mapWidth*scale)/2-MAP_BOUNDS.minX*scale;
-  const offsetZ=(height-mapDepth*scale)/2-MAP_BOUNDS.minZ*scale;
-  const sx=x=>offsetX+x*scale,sz=z=>offsetZ+z*scale;
-  ctx.clearRect(0,0,width,height);
-  ctx.fillStyle='rgba(2,8,18,.94)';ctx.fillRect(0,0,width,height);
-  ctx.fillStyle='#0b2948';ctx.fillRect(sx(MAP_BOUNDS.minX),sz(MAP_BOUNDS.minZ),mapWidth*scale,mapDepth*scale);
-  ctx.strokeStyle='rgba(108,218,255,.45)';ctx.lineWidth=1;ctx.strokeRect(sx(MAP_BOUNDS.minX),sz(MAP_BOUNDS.minZ),mapWidth*scale,mapDepth*scale);
-  ctx.fillStyle='#14263d';for(const o of WALLS)ctx.fillRect(sx(o.x-o.w/2),sz(o.z-o.d/2),Math.max(1,o.w*scale),Math.max(1,o.d*scale));
-  ctx.fillStyle='#26384b';for(const o of SOLID_PROPS)ctx.fillRect(sx(o.x-o.w/2),sz(o.z-o.d/2),Math.max(1,o.w*scale),Math.max(1,o.d*scale));
-  ctx.fillStyle='#355064';ctx.beginPath();ctx.arc(sx(EMERGENCY_BUTTON.x),sz(EMERGENCY_BUTTON.z),Math.max(2,2.25*scale),0,Math.PI*2);ctx.fill();
-  for(const p of state?.players||[]){
-    if(p.reported||p.hidden)continue;
-    const model=models.get(p.id),x=model?.position?.x??p.x,z=model?.position?.z??p.z;
-    const isMe=p.id===myId;
-    const hex=(COLORS[p.color]||0xffffff).toString(16).padStart(6,'0');
-    ctx.globalAlpha=p.alive?1:.35;ctx.fillStyle=`#${hex}`;ctx.beginPath();ctx.arc(sx(x),sz(z),isMe?4.5:3,0,Math.PI*2);ctx.fill();
-    if(isMe){ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke()}
-  }
-  ctx.globalAlpha=1;
-}
 function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(state?.phase==='playing'&&localModel)moveLocal(dt);for(const m of models.values()){if(m!==localModel){const a=1-Math.exp(-12*dt);m.position.lerp(m.userData.target,a);m.rotation.y+=(m.userData.rotation-m.rotation.y)*(1-Math.exp(-14*dt))}}updateNearest();if(renderMode==='3d'){updateLockerVisuals(dt);updateCamera(dt)}drawMiniMap();updateCooldown();updateSabotage();if(renderMode==='3d')renderer.render(scene,camera);else draw2DMap()}
 function collidesWithMap(x,z,r=.62){
   if(x-r<MAP_BOUNDS.minX||x+r>MAP_BOUNDS.maxX||z-r<MAP_BOUNDS.minZ||z+r>MAP_BOUNDS.maxZ)return true;
