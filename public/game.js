@@ -20,7 +20,7 @@ const SOLID_PROPS=[
   {x:-13.8,z:9.8,w:1.6,d:1.6},{x:13.8,z:9.8,w:1.6,d:1.6},
   {x:-15.8,z:-10.7,w:1.15,d:.9},{x:-15.8,z:2.6,w:1.15,d:.9},{x:15.8,z:10.6,w:1.15,d:.9},{x:15.8,z:-10.6,w:1.15,d:.9}
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null;
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=1,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0;
 const randomRoom=()=>Array.from({length:6},()=>('ABCDEFGHJKLMNPQRSTUVWXYZ23456789')[Math.floor(Math.random()*32)]).join('');
 const escapeHtml=s=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function send(type,data={}){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type,...data}))}
@@ -38,10 +38,10 @@ function connect(room,name){
   socket=new WebSocket(wsUrl);
   socket.onopen=()=>send('join',{name,clientVersion:MAP_VERSION,color:$('colorSelect')?.value,hat:$('hatSelect')?.value});
   socket.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(error){console.error('Invalid server message',error,e.data)}};
-  socket.onclose=(event)=>showNotice(`接続が切れました（code: ${event.code}${event.reason ? ` / ${event.reason}` : ''}）。再読み込みしてください。`);
+  socket.onclose=(event)=>{hangUpCall(false);clearIncomingCall();showNotice(`接続が切れました（code: ${event.code}${event.reason ? ` / ${event.reason}` : ''}）。再読み込みしてください。`)};
   socket.onerror=error=>{console.error('WebSocket error',error);showNotice('WebSocket接続に失敗しました。Cloudflareのログを確認してください。')};
 }
-function handle(m){if(m.type==='hello'){myId=m.id;ui.room.textContent=m.room}else if(m.type==='state'){if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('新旧ファイルが混在していますが、互換モードで接続しました。')}state=m.state;ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open)syncVoicePeers()}else if(m.type==='playerMoved'){const o=models.get(m.id);if(o){o.userData.target.set(m.x,0,m.z);o.userData.rotation=m.rotation;if(m.id===myId&&o.position.distanceTo(o.userData.target)>.9)o.position.lerp(o.userData.target,.35)}}else if(m.type==='error'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.message)}else if(m.type==='gameStarted'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.practiceMode?'練習モードを開始しました':'ゲームを開始しました')}else if(m.type==='meetingStarted')openMeeting(m.reason);else if(m.type==='meetingEnded'){closeDialog('meetingDialog');showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}else if(m.type==='voiceSignal')handleVoiceSignal(m);else if(m.type==='callControl')handleCallControl(m);else if(m.type==='chat')appendChat(m);else if(m.type==='sabotage')showNotice('妨害が発生しました');else if(m.type==='sabotageFixed')showNotice('妨害が解除されました');else if(m.type==='gameFinished'){hangUpCall(true);saveResult(m.winner);openResult(m.winner)}else if(m.type==='killEffect')flashScreen();else if(m.type==='abilityResult')showNotice(m.message);}
+function handle(m){if(m.type==='hello'){myId=m.id;ui.room.textContent=m.room}else if(m.type==='state'){if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('新旧ファイルが混在していますが、互換モードで接続しました。')}state=m.state;ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();if(activeCallPeer){const callTarget=state.players?.find(p=>p.id===activeCallPeer);if(!callTarget?.connected||!callTarget?.alive){showNotice('通話相手が退出したため通話を終了しました。');hangUpCall(false)}else updateCallUi()}if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open)syncVoicePeers()}else if(m.type==='playerMoved'){const o=models.get(m.id);if(o){o.userData.target.set(m.x,0,m.z);o.userData.rotation=m.rotation;if(m.id===myId&&o.position.distanceTo(o.userData.target)>.9)o.position.lerp(o.userData.target,.35)}}else if(m.type==='error'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.message)}else if(m.type==='gameStarted'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.practiceMode?'練習モードを開始しました':'ゲームを開始しました')}else if(m.type==='meetingStarted')openMeeting(m.reason);else if(m.type==='meetingEnded'){closeDialog('meetingDialog');showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}else if(m.type==='voiceSignal')handleVoiceSignal(m);else if(m.type==='callControl')handleCallControl(m);else if(m.type==='chat')appendChat(m);else if(m.type==='sabotage')showNotice('妨害が発生しました');else if(m.type==='sabotageFixed')showNotice('妨害が解除されました');else if(m.type==='gameFinished'){hangUpCall(true);saveResult(m.winner);openResult(m.winner)}else if(m.type==='killEffect')flashScreen();else if(m.type==='abilityResult')showNotice(m.message);}
 $('createButton').onclick=()=>joinRoom(randomRoom());$('joinButton').onclick=()=>joinRoom(ui.roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g,''));
 function joinRoom(room){
   if(room.length!==6){ui.message.textContent='6桁のルームコードを入力してください。';return}
@@ -291,6 +291,15 @@ function clearFirstPersonDirection(yaw){
   }
   return best;
 }
+function cameraPointBlocked(x,y,z,r=.18){
+  // プレイヤー用の2D当たり判定をカメラへ流用すると、壁を高さ無限として扱い、
+  // カメラがキャラクターの背中まで押し込まれて視界を塞いでしまう。
+  if(y-r<4.05&&(x-r<MAP_BOUNDS.minX||x+r>MAP_BOUNDS.maxX||z-r<MAP_BOUNDS.minZ||z+r>MAP_BOUNDS.maxZ))return true;
+  if(y-r<3.2){for(const o of WALLS)if(Math.abs(x-o.x)<o.w/2+r&&Math.abs(z-o.z)<o.d/2+r)return true}
+  if(y-r<2.05){for(const o of SOLID_PROPS)if(Math.abs(x-o.x)<o.w/2+r&&Math.abs(z-o.z)<o.d/2+r)return true}
+  if(y-r<1.35&&Math.hypot(x,z-.5)<2.05+r)return true;
+  return false;
+}
 function updateCamera(){
   if(!localModel||!camera)return;
   const pos=localModel.position;
@@ -306,11 +315,18 @@ function updateCamera(){
   const p=me();localModel.visible=p?!p.reported&&!p.hidden:true;
   const forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
   const distance=cameraMode===0?11:6.2,height=cameraMode===0?10.5:4.6;
-  const target=new THREE.Vector3(pos.x,pos.y+(cameraMode===0?.9:1.15),pos.z).addScaledVector(forward,cameraMode===0?2.4:3.4);
+  const wantedLookAhead=cameraMode===0?2.4:2.2;let clearLookAhead=0;
+  for(let d=.3;d<=wantedLookAhead+.001;d+=.3){const x=pos.x+forward.x*d,z=pos.z+forward.z*d;if(collidesWithMap(x,z,.14))break;clearLookAhead=d}
+  const target=new THREE.Vector3(pos.x,pos.y+(cameraMode===0?.9:1.15),pos.z).addScaledVector(forward,clearLookAhead);
   const desired=new THREE.Vector3(pos.x,pos.y+height,pos.z).addScaledVector(forward,-distance);
-  const direction=desired.clone().sub(target);let safe=desired.clone();
-  for(let t=1;t>=.18;t-=.06){const test=target.clone().addScaledVector(direction,t);if(!collidesWithMap(test.x,test.z,.18)){safe=test;break}}
-  camera.position.lerp(safe,.16);camera.lookAt(target);
+  const direction=desired.clone().sub(target);
+  let safe=target.clone().addScaledVector(direction,.16);
+  for(let t=.16;t<=1.001;t+=.04){
+    const test=target.clone().addScaledVector(direction,t);
+    if(cameraPointBlocked(test.x,test.y,test.z,.16))break;
+    safe.copy(test);
+  }
+  camera.position.lerp(safe,.2);camera.lookAt(target);
 }
 
 function updateNearest(){
@@ -359,13 +375,24 @@ const chatPanel=$('globalChatPanel'),chatToggle=$('chatToggleButton');if(chatPan
 const RTC_CONFIG={iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun2.l.google.com:19302']},{urls:'stun:global.stun.twilio.com:3478'}],iceCandidatePoolSize:8};
 const pendingIce=new Map();let audioUnlocked=false;
 function setVoiceStatus(text,active=false){const el=$('voiceStatus');if(!el)return;el.textContent=text;el.classList.toggle('active',active)}
+function clearCallTimeout(){if(callTimeoutId){clearTimeout(callTimeoutId);callTimeoutId=0}}
+function armCallTimeout(peerId,ms,message){clearCallTimeout();callTimeoutId=setTimeout(()=>{if(activeCallPeer!==peerId)return;send('callControl',{targetId:peerId,action:'hangup'});showNotice(message);hangUpCall(false)},ms)}
+function clearIncomingCall(notify=false){if(incomingCallTimeoutId){clearTimeout(incomingCallTimeoutId);incomingCallTimeoutId=0}if(notify&&incomingCallPeer)send('callControl',{targetId:incomingCallPeer,action:'decline'});incomingCallPeer=null;closeDialog('incomingCallDialog');updateCallUi()}
+function currentCallName(){return state?.players?.find(p=>p.id===activeCallPeer)?.name||'相手'}
+function updateCallUi(){
+  const hangup=$('hangupCallButton'),help=$('callHelp');
+  if(hangup){hangup.disabled=!activeCallPeer;hangup.classList.toggle('hidden',!activeCallPeer)}
+  if(help)help.textContent=activeCallPeer?`📞 ${currentCallName()}と通話中／呼出中`:'📞を押して個別通話';
+  updateMicButton();
+}
 async function unlockRemoteAudio(){audioUnlocked=true;for(const audio of document.querySelectorAll('#remoteAudio audio')){audio.muted=false;audio.volume=1;try{await audio.play()}catch{}}}
 document.addEventListener('pointerdown',unlockRemoteAudio,{passive:true});
 async function startVoiceChat(){
-  if(localVoiceStream||voiceStarting)return;if(!navigator.mediaDevices?.getUserMedia){setVoiceStatus('このブラウザは音声通話に対応していません。');return}
+  if(!activeCallPeer){setVoiceStatus('先にメンバー一覧の📞から通話相手を選んでください。');showNotice('通話相手が選ばれていません。');updateCallUi();return false}
+  if(localVoiceStream)return true;if(voiceStarting)return false;if(!navigator.mediaDevices?.getUserMedia){setVoiceStatus('このブラウザは音声通話に対応していません。');return false}
   voiceStarting=true;setVoiceStatus('マイクの許可を待っています…');
-  try{localVoiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1,sampleRate:48000},video:false});micMuted=false;updateMicButton();setVoiceStatus('通話接続中…画面を一度クリックしてください。',true);syncVoicePeers();await unlockRemoteAudio()}
-  catch(error){console.error('Microphone permission error',error);setVoiceStatus('マイクを使用できません。サイト設定でマイクを許可してください。');showNotice('マイクの使用が許可されませんでした。')}finally{voiceStarting=false}
+  try{localVoiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1,sampleRate:48000},video:false});micMuted=false;updateCallUi();setVoiceStatus('通話接続中…画面を一度クリックしてください。',true);syncVoicePeers();await unlockRemoteAudio();return true}
+  catch(error){console.error('Microphone permission error',error);setVoiceStatus('マイクを使用できません。サイト設定でマイクを許可してください。');showNotice('マイクの使用が許可されませんでした。');return false}finally{voiceStarting=false}
 }
 function syncVoicePeers(){if(!localVoiceStream||!activeCallPeer)return;for(const id of [...voicePeers.keys()])if(id!==activeCallPeer)closeVoicePeer(id)}
 function ensureVoicePeer(peerId,makeOffer=false){
@@ -373,7 +400,7 @@ function ensureVoicePeer(peerId,makeOffer=false){
   for(const track of localVoiceStream?.getAudioTracks()||[])pc.addTrack(track,localVoiceStream);
   pc.onicecandidate=e=>{if(e.candidate)send('voiceSignal',{targetId:peerId,signal:{candidate:e.candidate.toJSON?.()||e.candidate}})};
   pc.ontrack=e=>{const stream=e.streams?.[0]||new MediaStream([e.track]);attachRemoteAudio(peerId,stream)};
-  pc.onconnectionstatechange=()=>{const cs=pc.connectionState;setVoiceStatus(cs==='connected'?'音声通話に接続しました。':`音声接続: ${cs}`,cs==='connected');if(cs==='failed'){try{pc.restartIce()}catch{}}if(cs==='closed')closeVoicePeer(peerId)};
+  pc.onconnectionstatechange=()=>{const cs=pc.connectionState;if(cs==='connected'){clearCallTimeout();setVoiceStatus('音声通話に接続しました。',true);updateCallUi()}else setVoiceStatus(`音声接続: ${cs}`,false);if(cs==='failed'){showNotice('音声接続に失敗したため通話を終了しました。');hangUpCall(true)}};
   if(makeOffer)queueMicrotask(async()=>{try{await pc.setLocalDescription(await pc.createOffer({offerToReceiveAudio:true}));send('voiceSignal',{targetId:peerId,signal:{description:pc.localDescription}})}catch(e){console.error('Voice offer failed',e)}});return pc
 }
 async function handleVoiceSignal(m){
@@ -382,31 +409,35 @@ async function handleVoiceSignal(m){
 }
 function attachRemoteAudio(peerId,stream){let audio=document.getElementById(`voice-${peerId}`);if(!audio){audio=document.createElement('audio');audio.id=`voice-${peerId}`;audio.autoplay=true;audio.playsInline=true;audio.controls=false;audio.volume=1;audio.muted=false;$('remoteAudio').append(audio)}audio.srcObject=stream;audio.play().then(()=>setVoiceStatus('音声通話に接続しました。',true)).catch(()=>setVoiceStatus('相手の音声を再生するため、画面をクリックしてください。'))}
 function closeVoicePeer(peerId){const pc=voicePeers.get(peerId);if(pc){pc.ontrack=null;pc.onicecandidate=null;pc.close();voicePeers.delete(peerId)}pendingIce.delete(peerId);document.getElementById(`voice-${peerId}`)?.remove()}
-function stopVoiceChat(){for(const id of [...voicePeers.keys()])closeVoicePeer(id);for(const track of localVoiceStream?.getTracks()||[])track.stop();localVoiceStream=null;voiceStarting=false;setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateMicButton()}
-function updateMicButton(){const b=$('micButton');if(!b)return;b.textContent=micMuted?'🔇 マイクOFF':'🎙 マイクON';b.classList.toggle('muted',micMuted)}
-$('micButton').onclick=async()=>{await unlockRemoteAudio();if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const t of localVoiceStream.getAudioTracks())t.enabled=!micMuted;updateMicButton();setVoiceStatus(micMuted?'マイクをミュートしています。':'音声通話に接続しました。',!micMuted)};
+function stopVoiceChat(){for(const id of [...voicePeers.keys()])closeVoicePeer(id);for(const track of localVoiceStream?.getTracks()||[])track.stop();localVoiceStream=null;voiceStarting=false;micMuted=false;setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi()}
+function updateMicButton(){const b=$('micButton');if(!b)return;if(!activeCallPeer){b.textContent='🎙 通話相手なし';b.disabled=true;b.classList.remove('muted');return}b.disabled=false;if(!localVoiceStream){b.textContent='🎙 マイク開始';b.classList.remove('muted');return}b.textContent=micMuted?'🔇 マイクOFF':'🎙 マイクON';b.classList.toggle('muted',micMuted)}
+$('micButton').onclick=async()=>{await unlockRemoteAudio();if(!activeCallPeer){showNotice('先にメンバー一覧の📞から通話相手を選んでください。');updateCallUi();return}if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const t of localVoiceStream.getAudioTracks())t.enabled=!micMuted;updateCallUi();setVoiceStatus(micMuted?'マイクをミュートしています。':'音声通話に接続しました。',!micMuted)};
 
 async function placeCall(peerId){
   if(!peerId||peerId===myId)return;if(activeCallPeer){showNotice('先に現在の通話を終了してください。');return}
-  const target=state?.players?.find(p=>p.id===peerId);activeCallPeer=peerId;setVoiceStatus(`${target?.name||'相手'}を呼び出しています…`,true);send('callControl',{targetId:peerId,action:'ring'});
+  const target=state?.players?.find(p=>p.id===peerId);activeCallPeer=peerId;updateCallUi();setVoiceStatus(`${target?.name||'相手'}を呼び出しています…`,true);send('callControl',{targetId:peerId,action:'ring'});
+  armCallTimeout(peerId,20000,'応答がないため呼び出しを終了しました。');
 }
 async function acceptIncomingCall(){
-  if(!incomingCallPeer)return;activeCallPeer=incomingCallPeer;incomingCallPeer=null;closeDialog('incomingCallDialog');await startVoiceChat();if(!localVoiceStream){hangUpCall(false);return}send('callControl',{targetId:activeCallPeer,action:'accept'});ensureVoicePeer(activeCallPeer,false);setVoiceStatus('通話に接続中…',true);
+  if(!incomingCallPeer)return;const peer=incomingCallPeer;if(incomingCallTimeoutId){clearTimeout(incomingCallTimeoutId);incomingCallTimeoutId=0}activeCallPeer=peer;incomingCallPeer=null;closeDialog('incomingCallDialog');updateCallUi();const started=await startVoiceChat();if(!started||!localVoiceStream){hangUpCall(false);return}send('callControl',{targetId:activeCallPeer,action:'accept'});ensureVoicePeer(activeCallPeer,false);armCallTimeout(activeCallPeer,15000,'音声接続が完了しなかったため通話を終了しました。');setVoiceStatus('通話に接続中…',true);
 }
-function declineIncomingCall(){if(incomingCallPeer)send('callControl',{targetId:incomingCallPeer,action:'decline'});incomingCallPeer=null;closeDialog('incomingCallDialog')}
+function declineIncomingCall(){clearIncomingCall(true)}
 async function handleCallControl(m){
   const from=m.fromId,action=m.action;if(!from)return;
   if(action==='ring'){
     if(activeCallPeer||incomingCallPeer){send('callControl',{targetId:from,action:'busy'});return}
-    incomingCallPeer=from;const caller=state?.players?.find(p=>p.id===from);$('incomingCallerName').textContent=`${caller?.name||'メンバー'}から着信です`;openDialog('incomingCallDialog');
-  }else if(action==='accept'&&activeCallPeer===from){await startVoiceChat();if(localVoiceStream){ensureVoicePeer(from,true);setVoiceStatus('音声通話に接続中…',true)}}
+    incomingCallPeer=from;const caller=state?.players?.find(p=>p.id===from);$('incomingCallerName').textContent=`${caller?.name||'メンバー'}から着信です`;openDialog('incomingCallDialog');updateCallUi();
+    if(incomingCallTimeoutId)clearTimeout(incomingCallTimeoutId);incomingCallTimeoutId=setTimeout(()=>{if(incomingCallPeer===from)clearIncomingCall(true)},20000);
+  }else if(action==='accept'&&activeCallPeer===from){clearCallTimeout();const started=await startVoiceChat();if(started&&localVoiceStream){ensureVoicePeer(from,true);armCallTimeout(from,15000,'音声接続が完了しなかったため通話を終了しました。');setVoiceStatus('音声通話に接続中…',true);updateCallUi()}}
   else if(['decline','busy'].includes(action)&&activeCallPeer===from){showNotice(action==='busy'?'相手は通話中です。':'通話が拒否されました。');hangUpCall(false)}
+  else if(action==='hangup'&&incomingCallPeer===from){showNotice('着信がキャンセルされました。');clearIncomingCall(false)}
   else if(action==='hangup'&&activeCallPeer===from){showNotice('通話が終了しました。');hangUpCall(false)}
 }
-function hangUpCall(notify=true){const peer=activeCallPeer;if(notify&&peer)send('callControl',{targetId:peer,action:'hangup'});activeCallPeer=null;stopVoiceChat();setVoiceStatus('メンバー一覧の📞から個別通話できます。');}
+function hangUpCall(notify=true){const peer=activeCallPeer;clearCallTimeout();if(notify&&peer)send('callControl',{targetId:peer,action:'hangup'});activeCallPeer=null;stopVoiceChat();setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi()}
 ui.players.addEventListener('click',e=>{const b=e.target.closest('.call-member');if(b)placeCall(b.dataset.callId)});
 $('acceptCallButton').onclick=acceptIncomingCall;$('declineCallButton').onclick=declineIncomingCall;$('hangupCallButton').onclick=()=>hangUpCall(true);
-addEventListener('beforeunload',stopVoiceChat);
+updateCallUi();
+addEventListener('beforeunload',()=>{hangUpCall(false);clearIncomingCall(false)});
 
 function openResult(w){$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'INTRUDER VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'侵入者の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
 function openDialog(id){const d=$(id);if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(d?.open)d.close()}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
