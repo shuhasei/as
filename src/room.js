@@ -358,7 +358,8 @@ export class GameRoom extends DurableObject {
       console.warn("Hidden Crew version mismatch", { clientVersion, serverVersion: MAP_VERSION });
     }
     if (this.players.has(id)) {
-      this.syncAll();
+      this.send(id, { type: "joined", id, room: this.roomCode, phase: this.phase });
+      this.send(id, { type: "state", state: this.publicState(id) });
       return;
     }
     const joiningAsSpectator = this.phase !== "lobby";
@@ -398,6 +399,7 @@ export class GameRoom extends DurableObject {
     });
     if (!this.hostId && !joiningAsSpectator) this.hostId = id;
     await this.persist();
+    this.send(id, { type: "joined", id, room: this.roomCode, phase: this.phase });
     this.syncAll();
   }
 
