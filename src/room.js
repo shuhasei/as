@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "wide-map-v9-minimap-fix";
+const MAP_VERSION = "wide-map-v10-forward-call";
 const LOCKERS = [{ id: "medical", x: -15.8, z: -10.7, exitX: -14.1, exitZ: -10.7 },{ id: "security", x: -15.8, z: 2.6, exitX: -14.1, exitZ: 2.6 },{ id: "electrical", x: 15.8, z: 10.6, exitX: 14.1, exitZ: 10.6 },{ id: "cargo", x: 15.8, z: -10.6, exitX: 14.1, exitZ: -10.6 }];
 const EMERGENCY_BUTTON = { x: 0, z: 0.5 };
 const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
@@ -314,6 +314,9 @@ export class GameRoom extends DurableObject {
         break;
       case "voiceSignal":
         this.voiceSignal(player, message);
+        break;
+      case "callControl":
+        this.callControl(player, message);
         break;
       case "sabotage":
         await this.startSabotage(player, message);
@@ -653,11 +656,19 @@ export class GameRoom extends DurableObject {
   }
 
   voiceSignal(player, message) {
-    if (this.phase !== "meeting" || !player.alive || !message.signal) return;
+    if (!message.signal || !this.sessions.has(player.id)) return;
     const targetId = String(message.targetId || "");
     const target = this.players.get(targetId);
     if (!target?.alive || !this.sessions.has(targetId)) return;
     this.send(targetId, { type: "voiceSignal", fromId: player.id, signal: message.signal });
+  }
+
+  callControl(player, message) {
+    const targetId = String(message.targetId || "");
+    const action = String(message.action || "");
+    if (!targetId || targetId === player.id || !["ring", "accept", "decline", "busy", "hangup"].includes(action)) return;
+    if (!this.players.has(targetId) || !this.sessions.has(targetId)) return;
+    this.send(targetId, { type: "callControl", fromId: player.id, action });
   }
 
   async startSabotage(player, message) {
