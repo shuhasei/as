@@ -4,7 +4,13 @@ const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "pur
 const MAP_VERSION = "wide-map-v13-compatible";
 const LOCKERS = [{ id: "medical", x: -15.8, z: -10.7, exitX: -14.1, exitZ: -10.7 },{ id: "security", x: -15.8, z: 2.6, exitX: -14.1, exitZ: 2.6 },{ id: "electrical", x: 15.8, z: 10.6, exitX: 14.1, exitZ: 10.6 },{ id: "cargo", x: 15.8, z: -10.6, exitX: 14.1, exitZ: -10.6 }];
 const EMERGENCY_BUTTON = { x: 0, z: 0.5 };
-const SPAWNS = [[-4,-1.5],[-1.5,-1.5],[1.5,-1.5],[4,-1.5],[-4,2],[-1.5,2],[1.5,2],[4,2],[-3,4],[3,4]];
+const SPAWNS = [
+  [-4, -2.5], [0, -2.5], [4, -2.5],
+  [-4, 0.5], [4, 0.5],
+  [-4, 3], [0, 3.5], [4, 3],
+  [-9, 0.5], [9, 0.5],
+  [-9, -2.5], [9, -2.5],
+];
 const TASKS = ["reactor", "wires", "scanner", "cargo", "fuel", "align"];
 const DEFAULT_SETTINGS = {
   impostors: 1,
@@ -365,18 +371,21 @@ export class GameRoom extends DurableObject {
       this.send(id, { type: "state", state: this.publicState(id) });
       return;
     }
-    const joiningAsSpectator = this.phase !== "lobby";
-    if (joiningAsSpectator && this.players.size >= 12) {
-      this.send(id, { type: "error", message: "観戦枠を含めて満員です。" });
-      return;
-    }
-    if ((!joiningAsSpectator && this.players.size >= 10) || (joiningAsSpectator && this.players.size >= 12)) {
+    // ゲーム開始後の参加者も観戦者にはせず、通常のクルーとして参加させます。
+    // 終了画面中だけは、次のロビーへ戻るまで待機扱いにします。
+    const joiningActiveGame = this.phase === "playing" || this.phase === "meeting";
+    const joiningAfterFinish = this.phase === "finished";
+    const maxPlayers = joiningActiveGame || joiningAfterFinish ? 12 : 10;
+    if (this.players.size >= maxPlayers) {
       this.send(id, { type: "error", message: "ルームは満員です。" });
       return;
     }
 
     const index = this.players.size;
     const [x, z] = SPAWNS[index % SPAWNS.length];
+    const lateJoinTasks = joiningActiveGame
+      ? shuffled(TASKS).slice(0, this.settings.tasks)
+      : [];
     this.players.set(id, {
       id,
       name: cleanName(message.name),
@@ -384,15 +393,15 @@ export class GameRoom extends DurableObject {
       x,
       z,
       rotation: 0,
-      alive: !joiningAsSpectator,
-      role: joiningAsSpectator ? "spectator" : "crew",
-      tasks: [],
+      alive: !joiningAfterFinish,
+      role: joiningAfterFinish ? "spectator" : "crew",
+      tasks: lateJoinTasks,
       completedTasks: new Set(),
       tasksDone: 0,
       emergencyUsed: false,
-      lastKillAt: 0,
-      reported: joiningAsSpectator,
-      spectator: joiningAsSpectator,
+      lastKillAt: Date.now(),
+      reported: joiningAfterFinish,
+      spectator: joiningAfterFinish,
       hidden: false,
       hiddenAt: null,
       hat: String(message.hat || "none").slice(0, 12),
@@ -400,7 +409,7 @@ export class GameRoom extends DurableObject {
       abilityUsed: false,
       downedAt: 0,
     });
-    if (!this.hostId && !joiningAsSpectator) this.hostId = id;
+    if (!this.hostId && !joiningAfterFinish) this.hostId = id;
     await this.persist();
     this.send(id, { type: "joined", id, room: this.roomCode, phase: this.phase });
     this.syncAll();
