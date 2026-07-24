@@ -4,7 +4,7 @@ const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf
 const MAP_VERSION='wide-map-v13-compatible';
 const TASKS={reactor:['リアクター調整',-13.8,8.8],wires:['配線修理',13.8,8.8],scanner:['生体スキャン',-13.8,-8.8],cargo:['貨物整理',13.8,-8.8],fuel:['燃料補給',0,9.2],align:['航路調整',0,-9.2]};
 const MAP_BOUNDS={minX:-18,maxX:18,minZ:-13,maxZ:13};
-const LOCKERS=[{id:'medical',x:-15.8,z:-10.7,exitX:-14.1,exitZ:-10.7,rot:Math.PI/2},{id:'security',x:-15.8,z:2.6,exitX:-14.1,exitZ:2.6,rot:Math.PI/2},{id:'electrical',x:15.8,z:10.6,exitX:14.1,exitZ:10.6,rot:-Math.PI/2},{id:'cargo',x:15.8,z:-10.6,exitX:14.1,exitZ:-10.6,rot:-Math.PI/2}];
+const LOCKERS=[{id:'medical',x:-15.8,z:-10.7,exitX:-14.2,exitZ:-11.85,rot:Math.PI/2},{id:'security',x:-15.8,z:2.6,exitX:-14.1,exitZ:2.6,rot:Math.PI/2},{id:'electrical',x:15.8,z:10.6,exitX:14.2,exitZ:11.85,rot:-Math.PI/2},{id:'cargo',x:15.8,z:-10.6,exitX:14.2,exitZ:-11.85,rot:-Math.PI/2}];
 const SECURITY_CONSOLE={x:-13.8,z:0.2};
 const EMERGENCY_BUTTON={x:0,z:.5};
 // 壁は出入口を3.4～4.0m確保し、キャラクター同士がすれ違える幅にしています。
@@ -339,6 +339,11 @@ function syncModels(){
     if(renderMode==='3d')m.traverse(o=>{if(o.material){o.material.transparent=!p.alive;o.material.opacity=p.alive?1:.28}});
     if(p.id===myId){
       localModel=m;
+      if(hiddenChanged){
+        localVelocity.set(0,0);
+        firstPersonInputSignature='';
+        firstPersonInputBaseYaw=firstPersonTargetYaw;
+      }
       if(!p.hidden&&collidesWithMap(m.position.x,m.position.z)){
         const safe=findNearestWalkablePosition(p.x,p.z);
         m.position.set(safe.x,0,safe.z);
