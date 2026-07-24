@@ -1,7 +1,8 @@
+
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "aurora-branch-map-v14";
+const MAP_VERSION = "aurora-realistic-tasks-v15";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -9,6 +10,8 @@ const LOCKERS = [
   { id: "storage", x: -12, z: -19.5, exitX: -10.4, exitZ: -19.5 },
 ];
 const EMERGENCY_BUTTON = { x: 0, z: 0 };
+const CARGO_PICKUP = { x: -6, z: -17 };
+const CARGO_DELIVERY = { x: 13.2, z: 6.1 };
 const SPAWNS = [
   [-4.5, -3.5], [0, -4.5], [4.5, -3.5],
   [-5, 0], [5, 0],
@@ -97,6 +100,7 @@ export class GameRoom extends DurableObject {
     this.players = new Map((saved.players || []).map((p) => [p.id, {
       ...p,
       completedTasks: new Set(p.completedTasks || []),
+      carryingCargo: Boolean(p.carryingCargo),
     }]));
     this.votes = new Map(saved.votes || []);
 
@@ -258,6 +262,7 @@ export class GameRoom extends DurableObject {
         spectator: Boolean(p.spectator),
         hidden: Boolean(p.hidden),
         hiddenAt: p.hidden ? p.hiddenAt || null : null,
+        carryingCargo: Boolean(p.carryingCargo),
         hat: p.hat || "none",
         shielded: Boolean(p.shielded) && (p.id === forId || this.phase === "finished"),
         abilityUsed: p.id === forId ? Boolean(p.abilityUsed) : undefined,
@@ -303,6 +308,9 @@ export class GameRoom extends DurableObject {
         break;
       case "taskComplete":
         await this.completeTask(player, message);
+        break;
+      case "cargoState":
+        await this.setCargoState(player, message);
         break;
       case "kill":
         await this.kill(player, message);
@@ -409,6 +417,7 @@ export class GameRoom extends DurableObject {
       spectator: joiningAfterFinish,
       hidden: false,
       hiddenAt: null,
+      carryingCargo: false,
       hat: String(message.hat || "none").slice(0, 12),
       shielded: false,
       abilityUsed: false,
@@ -500,6 +509,7 @@ export class GameRoom extends DurableObject {
         spectator: false,
         hidden: false,
         hiddenAt: null,
+        carryingCargo: false,
         shielded: false,
         abilityUsed: false,
         downedAt: 0,
@@ -523,10 +533,36 @@ export class GameRoom extends DurableObject {
     this.syncAll();
   }
 
+  async setCargoState(player, message) {
+    if (this.phase !== "playing" || !player.alive || player.role === "impostor" || player.spectator) return;
+    const active = Boolean(message.active);
+    if (active) {
+      if (!player.tasks.includes("cargo") || player.completedTasks.has("cargo")) return;
+      if (Math.hypot(player.x - CARGO_PICKUP.x, player.z - CARGO_PICKUP.z) > 3.2) {
+        this.send(player.id, { type: "error", message: "保管庫の貨物端末の近くで積み込んでください。" });
+        return;
+      }
+    }
+    player.carryingCargo = active;
+    await this.persist();
+    this.syncAll();
+  }
+
   async completeTask(player, message) {
     if (this.phase !== "playing" || !player.alive || player.role === "impostor" || player.spectator) return;
     const task = String(message.task || "");
     if (!player.tasks.includes(task) || player.completedTasks.has(task)) return;
+    if (task === "cargo") {
+      if (!player.carryingCargo) {
+        this.send(player.id, { type: "error", message: "先に保管庫で荷物を積み込んでください。" });
+        return;
+      }
+      if (Math.hypot(player.x - CARGO_DELIVERY.x, player.z - CARGO_DELIVERY.z) > 3.2) {
+        this.send(player.id, { type: "error", message: "荷物を管理室の搬入口まで運んでください。" });
+        return;
+      }
+      player.carryingCargo = false;
+    }
     player.completedTasks.add(task);
     player.tasksDone = player.completedTasks.size;
     await this.persist();
@@ -569,6 +605,7 @@ export class GameRoom extends DurableObject {
     }
     target.alive = false;
     target.hidden = false;
+    target.carryingCargo = false;
     target.reported = false;
     target.downedAt = Date.now();
     player.lastKillAt = Date.now();
@@ -640,6 +677,7 @@ export class GameRoom extends DurableObject {
       const target = this.players.get(top);
       if (target?.alive) {
         target.alive = false;
+        target.carryingCargo = false;
         ejected = {
           id: target.id,
           name: target.name,
@@ -880,6 +918,7 @@ export class GameRoom extends DurableObject {
         spectator: false,
         hidden: false,
         hiddenAt: null,
+        carryingCargo: false,
         shielded: false,
         abilityUsed: false,
         downedAt: 0,
