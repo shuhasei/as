@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-impostor-camera-v17';
+const MAP_VERSION='aurora-synced-cache-v19';
 const TASKS={
   reactor:['リアクター安定化',-28,18],
   engine:['エンジン出力調整',-28,6],
@@ -478,7 +478,7 @@ function updateCooldown(){
   if(ui.killCooldown)ui.killCooldown.textContent=remaining>0?`${Math.ceil(remaining/1000)}秒`:'';
   if(ui.kill&&me()?.role==='impostor')ui.kill.disabled=!canKill()||!nearest.player;
 }
-function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();requestAnimationFrame(adjustHudLayout);}
+function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();queueHudLayout();}
 function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;if(ui.sabotageTitle)ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind]||'妨害発生';if(ui.sabotageTimer)ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
 let animationFrameId=0;
 let miniMapEnabled=true;
@@ -1048,74 +1048,81 @@ if(chatPanel&&chatToggle){
   // スマホでは移動スティックを隠さないよう、最初はチャットを小さく表示する。
 
   if(mobileChatLayout())setChatCollapsed(true);
-  chatToggle.onclick=()=>{setChatCollapsed(!chatPanel.classList.contains('collapsed'));requestAnimationFrame(adjustHudLayout)};
+  chatToggle.onclick=()=>{setChatCollapsed(!chatPanel.classList.contains('collapsed'));queueHudLayout()};
+}
+let hudLayoutFrame=0;
+let lastHudLayoutKey='';
+function queueHudLayout(){
+  if(hudLayoutFrame)cancelAnimationFrame(hudLayoutFrame);
+  hudLayoutFrame=requestAnimationFrame(()=>{hudLayoutFrame=0;adjustHudLayout()});
+}
+function setHudStyle(el,property,value){
+  if(el&&el.style[property]!==value)el.style[property]=value;
 }
 function adjustHudLayout(){
   const action=ui.actionBar,chat=$('globalChatPanel'),hint=$('controlHint');
   if(!action||!chat)return;
   const mobile=matchMedia('(max-width:900px), (pointer:coarse)').matches;
-  const baseBottom=`calc(18px + env(safe-area-inset-bottom,0px))`;
-  action.style.left=mobile?'':'50%';
-  action.style.right=mobile?'':'auto';
-  action.style.bottom=baseBottom;
-  action.style.transform=mobile?'':'translateX(-50%)';
-  action.style.maxWidth='';
-  if(hint){
-    hint.style.left=mobile?'':'50%';
-    hint.style.right='auto';
-    hint.style.bottom='88px';
-    hint.style.transform=mobile?'':'translateX(-50%)';
-    hint.style.maxWidth='';
+  if(mobile){
+    const key=`mobile:${innerWidth}:${innerHeight}`;
+    if(key===lastHudLayoutKey)return;
+    lastHudLayoutKey=key;
+    for(const el of [action,hint]){
+      if(!el)continue;
+      for(const property of ['left','right','bottom','transform','maxWidth'])el.style.removeProperty(property.replace(/[A-Z]/g,m=>`-${m.toLowerCase()}`));
+    }
+    return;
   }
-  if(mobile||action.classList.contains('hidden'))return;
-  requestAnimationFrame(()=>{
-    const actionRect=action.getBoundingClientRect();
-    if(!actionRect.width)return;
-    const taskRect=$('taskPanel')?.getBoundingClientRect();
-    const mapRect=$('miniMap')?.getBoundingClientRect();
-    const chatRect=chat.getBoundingClientRect();
-    const leftLimit=(chat.classList.contains('collapsed')?18:chatRect.right+16);
-    let rightLimit=window.innerWidth-18;
-    if(taskRect&&taskRect.width)rightLimit=Math.min(rightLimit,taskRect.left-16);
-    if(mapRect&&mapRect.width)rightLimit=Math.min(rightLimit,mapRect.left-16);
-    const half=actionRect.width/2;
-    let center=window.innerWidth/2;
-    center=Math.max(center,leftLimit+half);
-    center=Math.min(center,rightLimit-half);
-    if(rightLimit-leftLimit<actionRect.width+24){
-      action.style.left=`${leftLimit}px`;
-      action.style.right='18px';
-      action.style.transform='none';
-      action.style.maxWidth=`${Math.max(180,rightLimit-leftLimit)}px`;
-      if(hint){
-        hint.style.left=`${leftLimit}px`;
-        hint.style.right='18px';
-        hint.style.transform='none';
-        hint.style.maxWidth=`${Math.max(180,rightLimit-leftLimit)}px`;
-      }
-      return;
-    }
-    action.style.left=`${center}px`;
-    action.style.right='auto';
-    action.style.transform='translateX(-50%)';
-    action.style.maxWidth=`${Math.max(180,rightLimit-leftLimit)}px`;
+  if(action.classList.contains('hidden'))return;
+  const taskRect=$('taskPanel')?.getBoundingClientRect();
+  const mapRect=$('miniMap')?.getBoundingClientRect();
+  const chatRect=chat.getBoundingClientRect();
+  const leftLimit=Math.round(chat.classList.contains('collapsed')?18:chatRect.right+16);
+  let rightLimit=Math.round(window.innerWidth-18);
+  if(taskRect&&taskRect.width)rightLimit=Math.min(rightLimit,Math.round(taskRect.left-16));
+  if(mapRect&&mapRect.width)rightLimit=Math.min(rightLimit,Math.round(mapRect.left-16));
+  const available=Math.max(180,rightLimit-leftLimit);
+  const naturalWidth=Math.min(action.scrollWidth||action.getBoundingClientRect().width,available);
+  const half=naturalWidth/2;
+  let center=Math.round(window.innerWidth/2);
+  center=Math.max(center,Math.ceil(leftLimit+half));
+  center=Math.min(center,Math.floor(rightLimit-half));
+  const narrow=available<naturalWidth+24;
+  const key=[window.innerWidth,window.innerHeight,chat.classList.contains('collapsed'),leftLimit,rightLimit,Math.round(naturalWidth),narrow].join(':');
+  if(key===lastHudLayoutKey)return;
+  lastHudLayoutKey=key;
+  setHudStyle(action,'bottom','calc(18px + env(safe-area-inset-bottom,0px))');
+  if(narrow){
+    setHudStyle(action,'left',`${leftLimit}px`);
+    setHudStyle(action,'right',`${Math.max(18,window.innerWidth-rightLimit)}px`);
+    setHudStyle(action,'transform','none');
+    setHudStyle(action,'maxWidth',`${available}px`);
     if(hint){
-      const hintRect=hint.getBoundingClientRect();
-      const hh=(hintRect.width||0)/2;
-      let hintCenter=center;
-      hintCenter=Math.max(hintCenter,leftLimit+hh);
-      hintCenter=Math.min(hintCenter,rightLimit-hh);
-      hint.style.left=`${hintCenter}px`;
-      hint.style.right='auto';
-      hint.style.transform='translateX(-50%)';
-      hint.style.maxWidth=`${Math.max(180,rightLimit-leftLimit)}px`;
+      setHudStyle(hint,'left',`${leftLimit}px`);
+      setHudStyle(hint,'right',`${Math.max(18,window.innerWidth-rightLimit)}px`);
+      setHudStyle(hint,'bottom','88px');
+      setHudStyle(hint,'transform','none');
+      setHudStyle(hint,'maxWidth',`${available}px`);
     }
-  });
+  }else{
+    setHudStyle(action,'left',`${center}px`);
+    setHudStyle(action,'right','auto');
+    setHudStyle(action,'transform','translateX(-50%)');
+    setHudStyle(action,'maxWidth',`${available}px`);
+    if(hint){
+      setHudStyle(hint,'left',`${center}px`);
+      setHudStyle(hint,'right','auto');
+      setHudStyle(hint,'bottom','88px');
+      setHudStyle(hint,'transform','translateX(-50%)');
+      setHudStyle(hint,'maxWidth',`${available}px`);
+    }
+  }
 }
-window.addEventListener('resize',adjustHudLayout,{passive:true});
-window.addEventListener('orientationchange',()=>setTimeout(adjustHudLayout,120),{passive:true});
-new MutationObserver(adjustHudLayout).observe(chatPanel,{attributes:true,attributeFilter:['class','style']});
-requestAnimationFrame(adjustHudLayout);
+window.addEventListener('resize',queueHudLayout,{passive:true});
+window.addEventListener('orientationchange',()=>setTimeout(queueHudLayout,120),{passive:true});
+new MutationObserver(()=>{lastHudLayoutKey='';queueHudLayout()}).observe(chatPanel,{attributes:true,attributeFilter:['class']});
+new MutationObserver(()=>{lastHudLayoutKey='';queueHudLayout()}).observe(ui.actionBar,{attributes:true,attributeFilter:['class']});
+queueHudLayout();
 
 const RTC_CONFIG={iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun2.l.google.com:19302']},{urls:'stun:global.stun.twilio.com:3478'}],iceCandidatePoolSize:8};
 const pendingIce=new Map(),voiceSignalQueues=new Map(),remoteAudioNodes=new Map();
@@ -1515,6 +1522,7 @@ $('profileSummary').textContent=profileText();
       max-width:calc(100vw - 620px);
       text-align:center;
       pointer-events:none;
+      transition:none !important;
     }
 
     #globalChatPanel{
