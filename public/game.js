@@ -20,44 +20,95 @@ const SOLID_PROPS=[
   {x:-13.8,z:9.8,w:1.6,d:1.6},{x:13.8,z:9.8,w:1.6,d:1.6},
   {x:-15.8,z:-10.7,w:1.15,d:.9},{x:-15.8,z:2.6,w:1.15,d:.9},{x:15.8,z:10.6,w:1.15,d:.9},{x:15.8,z:-10.6,w:1.15,d:.9}
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=1,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0;
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=1,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';
 const randomRoom=()=>Array.from({length:6},()=>('ABCDEFGHJKLMNPQRSTUVWXYZ23456789')[Math.floor(Math.random()*32)]).join('');
 const escapeHtml=s=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function send(type,data={}){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type,...data}))}
 function showNotice(t){ui.notice.textContent=t;ui.notice.classList.add('show');clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>ui.notice.classList.remove('show'),2200)}
 function createWebSocketUrl(room){
+  if(!['http:','https:'].includes(window.location.protocol))throw new Error('このゲームはCloudflareへ公開したURLから開いてください。');
   const protocol=window.location.protocol==='https:'?'wss:':'ws:';
-  const url=new URL('/ws',window.location.origin);
+  const url=new URL('/ws',window.location.href);
   url.protocol=protocol;
   url.searchParams.set('room',String(room).toUpperCase());
   return url.toString();
 }
-function connect(room,name){
-  const wsUrl=createWebSocketUrl(room);
-  console.info('[Hidden Crew] WebSocket:',wsUrl);
-  socket=new WebSocket(wsUrl);
-  socket.onopen=()=>send('join',{name,clientVersion:MAP_VERSION,color:$('colorSelect')?.value,hat:$('hatSelect')?.value});
-  socket.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(error){console.error('Invalid server message',error,e.data)}};
-  socket.onclose=(event)=>{hangUpCall(false);clearIncomingCall();showNotice(`接続が切れました（code: ${event.code}${event.reason ? ` / ${event.reason}` : ''}）。再読み込みしてください。`)};
-  socket.onerror=error=>{console.error('WebSocket error',error);showNotice('WebSocket接続に失敗しました。Cloudflareのログを確認してください。')};
+function setJoinControls(disabled){
+  const create=$('createButton'),join=$('joinButton');
+  if(create)create.disabled=disabled;if(join)join.disabled=disabled;if(ui.roomInput)ui.roomInput.disabled=disabled;if(ui.name)ui.name.disabled=disabled;
 }
-function handle(m){if(m.type==='hello'){myId=m.id;ui.room.textContent=m.room}else if(m.type==='state'){if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('新旧ファイルが混在していますが、互換モードで接続しました。')}state=m.state;ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();if(activeCallPeer){const callTarget=state.players?.find(p=>p.id===activeCallPeer);if(!callTarget?.connected||!callTarget?.alive){showNotice('通話相手が退出したため通話を終了しました。');hangUpCall(false)}else updateCallUi()}if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open)syncVoicePeers()}else if(m.type==='playerMoved'){const o=models.get(m.id);if(o){o.userData.target.set(m.x,0,m.z);o.userData.rotation=m.rotation;if(m.id===myId&&o.position.distanceTo(o.userData.target)>.9)o.position.lerp(o.userData.target,.35)}}else if(m.type==='error'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.message)}else if(m.type==='gameStarted'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.practiceMode?'練習モードを開始しました':'ゲームを開始しました')}else if(m.type==='meetingStarted')openMeeting(m.reason);else if(m.type==='meetingEnded'){closeDialog('meetingDialog');showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}else if(m.type==='voiceSignal')handleVoiceSignal(m);else if(m.type==='callControl')handleCallControl(m);else if(m.type==='chat')appendChat(m);else if(m.type==='sabotage')showNotice('妨害が発生しました');else if(m.type==='sabotageFixed')showNotice('妨害が解除されました');else if(m.type==='gameFinished'){hangUpCall(true);saveResult(m.winner);openResult(m.winner)}else if(m.type==='killEffect')flashScreen();else if(m.type==='abilityResult')showNotice(m.message);}
-$('createButton').onclick=()=>joinRoom(randomRoom());$('joinButton').onclick=()=>joinRoom(ui.roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g,''));
-function joinRoom(room){
-  if(room.length!==6){ui.message.textContent='6桁のルームコードを入力してください。';return}
-  ui.menu.classList.add('hidden');
-  ui.game.classList.remove('hidden');
-  // 3D描画で問題が起きても、ルーム接続まで止めない。
-  connect(room,ui.name.value);
-  requestAnimationFrame(()=>{
-    try{init3D()}catch(error){
-      console.error('[Hidden Crew] 3D initialization failed',error);
-      try{init2DFallback(error)}catch(fallbackError){
-        console.error('[Hidden Crew] fallback initialization failed',fallbackError);
-        showFatalLoadError(fallbackError);
-      }
-    }
-  });
+function setMenuMessage(message,isError=false){if(!ui.message)return;ui.message.textContent=message||'';ui.message.classList.toggle('error',!!isError)}
+function clearJoinTimeout(){if(joinTimeoutId){clearTimeout(joinTimeoutId);joinTimeoutId=0}}
+function ensureGameInitialized(){
+  if(gameInitialized)return;gameInitialized=true;
+  try{init3D()}catch(error){
+    console.error('[Hidden Crew] 3D initialization failed',error);
+    try{init2DFallback(error)}catch(fallbackError){console.error('[Hidden Crew] fallback initialization failed',fallbackError);showFatalLoadError(fallbackError)}
+  }
+}
+function finishJoin(room){
+  if(!joinPending&&gameInitialized)return;
+  clearJoinTimeout();joinPending=false;setJoinControls(false);setMenuMessage('');
+  ui.room.textContent=room||pendingRoom||'------';ui.menu.classList.add('hidden');ui.game.classList.remove('hidden');
+  ensureGameInitialized();showNotice('ルームに参加しました。');
+}
+function failJoin(message,closeSocket=true){
+  clearJoinTimeout();joinPending=false;setJoinControls(false);setMenuMessage(message||'ルームに参加できませんでした。',true);
+  ui.game.classList.add('hidden');ui.menu.classList.remove('hidden');
+  const ws=socket;socket=null;if(closeSocket&&ws&&ws.readyState<2){try{ws.close(4000,'Join failed')}catch{}}
+}
+function connect(room,name){
+  let wsUrl;
+  try{wsUrl=createWebSocketUrl(room)}catch(error){failJoin(error.message,false);return}
+  console.info('[Hidden Crew] WebSocket:',wsUrl);
+  const ws=new WebSocket(wsUrl);socket=ws;
+  ws.onopen=()=>{if(socket!==ws)return;ws.send(JSON.stringify({type:'join',name,clientVersion:MAP_VERSION,color:$('colorSelect')?.value,hat:$('hatSelect')?.value}))};
+  ws.onmessage=e=>{if(socket!==ws)return;try{handle(JSON.parse(e.data))}catch(error){console.error('Invalid server message',error,e.data);if(joinPending)failJoin('サーバーから不正な応答が返りました。')}};
+  ws.onclose=event=>{if(socket!==ws)return;socket=null;hangUpCall(false);clearIncomingCall(false);const detail=event.reason?`：${event.reason}`:'';if(joinPending)failJoin(`ルームへ接続できませんでした（code ${event.code}${detail}）。`,false);else showNotice(`接続が切れました（code: ${event.code}${detail}）。再読み込みしてください。`)};
+  ws.onerror=error=>{console.error('WebSocket error',error);if(joinPending)setMenuMessage('サーバーへ接続できません。公開先とWorker設定を確認してください。',true)};
+}
+function handle(m){
+  if(m.type==='hello'){
+    myId=m.id;ui.room.textContent=m.room;
+  }else if(m.type==='joined'){
+    if(m.id)myId=m.id;finishJoin(m.room);
+  }else if(m.type==='state'){
+    if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('新旧ファイルが混在していますが、互換モードで接続しました。')}
+    state=m.state;
+    if(joinPending&&myId&&state.players?.some(player=>player.id===myId))finishJoin(state.room);
+    ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();
+    if(activeCallPeer){const callTarget=state.players?.find(p=>p.id===activeCallPeer);if(!callTarget?.connected||!callTarget?.alive){showNotice('通話相手が退出したため通話を終了しました。');hangUpCall(false)}else updateCallUi()}
+    if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open)syncVoicePeers();
+  }else if(m.type==='playerMoved'){
+    const o=models.get(m.id);if(o){o.userData.target.set(m.x,0,m.z);o.userData.rotation=m.rotation;if(m.id===myId&&o.position.distanceTo(o.userData.target)>.9)o.position.lerp(o.userData.target,.35)}
+  }else if(m.type==='error'){
+    ui.start.disabled=false;ui.start.textContent='ゲーム開始';if(joinPending)failJoin(m.message);else showNotice(m.message);
+  }else if(m.type==='gameStarted'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.practiceMode?'練習モードを開始しました':'ゲームを開始しました')}
+  else if(m.type==='meetingStarted')openMeeting(m.reason);
+  else if(m.type==='meetingEnded'){closeDialog('meetingDialog');showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}
+  else if(m.type==='voiceSignal')handleVoiceSignal(m);
+  else if(m.type==='callControl')handleCallControl(m);
+  else if(m.type==='chat')appendChat(m);
+  else if(m.type==='sabotage')showNotice('妨害が発生しました');
+  else if(m.type==='sabotageFixed')showNotice('妨害が解除されました');
+  else if(m.type==='gameFinished'){hangUpCall(true);saveResult(m.winner);openResult(m.winner)}
+  else if(m.type==='killEffect')flashScreen();
+  else if(m.type==='abilityResult')showNotice(m.message);
+}
+$('createButton').onclick=()=>joinRoom(randomRoom());
+$('joinButton').onclick=()=>joinRoom(ui.roomInput.value);
+ui.roomInput.addEventListener('input',()=>{ui.roomInput.value=ui.roomInput.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)});
+ui.roomInput.addEventListener('keydown',event=>{if(event.key==='Enter')joinRoom(ui.roomInput.value)});
+function joinRoom(value){
+  if(joinPending)return;
+  const room=String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);
+  const name=String(ui.name.value||'Player').replace(/[<>]/g,'').trim().slice(0,16)||'Player';
+  ui.roomInput.value=room;ui.name.value=name;
+  if(room.length!==6){setMenuMessage('6桁のルームコードを入力してください。',true);ui.roomInput.focus();return}
+  if(socket&&socket.readyState<2){try{socket.close(1000,'Reconnect')}catch{}}
+  myId=null;state=null;pendingRoom=room;pendingName=name;joinPending=true;setJoinControls(true);setMenuMessage('ルームへ接続しています…');
+  joinTimeoutId=setTimeout(()=>{if(joinPending)failJoin('接続がタイムアウトしました。Cloudflareへの公開設定を確認してください。')},12000);
+  connect(room,name);
 }
 function showFatalLoadError(error){
   const canvas=$('gameCanvas');if(canvas)canvas.style.display='none';
