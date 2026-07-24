@@ -403,11 +403,11 @@ function moveLocal(dt){
   let inputX=screenRight;
   let inputZ=-screenForward;
 
-  // 一人称では、forward × up が画面右になるように右ベクトルを作る。
-  // 以前はこの符号が逆だったため、左右キーだけ反転していた。
+  // 一人称では、正面方向に対して時計回り90度を「右」とする。
+  // yaw=0（正面が+Z）のとき、D/→で+X、A/←で-Xへ正確に移動する。
   if(renderMode==='3d'&&cameraMode===2){
     const forwardX=Math.sin(firstPersonYaw),forwardZ=Math.cos(firstPersonYaw);
-    const rightX=-forwardZ,rightZ=forwardX;
+    const rightX=forwardZ,rightZ=-forwardX;
     inputX=forwardX*screenForward+rightX*screenRight;
     inputZ=forwardZ*screenForward+rightZ*screenRight;
   }
