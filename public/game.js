@@ -175,9 +175,11 @@ function drawMiniMap(){
   }
   ctx.globalAlpha=1;
 }
-function isTypingTarget(target){return target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||target?.isContentEditable}function isDown(...codes){return codes.some(code=>keyCodes.has(code))}function handleKeyDown(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.add(code);keys.add(key);if(e.repeat)return;if(code==='KeyE')useAction();if(code==='KeyR')reportAction();if(code==='KeyQ'||code==='Space')attackAction();if(code==='KeyM')meetingAction()}function handleKeyUp(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.delete(code);keys.delete(key)}function clearKeys(){keyCodes.clear();keys.clear();localVelocity.set(0,0);joy={x:0,y:0}}function init3D(){if(renderer)return;scene=new THREE.Scene();scene.background=new THREE.Color(0x020711);scene.fog=new THREE.FogExp2(0x020711,.026);camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,140);const canvas=$('gameCanvas');if(!canvas)throw new Error('gameCanvas が見つかりません');renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;clock=new THREE.Clock();buildWorld();addEventListener('resize',resize);addEventListener('keydown',handleKeyDown,{passive:false});addEventListener('keyup',handleKeyUp,{passive:false});addEventListener('blur',clearKeys);document.addEventListener('visibilitychange',()=>{if(document.hidden)clearKeys()});setupJoystick();animate();showNotice('移動: 矢印キー/WASD　攻撃: Q/Space　使用: E　通報: R')}
+function isTypingTarget(target){return target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||target?.isContentEditable}function isDown(...codes){return codes.some(code=>keyCodes.has(code))}function handleKeyDown(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.add(code);keys.add(key);if(e.repeat)return;if(code==='KeyE')useAction();if(code==='KeyR')reportAction();if(code==='KeyQ'||code==='Space')attackAction();if(code==='KeyM')meetingAction()}function handleKeyUp(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.delete(code);keys.delete(key)}function clearKeys(){keyCodes.clear();keys.clear();localVelocity.set(0,0);joy={x:0,y:0}}function init3D(){if(renderer)return;scene=new THREE.Scene();scene.background=new THREE.Color(0x020711);scene.fog=new THREE.FogExp2(0x020711,.026);camera=new THREE.PerspectiveCamera(68,innerWidth/innerHeight,.03,160);scene.add(camera);const canvas=$('gameCanvas');if(!canvas)throw new Error('gameCanvas が見つかりません');renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;clock=new THREE.Clock();buildWorld();addEventListener('resize',resize);addEventListener('keydown',handleKeyDown,{passive:false});addEventListener('keyup',handleKeyUp,{passive:false});addEventListener('blur',clearKeys);document.addEventListener('visibilitychange',()=>{if(document.hidden)clearKeys()});setupJoystick();animate();showNotice('移動: 矢印キー/WASD　攻撃: Q/Space　使用: E　通報: R')}
 function buildWorld(){
-  scene.add(new THREE.HemisphereLight(0x9be4ff,0x050b12,2.2));
+  scene.add(new THREE.HemisphereLight(0xb9efff,0x101927,3.15));
+  const cameraLight=new THREE.PointLight(0xc8f3ff,2.8,13,1.4);cameraLight.position.set(0,.15,.15);camera.add(cameraLight);
+  const headLamp=new THREE.SpotLight(0xe4f8ff,5.2,18,Math.PI/4,.55,1.15);headLamp.position.set(0,.05,.1);headLamp.target.position.set(0,-.15,6);camera.add(headLamp);camera.add(headLamp.target);
   const sun=new THREE.DirectionalLight(0xffffff,2.7);sun.position.set(7,18,9);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-24;sun.shadow.camera.right=24;sun.shadow.camera.top=18;sun.shadow.camera.bottom=-18;scene.add(sun);
   const floor=new THREE.Mesh(new THREE.BoxGeometry(38,.5,28),new THREE.MeshPhysicalMaterial({color:0x0b2948,metalness:.58,roughness:.34,clearcoat:.7}));floor.position.y=-.32;floor.receiveShadow=true;scene.add(floor);
   const roomFloors=[[-12,9,11.5,7.8,0x43232c],[0,9,11.5,7.8,0x493b22],[12,9,11.5,7.8,0x253c51],[-12,.25,11.5,8.5,0x26374e],[0,.25,11.5,8.5,0x2b3547],[12,.25,11.5,8.5,0x244047],[-12,-8.65,11.5,8.2,0x203b4b],[0,-8.65,11.5,8.2,0x1e3d43],[12,-8.65,11.5,8.2,0x493824]];
@@ -268,7 +270,39 @@ function moveLocal(dt){
   localModel.userData.target.copy(localModel.position);
   if(performance.now()-lastMove>40){lastMove=performance.now();send('move',{x:localModel.position.x,z:localModel.position.z,rotation:localModel.rotation.y,clientTime:Date.now()})}
 }
-function updateCamera(){if(!localModel)return;const pos=localModel.position;if(cameraMode===2){localModel.visible=false;const eye=new THREE.Vector3(pos.x,pos.y+1.48,pos.z);const forward=new THREE.Vector3(Math.sin(firstPersonYaw),0,Math.cos(firstPersonYaw));camera.position.lerp(eye,.35);camera.lookAt(eye.clone().add(forward.multiplyScalar(8)));return}const p=me();localModel.visible=p?!p.reported:true;const target=new THREE.Vector3(pos.x,pos.y+1,pos.z);const desired=cameraMode===0?new THREE.Vector3(pos.x,12,pos.z+12):new THREE.Vector3(pos.x,5.5,pos.z+7);camera.position.lerp(desired,.08);camera.lookAt(target)}
+function clearFirstPersonDirection(yaw){
+  const pos=localModel?.position;if(!pos)return yaw;
+  const candidates=[yaw,yaw+Math.PI/2,yaw-Math.PI/2,yaw+Math.PI];
+  let best=yaw,bestClear=-1;
+  for(const angle of candidates){
+    let clear=0;
+    for(let d=.8;d<=5;d+=.45){
+      const x=pos.x+Math.sin(angle)*d,z=pos.z+Math.cos(angle)*d;
+      if(collidesWithMap(x,z,.16))break;
+      clear=d;
+    }
+    if(clear>bestClear){bestClear=clear;best=angle}
+  }
+  return best;
+}
+function updateCamera(){
+  if(!localModel||!camera)return;
+  const pos=localModel.position;
+  if(cameraMode===2){
+    localModel.visible=false;
+    camera.fov=74;camera.near=.03;camera.updateProjectionMatrix();
+    const eye=new THREE.Vector3(pos.x,pos.y+1.72,pos.z);
+    const forward=new THREE.Vector3(Math.sin(firstPersonYaw),-.075,Math.cos(firstPersonYaw)).normalize();
+    camera.position.copy(eye);
+    camera.lookAt(eye.clone().addScaledVector(forward,10));
+    return;
+  }
+  camera.fov=cameraMode===0?58:66;camera.near=.08;camera.updateProjectionMatrix();
+  const p=me();localModel.visible=p?!p.reported&&!p.hidden:true;
+  const target=new THREE.Vector3(pos.x,pos.y+1,pos.z);
+  const desired=cameraMode===0?new THREE.Vector3(pos.x,12,pos.z+12):new THREE.Vector3(pos.x,5.8,pos.z+7.8);
+  camera.position.lerp(desired,.11);camera.lookAt(target);
+}
 function updateNearest(){
   nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};
   if(!localModel||!state)return;
@@ -292,7 +326,7 @@ function updateNearest(){
 function updateLockerVisuals(dt){const p=me();for(const locker of LOCKERS){const visual=lockerVisuals.get(locker.id);if(!visual)continue;const occupied=(state?.players||[]).some(x=>x.hidden&&x.hiddenAt===locker.id);const nearby=nearest.locker?.id===locker.id;const target=occupied?1:(nearby?.22:0);visual.userData.open+=(target-visual.userData.open)*(1-Math.exp(-10*dt));visual.userData.doorPivot.rotation.y=-visual.userData.open*1.45;visual.userData.lamp.material.color.setHex(occupied?0xffb347:nearby?0x77ff9c:0x63f4ff)}}
 function useAction(){const p=me();if(!p)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(!nearest.task)return;if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}if(p.role!=='impostor'&&!p.spectator&&(p.tasks||[]).includes(nearest.task)&&!(p.completedTasks||[]).includes(nearest.task))openTask(nearest.task);else showNotice('この端末に用事はありません')}
 function reportAction(){if(nearest.body)send('report',{bodyId:nearest.body});else showNotice('近くに通報できる対象がありません')}function attackAction(){const p=me();if(!p||state?.phase!=='playing')return;if(p.role!=='impostor'){showNotice('攻撃は侵入者だけが使えます');return}if(!canKill()){showNotice('攻撃のクールダウン中です');return}if(!nearest.player){showNotice('攻撃できる相手に近づいてください');return}send('kill',{targetId:nearest.player})}function meetingAction(){if(!nearest.emergency){showNotice('中央の緊急ボタンに近づいてください');return}send('meeting')}
-ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{cameraMode=(cameraMode+1)%3;if(cameraMode===2&&localModel)firstPersonYaw=localModel.rotation.y;const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(labels[cameraMode]);$('cameraButton').textContent=`${labels[(cameraMode+1)%3]}へ切替`};
+ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{cameraMode=(cameraMode+1)%3;if(cameraMode===2&&localModel){firstPersonYaw=clearFirstPersonDirection(Number(localModel.rotation.y)||0);camera.position.set(localModel.position.x,localModel.position.y+1.72,localModel.position.z)}const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(labels[cameraMode]);$('cameraButton').textContent=`${labels[(cameraMode+1)%3]}へ切替`};
 ui.settings.onclick=()=>{const s=state.settings||{};$('settingImpostors').value=s.impostors;$('settingTasks').value=s.tasks;$('settingSpeed').value=s.speed;$('settingKillCooldown').value=s.killCooldown;$('settingMeeting').value=s.meetingTime;$('settingReveal').value=s.revealRoles?'yes':'no';openDialog('settingsDialog')};$('saveSettingsButton').onclick=()=>{send('settings',{settings:{impostors:+$('settingImpostors').value,tasks:+$('settingTasks').value,speed:+$('settingSpeed').value,killCooldown:+$('settingKillCooldown').value,meetingTime:+$('settingMeeting').value,revealRoles:$('settingReveal').value==='yes'}});closeDialog('settingsDialog')};document.querySelectorAll('[data-sabotage]').forEach(b=>b.onclick=()=>{send('sabotage',{kind:b.dataset.sabotage});closeDialog('sabotageDialog')});document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog(b.dataset.close));
 
 const ROLE_LABELS={crew:'クルー',impostor:'侵入者',doctor:'医者',detective:'探偵',guard:'警備員',spectator:'観戦者'};
