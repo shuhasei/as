@@ -164,6 +164,34 @@ function syncModels(){if(!state)return;const active=new Set();for(const p of sta
 function me(){return state?.players.find(p=>p.id===myId)}
 function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'侵入者':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span>${escapeHtml(x.name)}${x.host?' ★':''}</span></div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は侵入者だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${TASKS[t]?.[0]||t}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();}
 function updateSabotage(){const s=state?.sabotage;ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind];ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
+function drawMiniMap(){
+  const canvas=ui.miniMap;
+  if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  if(!ctx)return;
+  const width=canvas.width||220,height=canvas.height||160,padding=8;
+  const mapWidth=MAP_BOUNDS.maxX-MAP_BOUNDS.minX,mapDepth=MAP_BOUNDS.maxZ-MAP_BOUNDS.minZ;
+  const scale=Math.min((width-padding*2)/mapWidth,(height-padding*2)/mapDepth);
+  const offsetX=(width-mapWidth*scale)/2-MAP_BOUNDS.minX*scale;
+  const offsetZ=(height-mapDepth*scale)/2-MAP_BOUNDS.minZ*scale;
+  const sx=x=>offsetX+x*scale,sz=z=>offsetZ+z*scale;
+  ctx.clearRect(0,0,width,height);
+  ctx.fillStyle='rgba(2,8,18,.94)';ctx.fillRect(0,0,width,height);
+  ctx.fillStyle='#0b2948';ctx.fillRect(sx(MAP_BOUNDS.minX),sz(MAP_BOUNDS.minZ),mapWidth*scale,mapDepth*scale);
+  ctx.strokeStyle='rgba(108,218,255,.45)';ctx.lineWidth=1;ctx.strokeRect(sx(MAP_BOUNDS.minX),sz(MAP_BOUNDS.minZ),mapWidth*scale,mapDepth*scale);
+  ctx.fillStyle='#14263d';for(const o of WALLS)ctx.fillRect(sx(o.x-o.w/2),sz(o.z-o.d/2),Math.max(1,o.w*scale),Math.max(1,o.d*scale));
+  ctx.fillStyle='#26384b';for(const o of SOLID_PROPS)ctx.fillRect(sx(o.x-o.w/2),sz(o.z-o.d/2),Math.max(1,o.w*scale),Math.max(1,o.d*scale));
+  ctx.fillStyle='#355064';ctx.beginPath();ctx.arc(sx(EMERGENCY_BUTTON.x),sz(EMERGENCY_BUTTON.z),Math.max(2,2.25*scale),0,Math.PI*2);ctx.fill();
+  for(const p of state?.players||[]){
+    if(p.reported||p.hidden)continue;
+    const model=models.get(p.id),x=model?.position?.x??p.x,z=model?.position?.z??p.z;
+    const isMe=p.id===myId;
+    const hex=(COLORS[p.color]||0xffffff).toString(16).padStart(6,'0');
+    ctx.globalAlpha=p.alive?1:.35;ctx.fillStyle=`#${hex}`;ctx.beginPath();ctx.arc(sx(x),sz(z),isMe?4.5:3,0,Math.PI*2);ctx.fill();
+    if(isMe){ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke()}
+  }
+  ctx.globalAlpha=1;
+}
 function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(state?.phase==='playing'&&localModel)moveLocal(dt);for(const m of models.values()){if(m!==localModel){const a=1-Math.exp(-12*dt);m.position.lerp(m.userData.target,a);m.rotation.y+=(m.userData.rotation-m.rotation.y)*(1-Math.exp(-14*dt))}}updateNearest();if(renderMode==='3d'){updateLockerVisuals(dt);updateCamera(dt)}drawMiniMap();updateCooldown();updateSabotage();if(renderMode==='3d')renderer.render(scene,camera);else draw2DMap()}
 function collidesWithMap(x,z,r=.62){
   if(x-r<MAP_BOUNDS.minX||x+r>MAP_BOUNDS.maxX||z-r<MAP_BOUNDS.minZ||z+r>MAP_BOUNDS.maxZ)return true;
