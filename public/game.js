@@ -20,7 +20,7 @@ const SOLID_PROPS=[
   {x:-13.8,z:9.8,w:1.6,d:1.6},{x:13.8,z:9.8,w:1.6,d:1.6},
   {x:-15.8,z:-10.7,w:1.15,d:.9},{x:-15.8,z:2.6,w:1.15,d:.9},{x:15.8,z:10.6,w:1.15,d:.9},{x:15.8,z:-10.6,w:1.15,d:.9}
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,cameraMode=0,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false;
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;const localVelocity=new THREE.Vector2();let lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false;
 const randomRoom=()=>Array.from({length:6},()=>('ABCDEFGHJKLMNPQRSTUVWXYZ23456789')[Math.floor(Math.random()*32)]).join('');
 const escapeHtml=s=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function send(type,data={}){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type,...data}))}
@@ -52,7 +52,10 @@ function joinRoom(room){
   requestAnimationFrame(()=>{
     try{init3D()}catch(error){
       console.error('[Hidden Crew] 3D initialization failed',error);
-      showFatalLoadError(error);
+      try{init2DFallback(error)}catch(fallbackError){
+        console.error('[Hidden Crew] fallback initialization failed',fallbackError);
+        showFatalLoadError(fallbackError);
+      }
     }
   });
 }
@@ -60,9 +63,65 @@ function showFatalLoadError(error){
   const canvas=$('gameCanvas');if(canvas)canvas.style.display='none';
   let panel=$('loadErrorPanel');
   if(!panel){panel=document.createElement('div');panel.id='loadErrorPanel';panel.className='load-error-panel glass';document.getElementById('gameScreen')?.append(panel)}
-  panel.innerHTML='<h2>マップを読み込めませんでした</h2><p>古いファイルが残っている可能性があります。</p><button id="reloadFreshButton" class="primary">最新版を読み直す</button>';
+  const detail=escapeHtml(error?.message||String(error||'不明なエラー'));
+  panel.innerHTML=`<h2>マップを読み込めませんでした</h2><p>描画処理でエラーが発生しました。</p><p class="error-detail">${detail}</p><button id="reloadFreshButton" class="primary">最新版を読み直す</button>`;
   panel.querySelector('#reloadFreshButton').onclick=()=>{const url=new URL(location.href);url.searchParams.set('refresh',Date.now().toString());location.replace(url.toString())};
   showNotice('3Dマップの読み込みに失敗しました。最新版を読み直してください。');
+}
+function init2DFallback(originalError){
+  renderMode='2d';
+  renderer=null;scene=null;camera=null;
+  const canvas=$('gameCanvas');
+  if(!canvas)throw new Error('gameCanvas が見つかりません');
+  canvas.style.display='block';
+  canvas2d=canvas.getContext('2d',{alpha:false});
+  if(!canvas2d)throw new Error('Canvas 2Dも利用できません');
+  clock=new THREE.Clock();
+  resize();
+  addEventListener('resize',resize);
+  addEventListener('keydown',handleKeyDown,{passive:false});
+  addEventListener('keyup',handleKeyUp,{passive:false});
+  addEventListener('blur',clearKeys);
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)clearKeys()});
+  setupJoystick();
+  syncModels();
+  animate();
+  const panel=$('loadErrorPanel');if(panel)panel.remove();
+  showNotice('3D表示を利用できないため、軽量マップで開始しました。');
+  console.warn('[Hidden Crew] 2D fallback enabled:',originalError);
+}
+function makeFallbackModel(player){
+  return {position:new THREE.Vector3(player.x||0,0,player.z||0),rotation:{y:player.rotation||0},visible:true,userData:{target:new THREE.Vector3(player.x||0,0,player.z||0),rotation:player.rotation||0,hidden:Boolean(player.hidden)}};
+}
+function draw2DMap(){
+  if(!canvas2d)return;
+  const canvas=$('gameCanvas'),ctx=canvas2d,w=canvas.width,h=canvas.height;
+  const scale=Math.min(w/42,h/32),ox=w/2,oz=h/2;
+  const sx=x=>ox+x*scale,sz=z=>oz+z*scale;
+  ctx.fillStyle='#020711';ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#0b2948';ctx.fillRect(sx(-18),sz(-13),36*scale,26*scale);
+  ctx.strokeStyle='#245b79';ctx.lineWidth=Math.max(1,scale*.05);ctx.strokeRect(sx(-18),sz(-13),36*scale,26*scale);
+  ctx.fillStyle='#14263d';
+  for(const o of WALLS)ctx.fillRect(sx(o.x-o.w/2),sz(o.z-o.d/2),o.w*scale,o.d*scale);
+  ctx.fillStyle='#26384b';
+  for(const o of SOLID_PROPS)ctx.fillRect(sx(o.x-o.w/2),sz(o.z-o.d/2),o.w*scale,o.d*scale);
+  ctx.fillStyle='#355064';ctx.beginPath();ctx.arc(sx(0),sz(.5),2.25*scale,0,Math.PI*2);ctx.fill();
+  for(const [id,[name,x,z]] of Object.entries(TASKS)){
+    ctx.fillStyle='#46dfff';ctx.fillRect(sx(x)-.45*scale,sz(z)-.45*scale,.9*scale,.9*scale);
+    ctx.fillStyle='#dffcff';ctx.font=`${Math.max(10,scale*.38)}px sans-serif`;ctx.textAlign='center';ctx.fillText(name,sx(x),sz(z)-.65*scale);
+  }
+  for(const locker of LOCKERS){
+    const occupied=state?.players?.some(p=>p.hidden&&p.hiddenAt===locker.id);
+    ctx.fillStyle=occupied?'#ffb34d':'#3b6680';ctx.fillRect(sx(locker.x)-.55*scale,sz(locker.z)-.45*scale,1.1*scale,.9*scale);
+  }
+  for(const p of state?.players||[]){
+    if(p.reported||p.hidden)continue;
+    const model=models.get(p.id),x=model?.position?.x??p.x,z=model?.position?.z??p.z;
+    const hex=(COLORS[p.color]||0xffffff).toString(16).padStart(6,'0');
+    ctx.globalAlpha=p.alive?1:.35;ctx.fillStyle=`#${hex}`;ctx.beginPath();ctx.arc(sx(x),sz(z),.58*scale,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;ctx.fillStyle='#ffffff';ctx.font=`bold ${Math.max(11,scale*.42)}px sans-serif`;ctx.textAlign='center';ctx.fillText(p.name,sx(x),sz(z)-.85*scale);
+  }
+  ctx.fillStyle='rgba(2,7,17,.75)';ctx.fillRect(10,h-40,310,30);ctx.fillStyle='#dffcff';ctx.textAlign='left';ctx.font='14px sans-serif';ctx.fillText('軽量マップ表示中（操作・機能はそのまま使えます）',20,h-20);
 }
 function isTypingTarget(target){return target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||target?.isContentEditable}function isDown(...codes){return codes.some(code=>keyCodes.has(code))}function handleKeyDown(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.add(code);keys.add(key);if(e.repeat)return;if(code==='KeyE')useAction();if(code==='KeyR')reportAction();if(code==='KeyQ'||code==='Space')attackAction();if(code==='KeyM')meetingAction()}function handleKeyUp(e){if(isTypingTarget(e.target))return;const code=e.code;const key=String(e.key||'').toLowerCase();if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code))e.preventDefault();keyCodes.delete(code);keys.delete(key)}function clearKeys(){keyCodes.clear();keys.clear();localVelocity.set(0,0);joy={x:0,y:0}}function init3D(){if(renderer)return;scene=new THREE.Scene();scene.background=new THREE.Color(0x020711);scene.fog=new THREE.FogExp2(0x020711,.026);camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,140);const canvas=$('gameCanvas');if(!canvas)throw new Error('gameCanvas が見つかりません');renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;clock=new THREE.Clock();buildWorld();addEventListener('resize',resize);addEventListener('keydown',handleKeyDown,{passive:false});addEventListener('keyup',handleKeyUp,{passive:false});addEventListener('blur',clearKeys);document.addEventListener('visibilitychange',()=>{if(document.hidden)clearKeys()});setupJoystick();animate();showNotice('移動: 矢印キー/WASD　攻撃: Q/Space　使用: E　通報: R')}
 function buildWorld(){
@@ -89,11 +148,11 @@ function buildWorld(){
   const starGeo=new THREE.BufferGeometry(),pts=[];for(let i=0;i<1200;i++)pts.push((Math.random()-.5)*115,Math.random()*45+5,(Math.random()-.5)*115);starGeo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:.09})));
 }
 function createCrewmate(c){const group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[c]||0xffffff,roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=true;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=true;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=true;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);group.userData.target=new THREE.Vector3();group.userData.rotation=0;return group}
-function syncModels(){if(!state)return;const active=new Set();for(const p of state.players){active.add(p.id);let m=models.get(p.id);const created=!m;if(created){m=createCrewmate(p.color);models.set(p.id,m);scene.add(m)}const hiddenChanged=m.userData.hidden!==Boolean(p.hidden);m.userData.hidden=Boolean(p.hidden);m.userData.target.set(p.x,0,p.z);m.userData.rotation=p.rotation;if(created||p.id===myId&&(!localModel||hiddenChanged)){m.position.set(p.x,0,p.z);m.rotation.y=p.rotation||0}m.visible=!p.reported&&!p.hidden;m.traverse(o=>{if(o.material){o.material.transparent=!p.alive;o.material.opacity=p.alive?1:.28}});if(p.id===myId){localModel=m;if(!p.hidden&&collidesWithMap(m.position.x,m.position.z)){m.position.set(p.x,0,p.z);m.userData.target.copy(m.position);localVelocity.set(0,0)}}}for(const[id,m]of models)if(!active.has(id)){scene.remove(m);models.delete(id)}}
+function syncModels(){if(!state)return;const active=new Set();for(const p of state.players){active.add(p.id);let m=models.get(p.id);const created=!m;if(created){m=renderMode==='2d'?makeFallbackModel(p):createCrewmate(p.color);models.set(p.id,m);if(renderMode==='3d')scene.add(m)}const hiddenChanged=m.userData.hidden!==Boolean(p.hidden);m.userData.hidden=Boolean(p.hidden);m.userData.target.set(p.x,0,p.z);m.userData.rotation=p.rotation;if(created||p.id===myId&&(!localModel||hiddenChanged)){m.position.set(p.x,0,p.z);m.rotation.y=p.rotation||0}m.visible=!p.reported&&!p.hidden;if(renderMode==='3d')m.traverse(o=>{if(o.material){o.material.transparent=!p.alive;o.material.opacity=p.alive?1:.28}});if(p.id===myId){localModel=m;if(!p.hidden&&collidesWithMap(m.position.x,m.position.z)){m.position.set(p.x,0,p.z);m.userData.target.copy(m.position);localVelocity.set(0,0)}}}for(const[id,m]of models)if(!active.has(id)){if(renderMode==='3d')scene.remove(m);models.delete(id)}}
 function me(){return state?.players.find(p=>p.id===myId)}
 function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'侵入者':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span>${escapeHtml(x.name)}${x.host?' ★':''}</span></div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は侵入者だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${TASKS[t]?.[0]||t}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();}
 function updateSabotage(){const s=state?.sabotage;ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind];ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
-function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(state?.phase==='playing'&&localModel)moveLocal(dt);for(const m of models.values()){if(m!==localModel){const a=1-Math.exp(-12*dt);m.position.lerp(m.userData.target,a);m.rotation.y+=(m.userData.rotation-m.rotation.y)*(1-Math.exp(-14*dt))}}updateNearest();updateLockerVisuals(dt);updateCamera(dt);drawMiniMap();updateCooldown();updateSabotage();renderer.render(scene,camera)}
+function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);if(state?.phase==='playing'&&localModel)moveLocal(dt);for(const m of models.values()){if(m!==localModel){const a=1-Math.exp(-12*dt);m.position.lerp(m.userData.target,a);m.rotation.y+=(m.userData.rotation-m.rotation.y)*(1-Math.exp(-14*dt))}}updateNearest();if(renderMode==='3d'){updateLockerVisuals(dt);updateCamera(dt)}drawMiniMap();updateCooldown();updateSabotage();if(renderMode==='3d')renderer.render(scene,camera);else draw2DMap()}
 function collidesWithMap(x,z,r=.62){
   if(x-r<MAP_BOUNDS.minX||x+r>MAP_BOUNDS.maxX||z-r<MAP_BOUNDS.minZ||z+r>MAP_BOUNDS.maxZ)return true;
   for(const o of [...WALLS,...SOLID_PROPS])if(Math.abs(x-o.x)<o.w/2+r&&Math.abs(z-o.z)<o.d/2+r)return true;
@@ -190,7 +249,7 @@ addEventListener('beforeunload',stopVoiceChat);
 
 function openResult(w){$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'INTRUDER VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'侵入者の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
 function openDialog(id){const d=$(id);if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(d?.open)d.close()}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
-function setupJoystick(){let active=false;const move=e=>{if(!active)return;const r=ui.joystick.getBoundingClientRect(),x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2),m=Math.min(45,Math.hypot(x,y)),a=Math.atan2(y,x);joy={x:Math.cos(a)*m/45,y:Math.sin(a)*m/45};ui.stick.style.transform=`translate(${joy.x*36}px,${joy.y*36}px)`};ui.joystick.onpointerdown=e=>{active=true;ui.joystick.setPointerCapture(e.pointerId);move(e)};ui.joystick.onpointermove=move;ui.joystick.onpointerup=()=>{active=false;joy={x:0,y:0};ui.stick.style.transform=''}}function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}
+function setupJoystick(){let active=false;const move=e=>{if(!active)return;const r=ui.joystick.getBoundingClientRect(),x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2),m=Math.min(45,Math.hypot(x,y)),a=Math.atan2(y,x);joy={x:Math.cos(a)*m/45,y:Math.sin(a)*m/45};ui.stick.style.transform=`translate(${joy.x*36}px,${joy.y*36}px)`};ui.joystick.onpointerdown=e=>{active=true;ui.joystick.setPointerCapture(e.pointerId);move(e)};ui.joystick.onpointermove=move;ui.joystick.onpointerup=()=>{active=false;joy={x:0,y:0};ui.stick.style.transform=''}}function resize(){const canvas=$('gameCanvas');if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(innerWidth*ratio));canvas.height=Math.max(1,Math.floor(innerHeight*ratio));canvas.style.width=innerWidth+'px';canvas.style.height=innerHeight+'px';return}camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}
 setInterval(()=>{if(state?.phase==='meeting')$('meetingTimer').textContent=`残り ${Math.max(0,Math.ceil((state.meetingEndsAt-Date.now())/1000))}秒`},500);
 
 $('profileSummary').textContent=profileText();
