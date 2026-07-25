@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-visible-corpse-v39';
+const MAP_VERSION='aurora-group-talk-layout-v40';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -135,7 +135,7 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0;const groupVoicePlaybackAt=new Map();
 let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
@@ -215,7 +215,7 @@ function connect(room,name){
   const ws=new WebSocket(wsUrl);socket=ws;
   ws.onopen=()=>{if(socket!==ws)return;ws.send(JSON.stringify({type:'join',name,clientVersion:MAP_VERSION,color:$('colorSelect')?.value,hat:$('hatSelect')?.value}))};
   ws.onmessage=e=>{if(socket!==ws)return;try{handle(JSON.parse(e.data))}catch(error){console.error('Invalid server message',error,e.data);if(joinPending)failJoin('サーバーから不正な応答が返りました。')}};
-  ws.onclose=event=>{if(socket!==ws)return;socket=null;stopMeetingVoice();hangUpCall(false);clearIncomingCall(false);const detail=event.reason?`：${event.reason}`:'';if(joinPending)failJoin(`ルームへ接続できませんでした（code ${event.code}${detail}）。`,false);else showNotice(`接続が切れました（code: ${event.code}${detail}）。再読み込みしてください。`)};
+  ws.onclose=event=>{if(socket!==ws)return;socket=null;stopMeetingVoice();stopGroupVoice();hangUpCall(false);clearIncomingCall(false);const detail=event.reason?`：${event.reason}`:'';if(joinPending)failJoin(`ルームへ接続できませんでした（code ${event.code}${detail}）。`,false);else showNotice(`接続が切れました（code: ${event.code}${detail}）。再読み込みしてください。`)};
   ws.onerror=error=>{console.error('WebSocket error',error);if(joinPending)setMenuMessage('サーバーへ接続できません。公開先とWorker設定を確認してください。',true)};
 }
 function handle(m){
@@ -230,7 +230,7 @@ function handle(m){
     state=m.state;syncCargoCarryState();
     if(state.phase!=='meeting'&&(meetingVoiceStream||meetingVoiceProcessor))stopMeetingVoice();
     if(joinPending&&myId&&state.players?.some(player=>player.id===myId))finishJoin(state.room);
-    ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();
+    ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();updateGroupVoiceUi();
     const currentSelf=me();
     if(wasAlive===true&&currentSelf&&!currentSelf.alive){
       spectatorTargetId=null;clearKeys();localVelocity.set(0,0);
@@ -254,11 +254,12 @@ function handle(m){
   }else if(m.type==='error'){
     ui.start.disabled=false;ui.start.textContent='ゲーム開始';if(joinPending)failJoin(m.message);else showNotice(m.message);
   }else if(m.type==='gameStarted'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.practiceMode?'1人練習：あなたは人狼です':'ゲームを開始しました')}
-  else if(m.type==='meetingStarted')openMeeting(m.reason);
-  else if(m.type==='meetingEnded'){stopMeetingVoice();closeDialog('meetingDialog');showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}
+  else if(m.type==='meetingStarted'){openMeeting(m.reason);updateGroupVoiceUi()}
+  else if(m.type==='meetingEnded'){stopMeetingVoice();closeDialog('meetingDialog');updateGroupVoiceUi();showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}
   else if(m.type==='voiceSignal')handleVoiceSignal(m);
   else if(m.type==='voiceAudio')handleVoiceAudio(m);
   else if(m.type==='meetingVoiceAudio')handleMeetingVoiceAudio(m);
+  else if(m.type==='groupVoiceAudio')handleGroupVoiceAudio(m);
   else if(m.type==='callControl')handleCallControl(m);
   else if(m.type==='chat')appendChat(m);
   else if(m.type==='sabotage')showNotice('妨害が発生しました');
@@ -1484,7 +1485,7 @@ function openTask(id){
 }
 function finishTask(id){const counts=activeTaskCountsProgress&&activeTaskCompletionId===id;if(counts){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.tasks=(s.tasks||0)+1;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));send('taskComplete',{task:id})}closeDialog('taskDialog');showNotice(counts?'タスク完了！':'模擬操作完了（進捗には加算されません）')}
 $('taskDialog').addEventListener('close',()=>{resetTaskRuntime();resetPerformanceSampling({restoreQuality:true,delay:6000})});
-function openMeeting(reason){if(activeCallPeer)hangUpCall(true);stopMeetingVoice();$('meetingReason').textContent=reason;renderVotes();openDialog('meetingDialog');setVoiceStatus('「音声を聞く」を押すと、会議中の全員の声が聞こえます。');updateMeetingVoiceUi();enableMeetingAudio(false)}
+function openMeeting(reason){if(activeCallPeer)hangUpCall(true);stopMeetingVoice();updateGroupVoiceUi();$('meetingReason').textContent=reason;renderVotes();openDialog('meetingDialog');setVoiceStatus('「音声を聞く」を押すと、会議中の全員の声が聞こえます。');updateMeetingVoiceUi();enableMeetingAudio(false)}
 function renderVotes(){if(!state)return;const root=$('voteList');root.innerHTML='';state.players.filter(p=>p.alive).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});$('skipVoteButton').onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
 function bindChatForm(formId,inputId){const form=$(formId),input=$(inputId);if(!form||!input)return;form.onsubmit=e=>{e.preventDefault();const text=input.value.trim();if(!text)return;if(socket?.readyState!==WebSocket.OPEN){showNotice('チャットサーバーへ接続されていません');return}send('chat',{text});input.value='';input.focus()}}
@@ -1512,9 +1513,32 @@ function queueHudLayout(){
 function setHudStyle(el,property,value){
   if(el&&el.style[property]!==value)el.style[property]=value;
 }
+function layoutMiniMap(){
+  const map=ui.miniMap,chat=$('globalChatPanel');if(!map||!chat)return;
+  if(!miniMapEnabled||matchMedia('(max-width:720px)').matches){map.style.display='none';return}
+  map.style.display='block';map.style.position='fixed';map.style.right='18px';map.style.bottom='auto';map.style.transformOrigin='top right';
+  const task=$('taskPanel'),taskRect=task&&!task.classList.contains('hidden')?task.getBoundingClientRect():null;
+  let scale=window.innerWidth<1000?.78:window.innerWidth<1250?.9:1;
+  let top=Math.max(92,Math.round((taskRect?.bottom||88)+12));
+  map.style.top=`${top}px`;map.style.transform=`scale(${scale})`;
+  let mapRect=map.getBoundingClientRect(),chatRect=chat.getBoundingClientRect();
+  const overlaps=()=>mapRect.left<chatRect.right+10&&mapRect.right>chatRect.left-10&&mapRect.top<chatRect.bottom+10&&mapRect.bottom>chatRect.top-10;
+  if(overlaps()){
+    const aboveChat=Math.floor(chatRect.top-mapRect.height-12);
+    const taskBottom=Math.ceil((taskRect?.bottom||82)+10);
+    if(aboveChat>=taskBottom){top=aboveChat;map.style.top=`${top}px`;mapRect=map.getBoundingClientRect()}
+    else{
+      scale=Math.max(.58,scale-.18);map.style.transform=`scale(${scale})`;mapRect=map.getBoundingClientRect();
+      const secondAbove=Math.floor(chatRect.top-mapRect.height-12);
+      if(secondAbove>=taskBottom){map.style.top=`${secondAbove}px`;mapRect=map.getBoundingClientRect()}
+      if(mapRect.left<chatRect.right+10&&mapRect.top<chatRect.bottom+10&&mapRect.bottom>chatRect.top-10)map.style.display='none';
+    }
+  }
+}
 function adjustHudLayout(){
   const action=ui.actionBar,chat=$('globalChatPanel'),hint=$('controlHint');
   if(!action||!chat)return;
+  layoutMiniMap();
   const mobile=matchMedia('(max-width:900px), (pointer:coarse)').matches;
   if(mobile){
     const key=`mobile:${innerWidth}:${innerHeight}`;
@@ -1575,6 +1599,7 @@ window.addEventListener('resize',queueHudLayout,{passive:true});
 window.addEventListener('orientationchange',()=>setTimeout(queueHudLayout,120),{passive:true});
 new MutationObserver(()=>{lastHudLayoutKey='';queueHudLayout()}).observe(chatPanel,{attributes:true,attributeFilter:['class']});
 new MutationObserver(()=>{lastHudLayoutKey='';queueHudLayout()}).observe(ui.actionBar,{attributes:true,attributeFilter:['class']});
+if('ResizeObserver' in window){const hudResizeObserver=new ResizeObserver(()=>{lastHudLayoutKey='';queueHudLayout()});hudResizeObserver.observe(chatPanel);if($('taskPanel'))hudResizeObserver.observe($('taskPanel'))}
 queueHudLayout();
 
 const RTC_CONFIG={iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun2.l.google.com:19302']},{urls:'stun:global.stun.twilio.com:3478'}],iceCandidatePoolSize:8};
@@ -1596,13 +1621,102 @@ function updateCallUi(){
   const hangup=$('hangupCallButton'),help=$('callHelp');
   if(hangup){hangup.disabled=!activeCallPeer;hangup.classList.toggle('hidden',!activeCallPeer)}
   if(help)help.textContent=activeCallPeer?(currentVoiceStatus||`📞 ${currentCallName()}と通話中`):'📞を押して個別通話';
-  updateMicButton();
+  updateMicButton();updateGroupVoiceUi();
 }
 function getVoiceAudioContext(){
   const AudioContextClass=window.AudioContext||window.webkitAudioContext;if(!AudioContextClass)return null;
   if(!voiceAudioContext||voiceAudioContext.state==='closed'){try{voiceAudioContext=new AudioContextClass({latencyHint:'interactive'})}catch{voiceAudioContext=new AudioContextClass()}}
   return voiceAudioContext;
 }
+function groupVoiceAvailable(){return !!state&&state.phase!=='meeting'&&socket?.readyState===WebSocket.OPEN}
+function groupVoiceActive(){return groupVoiceAvailable()&&!activeCallPeer}
+function setGroupVoiceStatus(text,active=false){
+  const status=$('groupVoiceStatus');if(!status)return;status.textContent=text||'グループ音声：未接続';status.classList.toggle('active',active);
+}
+function updateGroupVoiceUi(){
+  const speaker=$('groupSpeakerButton'),mic=$('groupMicButton');if(!speaker||!mic)return;
+  const context=voiceAudioContext,connected=socket?.readyState===WebSocket.OPEN;
+  if(!connected||!state){speaker.disabled=true;mic.disabled=true;speaker.textContent='🔊 音声を聞く';mic.textContent='🎙 参加する';setGroupVoiceStatus('グループ音声：未接続');return}
+  if(state.phase==='meeting'){
+    speaker.disabled=true;mic.disabled=true;speaker.textContent='🔊 会議音声へ';mic.textContent='🎙 会議中';setGroupVoiceStatus('会議中は会議専用の音声を使用します');return;
+  }
+  if(activeCallPeer){
+    speaker.disabled=true;mic.disabled=true;speaker.textContent='🔊 一時停止';mic.textContent='🎙 個人通話中';setGroupVoiceStatus('個人通話中はグループトークを一時停止しています');return;
+  }
+  speaker.disabled=false;mic.disabled=groupVoiceStarting;
+  const audioReady=groupVoiceListening&&context?.state==='running';
+  speaker.textContent=audioReady?'🔊 音声ON':'🔊 音声を聞く';
+  if(groupVoiceStarting)mic.textContent='🎙 準備中…';
+  else if(!groupVoiceStream)mic.textContent='🎙 参加する';
+  else mic.textContent=groupVoiceMuted?'🔇 マイクOFF':'🎙 マイクON';
+  mic.classList.toggle('muted',groupVoiceMuted);
+  if(groupVoiceStream)setGroupVoiceStatus(groupVoiceMuted?'グループ音声を聞いています（マイクOFF）':'グループトークに参加中（マイクON）',true);
+  else if(audioReady)setGroupVoiceStatus('グループ音声を聞いています',true);
+  else setGroupVoiceStatus('グループ音声：未接続');
+}
+async function enableGroupAudio(showMessage=true){
+  const context=getVoiceAudioContext();
+  if(!context){if(showMessage)showNotice('このブラウザではグループ音声を再生できません。');updateGroupVoiceUi();return false}
+  try{if(context.state==='suspended')await context.resume()}catch(error){console.warn('Group audio resume failed',error)}
+  groupVoiceListening=context.state==='running';
+  if(!groupVoiceListening&&showMessage)showNotice('もう一度「音声を聞く」を押してください。');
+  updateGroupVoiceUi();return groupVoiceListening;
+}
+async function startGroupVoice(){
+  if(!groupVoiceAvailable()){showNotice(state?.phase==='meeting'?'会議中は会議専用音声を使ってください。':'グループトークへ接続できません。');return false}
+  if(activeCallPeer){showNotice('個人通話を終了してからグループトークへ参加してください。');return false}
+  if(groupVoiceStream)return true;if(groupVoiceStarting)return false;
+  if(!navigator.mediaDevices?.getUserMedia){showNotice('グループトークにはHTTPSで開ける対応ブラウザが必要です。');return false}
+  groupVoiceStarting=true;updateGroupVoiceUi();setGroupVoiceStatus('マイクの許可を待っています…');
+  try{
+    await enableGroupAudio(false);
+    groupVoiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});
+    groupVoiceMuted=false;groupVoiceListening=true;
+    const context=getVoiceAudioContext();if(!context)throw new Error('AudioContext unavailable');if(context.state==='suspended')await context.resume();
+    groupVoiceSource=context.createMediaStreamSource(groupVoiceStream);
+    groupVoiceProcessor=context.createScriptProcessor(4096,1,1);
+    groupVoiceSilentGain=context.createGain();groupVoiceSilentGain.gain.value=0;
+    groupVoiceSource.connect(groupVoiceProcessor);groupVoiceProcessor.connect(groupVoiceSilentGain).connect(context.destination);
+    groupVoiceProcessor.onaudioprocess=event=>{
+      if(!groupVoiceActive()||groupVoiceMuted||socket?.readyState!==WebSocket.OPEN)return;
+      const track=groupVoiceStream?.getAudioTracks()?.[0];if(!track?.enabled)return;
+      const input=event.inputBuffer.getChannelData(0);let energy=0;for(let i=0;i<input.length;i+=4)energy+=input[i]*input[i];
+      const rms=Math.sqrt(energy/Math.max(1,Math.ceil(input.length/4)));if(rms<.009)return;
+      const now=performance.now();if(now-groupVoiceLastSentAt<65)return;groupVoiceLastSentAt=now;
+      const pcm=downsampleVoice(input,event.inputBuffer.sampleRate||context.sampleRate);if(!pcm.length)return;
+      send('groupVoiceAudio',{rate:RELAY_SAMPLE_RATE,seq:++groupVoiceSequence,data:pcmToBase64(pcm)});
+    };
+    updateGroupVoiceUi();showNotice('グループトークに参加しました。');return true;
+  }catch(error){
+    console.error('Group microphone error',error);stopGroupVoice();showNotice('マイクを使用できません。ブラウザのサイト設定で許可してください。');return false;
+  }finally{groupVoiceStarting=false;updateGroupVoiceUi()}
+}
+function stopGroupVoice(){
+  if(groupVoiceProcessor){groupVoiceProcessor.onaudioprocess=null;try{groupVoiceProcessor.disconnect()}catch{}groupVoiceProcessor=null}
+  if(groupVoiceSource){try{groupVoiceSource.disconnect()}catch{}groupVoiceSource=null}
+  if(groupVoiceSilentGain){try{groupVoiceSilentGain.disconnect()}catch{}groupVoiceSilentGain=null}
+  for(const track of groupVoiceStream?.getTracks()||[])track.stop();
+  groupVoiceStream=null;groupVoiceStarting=false;groupVoiceMuted=false;groupVoiceListening=false;groupVoiceSequence=0;groupVoiceLastSentAt=0;groupVoicePlaybackAt.clear();updateGroupVoiceUi();
+}
+async function handleGroupVoiceAudio(message){
+  if(!groupVoiceActive()||!groupVoiceListening||!message.fromId||message.fromId===myId||typeof message.data!=='string'||message.data.length>16000)return;
+  const context=getVoiceAudioContext();if(!context||context.state!=='running'){setGroupVoiceStatus('音声を聞くには「🔊 音声を聞く」を押してください');updateGroupVoiceUi();return}
+  try{
+    const pcm=base64ToPcm(message.data);if(!pcm.length)return;
+    const rate=Math.max(8000,Math.min(24000,Number(message.rate)||RELAY_SAMPLE_RATE));
+    const buffer=context.createBuffer(1,pcm.length,rate),channel=buffer.getChannelData(0);for(let i=0;i<pcm.length;i++)channel[i]=pcm[i]/32768;
+    const source=context.createBufferSource(),gain=context.createGain();gain.gain.value=.88;source.buffer=buffer;source.connect(gain).connect(context.destination);
+    const now=context.currentTime;let playAt=groupVoicePlaybackAt.get(message.fromId)||0;if(!playAt||playAt<now-.08||playAt>now+.45)playAt=now+.045;
+    source.start(playAt);groupVoicePlaybackAt.set(message.fromId,playAt+buffer.duration);source.onended=()=>{try{source.disconnect();gain.disconnect()}catch{}};
+    const name=message.from||state?.players?.find(player=>player.id===message.fromId)?.name||'参加者';setGroupVoiceStatus(`🗣 ${name}が話しています`,true);
+  }catch(error){console.warn('Group voice playback failed',error)}
+}
+$('groupSpeakerButton').onclick=async()=>{await enableGroupAudio(true)};
+$('groupMicButton').onclick=async()=>{
+  if(!groupVoiceStream){await startGroupVoice();return}
+  groupVoiceMuted=!groupVoiceMuted;for(const track of groupVoiceStream.getAudioTracks())track.enabled=!groupVoiceMuted;updateGroupVoiceUi();
+};
+
 function meetingVoiceActive(){return state?.phase==='meeting'&&document.getElementById('meetingDialog')?.open}
 function updateMeetingVoiceUi(){
   const speaker=$('speakerButton'),button=$('micButton'),player=me(),context=getVoiceAudioContext();
@@ -1688,6 +1802,7 @@ async function unlockRemoteAudio(){
   try{if(context?.state==='suspended')await context.resume()}catch{}
   for(const audio of document.querySelectorAll('#remoteAudio audio')){const peerId=audio.id.startsWith('voice-')?audio.id.slice(6):'';if(remoteAudioNodes.has(peerId)){audio.muted=true;continue}audio.muted=false;audio.volume=1;try{await audio.play()}catch{}}
   if(meetingVoiceActive())updateMeetingVoiceUi();
+  updateGroupVoiceUi();
   if(activeCallPeer&&context?.state==='running'&&(voiceRelayActive||peerIsConnected(activeCallPeer)))setVoiceStatus(voiceRelayActive?'音声中継モードで接続しました。':'音声通話に接続しました。',true);
 }
 document.addEventListener('pointerdown',unlockRemoteAudio,{passive:true});
@@ -2075,8 +2190,11 @@ $('profileSummary').textContent=profileText();
 
     #miniMap{
       z-index:30;
-      right:18px !important;
-      bottom:118px !important;
+      position:fixed!important;
+      right:18px!important;
+      top:330px;
+      bottom:auto!important;
+      transform-origin:top right;
     }
 
     #actionBar{
@@ -2120,15 +2238,21 @@ $('profileSummary').textContent=profileText();
       bottom:18px !important;
       width:min(430px,calc(100vw - 36px));
       max-width:min(430px,calc(100vw - 36px));
-      max-height:min(420px,calc(100vh - 280px));
+      max-height:min(460px,calc(100vh - 250px));
     }
-
+    .group-voice-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:8px 0 10px;border-bottom:1px solid rgba(120,220,255,.18)}
+    .group-voice-status{min-width:0;font-size:12px;line-height:1.35;color:#c9e9f3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .group-voice-status.active{color:#72ffc0}
+    .group-voice-actions{display:flex;gap:6px;flex-wrap:nowrap}
+    .group-voice-actions button{min-height:38px;padding:7px 9px;white-space:nowrap}
     #globalChatPanel.collapsed{
-      width:205px !important;
-      min-height:64px;
-      max-height:64px;
+      width:330px !important;
+      min-height:112px;
+      max-height:112px;
       overflow:hidden;
     }
+    #globalChatPanel.collapsed .chat-log,#globalChatPanel.collapsed .chat-form{display:none!important}
+    #globalChatPanel.collapsed .group-voice-bar{border-bottom:0;padding-bottom:2px}
 
     #joystick{
       z-index:32;
@@ -2228,7 +2352,7 @@ $('profileSummary').textContent=profileText();
     @media (max-width:900px){
       #playerPanel{top:88px;left:10px;max-width:220px}
       #taskPanel{top:88px;right:10px;max-width:220px}
-      #miniMap{right:10px !important;bottom:150px !important;transform:scale(.85);transform-origin:bottom right}
+      #miniMap{right:10px!important;bottom:auto!important;transform-origin:top right}
       #actionBar{left:10px !important;right:10px !important;bottom:10px !important;transform:none;width:auto;max-width:none}
       #controlHint{display:none}
       #globalChatPanel{left:10px !important;bottom:104px !important;max-width:min(320px,calc(100vw - 20px))}
@@ -2236,6 +2360,8 @@ $('profileSummary').textContent=profileText();
     }
 
 
+
+    @media (max-width:720px){#miniMap{display:none!important}}
 
     @media (pointer:coarse){
       #joystick{width:138px;height:138px;z-index:80}
@@ -2266,6 +2392,9 @@ $('profileSummary').textContent=profileText();
       .spectator-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
       .spectator-actions button{min-width:0;padding:7px 5px;font-size:11px}
       .spectator-panel small{font-size:10px}
+      .group-voice-bar{grid-template-columns:1fr;gap:6px}
+      .group-voice-actions{justify-content:stretch}
+      .group-voice-actions button{flex:1;min-width:0;font-size:12px}
       #globalChatPanel{bottom:calc(142px + env(safe-area-inset-bottom,0px)) !important}
       #joystick{bottom:calc(220px + env(safe-area-inset-bottom,0px)) !important}
       #actionBar{padding:8px;gap:6px;max-height:132px;overflow:auto;-webkit-overflow-scrolling:touch}
@@ -2285,11 +2414,15 @@ $('profileSummary').textContent=profileText();
       #globalChatPanel.collapsed{
         left:auto !important;
         right:10px !important;
-        width:154px !important;
-        min-height:58px;
-        max-height:58px;
+        width:min(238px,calc(100vw - 28px)) !important;
+        min-height:116px;
+        max-height:116px;
         bottom:calc(150px + env(safe-area-inset-bottom,0px)) !important;
       }
+      #globalChatPanel.collapsed .group-voice-bar{grid-template-columns:1fr;gap:5px;padding-top:4px}
+      #globalChatPanel.collapsed .group-voice-status{text-align:center;font-size:11px}
+      #globalChatPanel.collapsed .group-voice-actions{justify-content:center}
+      #globalChatPanel.collapsed .group-voice-actions button{min-height:34px;padding:5px 7px;font-size:11px}
       #globalChatPanel:not(.collapsed) ~ #joystick,
       html.mobile-chat-open #joystick{
         opacity:0;
@@ -2309,7 +2442,7 @@ $('profileSummary').textContent=profileText();
       #topBar{top:4px;font-size:11px;padding:5px 8px}
       #playerPanel,#taskPanel{top:62px;max-height:145px;font-size:11px}
       #globalChatPanel{bottom:76px !important;max-height:150px}
-      #globalChatPanel.collapsed{left:auto !important;right:8px !important;width:150px !important}
+      #globalChatPanel.collapsed{left:auto !important;right:8px !important;width:230px !important;min-height:108px;max-height:108px}
       #globalChatPanel:not(.collapsed) ~ #joystick,
       html.mobile-chat-open #joystick{opacity:0;pointer-events:none !important}
       #joystick{left:12px !important;bottom:78px !important;transform:scale(.72);transform-origin:bottom left;transition:opacity .14s ease}
