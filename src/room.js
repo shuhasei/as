@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-security-access-v50";
+const MAP_VERSION = "aurora-dead-meeting-spectator-v51";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -806,6 +806,8 @@ export class GameRoom extends DurableObject {
   chat(player, message) {
     const text = String(message.text || "").replace(/[<>]/g, "").trim().slice(0, 120);
     if (!text || !this.sessions.has(player.id)) return;
+    // 死亡者は会議を観戦するだけで、会議チャットへ参加できません。
+    if (this.phase === "meeting" && !player.alive) return;
     const now = Date.now();
     if (player.lastChatAt && now - player.lastChatAt < 450) return;
     player.lastChatAt = now;
@@ -819,9 +821,10 @@ export class GameRoom extends DurableObject {
   }
 
   voiceSignal(player, message) {
-    if (!message.signal || !this.sessions.has(player.id)) return;
+    if (!message.signal || !this.sessions.has(player.id) || !player.alive || this.phase === "meeting") return;
     const targetId = String(message.targetId || "");
-    if (!targetId || targetId === player.id || !this.players.has(targetId) || !this.sessions.has(targetId)) {
+    const target = this.players.get(targetId);
+    if (!targetId || targetId === player.id || !target?.alive || !this.sessions.has(targetId)) {
       this.send(player.id, { type: "callControl", fromId: targetId, action: "unavailable" });
       return;
     }
@@ -829,10 +832,12 @@ export class GameRoom extends DurableObject {
   }
 
   voiceAudio(player, message) {
+    if (!player.alive || this.phase === "meeting") return;
     const targetId = String(message.targetId || "");
     const data = typeof message.data === "string" ? message.data : "";
     if (!targetId || targetId === player.id || !data || data.length > 16000) return;
-    if (!this.players.has(targetId) || !this.sessions.has(targetId)) {
+    const target = this.players.get(targetId);
+    if (!target?.alive || !this.sessions.has(targetId)) {
       this.send(player.id, { type: "callControl", fromId: targetId, action: "unavailable" });
       return;
     }
@@ -898,7 +903,8 @@ export class GameRoom extends DurableObject {
     const targetId = String(message.targetId || "");
     const action = String(message.action || "");
     if (!targetId || targetId === player.id || !["ring", "accept", "decline", "busy", "hangup", "relay"].includes(action)) return;
-    if (!this.players.has(targetId) || !this.sessions.has(targetId)) {
+    const target = this.players.get(targetId);
+    if (!player.alive || this.phase === "meeting" || !target?.alive || !this.sessions.has(targetId)) {
       if (action === "ring" || action === "accept") this.send(player.id, { type: "callControl", fromId: targetId, action: "unavailable" });
       return;
     }
