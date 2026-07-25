@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-pc-chat-joystick-v42';
+const MAP_VERSION='aurora-pc-chat-action-v44';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -1617,37 +1617,25 @@ function adjustHudLayout(){
   let center=Math.round(window.innerWidth/2);
   center=Math.max(center,Math.ceil(leftLimit+half));
   center=Math.min(center,Math.floor(rightLimit-half));
-  const narrow=available<naturalWidth+24;
+  const preferPinnedDesktop=true;
+  const narrow=available<naturalWidth+24||preferPinnedDesktop;
   const actionHeight=Math.round(action.getBoundingClientRect().height||66);
-  const hintBottom=Math.max(88,actionHeight+30);
-  const key=[window.innerWidth,window.innerHeight,chat.classList.contains('collapsed'),leftLimit,rightLimit,Math.round(naturalWidth),actionHeight,narrow].join(':');
+  const chatClearance=Math.max(0,Math.round(window.innerHeight-chatRect.top)+8);
+  const hintBottom=Math.max(chatClearance+actionHeight+12,actionHeight+30,88);
+  const key=[window.innerWidth,window.innerHeight,chat.classList.contains('collapsed'),leftLimit,rightLimit,Math.round(naturalWidth),actionHeight,narrow,chatClearance].join(':');
   if(key===lastHudLayoutKey)return;
   lastHudLayoutKey=key;
   setHudStyle(action,'bottom','calc(18px + env(safe-area-inset-bottom,0px))');
-  if(narrow){
-    setHudStyle(action,'left',`${leftLimit}px`);
-    setHudStyle(action,'right',`${Math.max(18,window.innerWidth-rightLimit)}px`);
-    setHudStyle(action,'transform','none');
-    setHudStyle(action,'maxWidth',`${available}px`);
-    if(hint){
-      setHudStyle(hint,'left',`${leftLimit}px`);
-      setHudStyle(hint,'right',`${Math.max(18,window.innerWidth-rightLimit)}px`);
-      setHudStyle(hint,'bottom',`${hintBottom}px`);
-      setHudStyle(hint,'transform','none');
-      setHudStyle(hint,'maxWidth',`${available}px`);
-    }
-  }else{
-    setHudStyle(action,'left',`${center}px`);
-    setHudStyle(action,'right','auto');
-    setHudStyle(action,'transform','translateX(-50%)');
-    setHudStyle(action,'maxWidth',`${available}px`);
-    if(hint){
-      setHudStyle(hint,'left',`${center}px`);
-      setHudStyle(hint,'right','auto');
-      setHudStyle(hint,'bottom',`${hintBottom}px`);
-      setHudStyle(hint,'transform','translateX(-50%)');
-      setHudStyle(hint,'maxWidth',`${available}px`);
-    }
+  setHudStyle(action,'left',`${leftLimit}px`);
+  setHudStyle(action,'right',`${Math.max(18,window.innerWidth-rightLimit)}px`);
+  setHudStyle(action,'transform','none');
+  setHudStyle(action,'maxWidth',`${available}px`);
+  if(hint){
+    setHudStyle(hint,'left',`${leftLimit}px`);
+    setHudStyle(hint,'right',`${Math.max(18,window.innerWidth-rightLimit)}px`);
+    setHudStyle(hint,'bottom',`${hintBottom}px`);
+    setHudStyle(hint,'transform','none');
+    setHudStyle(hint,'maxWidth',`${available}px`);
   }
 }
 window.addEventListener('resize',queueHudLayout,{passive:true});
