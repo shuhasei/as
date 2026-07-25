@@ -93,6 +93,36 @@ const SOLID_PROPS=[
 ];
 let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();
 let ceilingGroup=null,facilityAmbientLight=null,facilityKeyLight=null;const facilityLights=[],emergencyLights=[];
+const PERFORMANCE_COARSE=matchMedia('(pointer:coarse)').matches;
+const PERFORMANCE_LOW_POWER=PERFORMANCE_COARSE||(Number(navigator.hardwareConcurrency)||8)<=4||(Number(navigator.deviceMemory)||8)<=4;
+const PERFORMANCE_SHADOWS=!PERFORMANCE_LOW_POWER;
+const PERFORMANCE_MAX_DPR=PERFORMANCE_COARSE?.9:PERFORMANCE_LOW_POWER?1:1.35;
+const PERFORMANCE_MIN_DPR=.72;
+let performancePixelRatio=Math.max(PERFORMANCE_MIN_DPR,Math.min(Number(devicePixelRatio)||1,PERFORMANCE_MAX_DPR));
+let performanceFrameWindowStart=performance.now(),performanceRenderedFrames=0,performanceQualityReduced=false;
+let lastSceneRenderAt=0,lastMiniMapRenderAt=0,lastHudUpdateAt=0,lastNearestUpdateAt=0,lastLightCullAt=0;
+function applyPerformancePixelRatio(){
+  if(!renderer)return;
+  renderer.setPixelRatio(performancePixelRatio);
+  const viewport=window.visualViewport;
+  renderer.setSize(Math.max(1,Math.round(viewport?.width||innerWidth)),Math.max(1,Math.round(viewport?.height||innerHeight)),false);
+}
+function recordRenderedFrame(now){
+  performanceRenderedFrames++;
+  const elapsed=now-performanceFrameWindowStart;
+  if(elapsed<3000)return;
+  const fps=performanceRenderedFrames*1000/Math.max(1,elapsed);
+  performanceFrameWindowStart=now;performanceRenderedFrames=0;
+  if(fps<38&&performancePixelRatio>PERFORMANCE_MIN_DPR+.02){
+    performancePixelRatio=Math.max(PERFORMANCE_MIN_DPR,performancePixelRatio-.15);
+    applyPerformancePixelRatio();
+  }else if(fps<29&&!performanceQualityReduced){
+    performanceQualityReduced=true;
+    if(renderer)renderer.shadowMap.enabled=false;
+    if(facilityKeyLight)facilityKeyLight.castShadow=false;
+  }
+}
+
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
   const group=new THREE.Group();group.scale.setScalar(scale);
@@ -380,13 +410,13 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   const canvas=$('gameCanvas');
   if(!canvas)throw new Error('gameCanvas が見つかりません');
   canvas.style.display='block';
-  renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
-  renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+  renderer=new THREE.WebGLRenderer({canvas,antialias:!PERFORMANCE_LOW_POWER,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
+  renderer.setPixelRatio(performancePixelRatio);
   renderer.setSize(Math.max(1,innerWidth),Math.max(1,innerHeight),false);
   renderer.setClearColor(0x020711,1);
   renderer.outputColorSpace=THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled=true;
-  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled=PERFORMANCE_SHADOWS;
+  renderer.shadowMap.type=THREE.PCFShadowMap;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure=1.34;
   clock=new THREE.Clock();
@@ -464,14 +494,20 @@ function buildFacilityEnclosure(){
 }
 function updateFacilityLighting(dt=.016){
   if(!facilityAmbientLight)return;
-  const lightsOut=state?.sabotage?.kind==='lights';const now=performance.now()/1000;
+  const lightsOut=state?.sabotage?.kind==='lights';const nowMs=performance.now(),now=nowMs/1000;
+  const viewer=(securityOpen&&securityCamera)?securityCamera.position:(localModel?.position||camera?.position);
+  if(viewer&&nowMs-lastLightCullAt>260){
+    lastLightCullAt=nowMs;
+    const limit=securityOpen?(PERFORMANCE_LOW_POWER?4:6):(cameraMode===0?(PERFORMANCE_LOW_POWER?5:7):(PERFORMANCE_LOW_POWER?3:5));
+    const ranked=facilityLights.map((entry,index)=>({index,d:(entry.light.position.x-viewer.x)**2+(entry.light.position.z-viewer.z)**2})).sort((a,b)=>a.d-b.d);
+    const active=new Set(ranked.slice(0,limit).map(item=>item.index));
+    facilityLights.forEach((entry,index)=>entry.light.visible=active.has(index));
+    emergencyLights.forEach(entry=>{const d=(entry.light.position.x-viewer.x)**2+(entry.light.position.z-viewer.z)**2;entry.light.visible=lightsOut&&d<900});
+  }
   const ambientTarget=lightsOut?.18:1.48;facilityAmbientLight.intensity+=((ambientTarget)-facilityAmbientLight.intensity)*(1-Math.exp(-5*dt));
   if(facilityKeyLight){const target=lightsOut?.09:1.05;facilityKeyLight.intensity+=(target-facilityKeyLight.intensity)*(1-Math.exp(-4*dt))}
-  for(const entry of facilityLights){
-    const flicker=lightsOut?(Math.sin(now*18+entry.phase)>0.78?.34:.055):1;
-    const target=entry.baseIntensity*flicker;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-(lightsOut?14:5)*dt));
-  }
-  for(const entry of emergencyLights){const pulse=.78+.22*Math.sin(now*4.8+entry.phase);const target=lightsOut?1.45*pulse:.09;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-8*dt))}
+  for(const entry of facilityLights){if(!entry.light.visible)continue;const flicker=lightsOut?(Math.sin(now*18+entry.phase)>0.78?.34:.055):1;const target=entry.baseIntensity*flicker;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-(lightsOut?14:5)*dt))}
+  for(const entry of emergencyLights){if(!entry.light.visible)continue;const pulse=.78+.22*Math.sin(now*4.8+entry.phase);const target=lightsOut?1.45*pulse:.09;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-8*dt))}
 }
 function updateEnclosureCameraLayer(){
   if(!camera)return;camera.layers.enable(0);if(cameraMode===2)camera.layers.enable(2);else camera.layers.disable(2);
@@ -480,12 +516,12 @@ function buildWorld(){
   facilityAmbientLight=new THREE.HemisphereLight(0xd7f5ff,0x152536,1.48);scene.add(facilityAmbientLight);
   const cameraLight=new THREE.PointLight(0xd8f7ff,.95,10,1.55);cameraLight.position.set(0,.12,.1);camera.add(cameraLight);
   const headLamp=new THREE.SpotLight(0xeafaff,1.35,17,Math.PI/4.2,.72,1.15);headLamp.position.set(0,.05,.1);headLamp.target.position.set(0,-.12,7);camera.add(headLamp);camera.add(headLamp.target);
-  facilityKeyLight=new THREE.DirectionalLight(0xe4f6ff,1.05);facilityKeyLight.position.set(8,18,12);facilityKeyLight.castShadow=true;facilityKeyLight.shadow.mapSize.set(2048,2048);facilityKeyLight.shadow.camera.left=-40;facilityKeyLight.shadow.camera.right=40;facilityKeyLight.shadow.camera.top=30;facilityKeyLight.shadow.camera.bottom=-30;scene.add(facilityKeyLight);
+  facilityKeyLight=new THREE.DirectionalLight(0xe4f6ff,1.05);facilityKeyLight.position.set(8,18,12);facilityKeyLight.castShadow=PERFORMANCE_SHADOWS;facilityKeyLight.shadow.mapSize.set(1024,1024);facilityKeyLight.shadow.camera.left=-34;facilityKeyLight.shadow.camera.right=34;facilityKeyLight.shadow.camera.top=27;facilityKeyLight.shadow.camera.bottom=-27;facilityKeyLight.shadow.bias=-.00035;scene.add(facilityKeyLight);
   const mapWidth=MAP_BOUNDS.maxX-MAP_BOUNDS.minX,mapDepth=MAP_BOUNDS.maxZ-MAP_BOUNDS.minZ;
   const floor=new THREE.Mesh(new THREE.BoxGeometry(mapWidth+2,.5,mapDepth+2),new THREE.MeshPhysicalMaterial({color:0x061522,metalness:.58,roughness:.34,clearcoat:.7}));floor.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,-.32,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);floor.receiveShadow=true;scene.add(floor);
   for(const zone of MAP_ZONES){const m=new THREE.Mesh(new THREE.BoxGeometry(zone.w,.07,zone.d),new THREE.MeshStandardMaterial({color:zone.color||0x1a3146,metalness:.32,roughness:.52}));m.position.set(zone.x,-.025,zone.z);m.receiveShadow=true;scene.add(m)}
-  for(let x=MAP_BOUNDS.minX+1;x<MAP_BOUNDS.maxX;x+=2.5){const l=new THREE.Mesh(new THREE.BoxGeometry(.025,.02,mapDepth),new THREE.MeshBasicMaterial({color:0x16405e,transparent:true,opacity:.42}));l.position.set(x,.005,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);scene.add(l)}
-  for(let z=MAP_BOUNDS.minZ+1;z<MAP_BOUNDS.maxZ;z+=2.5){const l=new THREE.Mesh(new THREE.BoxGeometry(mapWidth,.02,.025),new THREE.MeshBasicMaterial({color:0x123651,transparent:true,opacity:.42}));l.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,.006,z);scene.add(l)}
+  const gridSize=Math.max(mapWidth,mapDepth),gridDivisions=Math.max(12,Math.round(gridSize/2.5));
+  const floorGrid=new THREE.GridHelper(gridSize,gridDivisions,0x1b4c69,0x123651);floorGrid.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,.006,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);floorGrid.scale.set(mapWidth/gridSize,1,mapDepth/gridSize);floorGrid.material.transparent=true;floorGrid.material.opacity=.42;floorGrid.material.depthWrite=false;scene.add(floorGrid);
   const wallMat=new THREE.MeshStandardMaterial({color:0x263d55,emissive:0x07131f,emissiveIntensity:.42,metalness:.64,roughness:.5});
   const trimMat=new THREE.MeshStandardMaterial({color:0x4b7d99,metalness:.76,roughness:.32,emissive:0x0a2230,emissiveIntensity:.5});
   // 大型マップでもスマホの描画が重くならないよう、壁を2つのInstancedMeshへ集約する。
@@ -504,9 +540,20 @@ function buildWorld(){
   Object.entries(TASKS).forEach(([id,[,x,z]],i)=>{const g=new THREE.Group();const base=new THREE.Mesh(new THREE.BoxGeometry(1.25,1.35,.65),new THREE.MeshStandardMaterial({color:0x26384b,metalness:.72,roughness:.3}));base.position.y=.68;base.castShadow=true;g.add(base);const screen=new THREE.Mesh(new THREE.PlaneGeometry(.86,.48),new THREE.MeshBasicMaterial({color:[0x48eaff,0x73ff93,0xffcb4e,0xff719e][i%4]}));screen.position.set(0,.88,.331);g.add(screen);g.position.set(x,0,z);scene.add(g)});
   const cargoDock=new THREE.Group();const dockBase=new THREE.Mesh(new THREE.BoxGeometry(1.8,.25,1.5),new THREE.MeshStandardMaterial({color:0x75512f,metalness:.18,roughness:.72}));dockBase.position.y=.13;dockBase.castShadow=true;cargoDock.add(dockBase);const dockGlow=new THREE.Mesh(new THREE.PlaneGeometry(1.45,1.15),new THREE.MeshBasicMaterial({color:0xffc95c,transparent:true,opacity:.32,side:THREE.DoubleSide}));dockGlow.rotation.x=-Math.PI/2;dockGlow.position.y=.265;cargoDock.add(dockGlow);cargoDock.position.set(CARGO_DELIVERY.x,0,CARGO_DELIVERY.z);scene.add(cargoDock);
   const addLocker=(locker)=>{const group=new THREE.Group();const shellMat=new THREE.MeshStandardMaterial({color:0x28445a,metalness:.78,roughness:.3});const darkMat=new THREE.MeshStandardMaterial({color:0x07131f,metalness:.35,roughness:.55});const shell=new THREE.Mesh(new THREE.BoxGeometry(1.15,2.55,.9),shellMat);shell.position.y=1.275;shell.castShadow=true;group.add(shell);const recess=new THREE.Mesh(new THREE.BoxGeometry(.86,2.15,.08),darkMat);recess.position.set(0,1.25,.47);group.add(recess);const doorPivot=new THREE.Group();doorPivot.position.set(-.46,0,.52);const door=new THREE.Mesh(new THREE.BoxGeometry(.9,2.18,.08),new THREE.MeshStandardMaterial({color:0x3b6680,metalness:.82,roughness:.25}));door.position.set(.45,1.25,0);door.castShadow=true;doorPivot.add(door);const handle=new THREE.Mesh(new THREE.BoxGeometry(.06,.3,.07),new THREE.MeshBasicMaterial({color:0x9cecff}));handle.position.set(.78,1.2,.07);doorPivot.add(handle);group.add(doorPivot);const lamp=new THREE.Mesh(new THREE.SphereGeometry(.08,12,8),new THREE.MeshBasicMaterial({color:0x63f4ff}));lamp.position.set(0,2.38,.53);group.add(lamp);group.position.set(locker.x,0,locker.z);group.rotation.y=locker.rot;group.userData={doorPivot,lamp,open:0,lockerId:locker.id};scene.add(group);lockerVisuals.set(locker.id,group)};LOCKERS.forEach(addLocker);
-  const starGeo=new THREE.BufferGeometry(),pts=[];for(let i=0;i<1500;i++)pts.push((Math.random()-.5)*150,Math.random()*52+5,(Math.random()-.5)*150);starGeo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:.09})));
+  const starGeo=new THREE.BufferGeometry(),pts=[];for(let i=0;i<(PERFORMANCE_LOW_POWER?450:900);i++)pts.push((Math.random()-.5)*150,Math.random()*52+5,(Math.random()-.5)*150);starGeo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:.09})));
 }
-function createCrewmate(c){const selectedColor=COLORS[c]?c:'white',group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[selectedColor],roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=true;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=true;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=true;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);const cargoBox=createCargoParcel(.82);cargoBox.position.set(0,1.02,.94);cargoBox.visible=false;group.add(cargoBox);group.userData.cargoBox=cargoBox;group.userData.target=new THREE.Vector3();group.userData.rotation=0;group.userData.skinMaterial=mat;group.userData.skinColor=selectedColor;return group}
+function createCrewmate(c){
+  const selectedColor=COLORS[c]?c:'white',group=new THREE.Group();
+  const mat=PERFORMANCE_LOW_POWER?new THREE.MeshStandardMaterial({color:COLORS[selectedColor],roughness:.24,metalness:.04}):new THREE.MeshPhysicalMaterial({color:COLORS[selectedColor],roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1});
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,PERFORMANCE_LOW_POWER?7:10,PERFORMANCE_LOW_POWER?13:22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=PERFORMANCE_SHADOWS;group.add(body);
+  [-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,PERFORMANCE_LOW_POWER?6:8,PERFORMANCE_LOW_POWER?10:16),mat);l.position.set(x,.28,0);l.castShadow=PERFORMANCE_SHADOWS;group.add(l)});
+  const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=PERFORMANCE_SHADOWS;group.add(pack);
+  const sphereWidth=PERFORMANCE_LOW_POWER?18:32,sphereHeight=PERFORMANCE_LOW_POWER?10:18;
+  const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,sphereWidth,sphereHeight),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);
+  const visorMaterial=PERFORMANCE_LOW_POWER?new THREE.MeshStandardMaterial({color:0xa8eaff,emissive:0x173b4a,emissiveIntensity:.35,roughness:.12,metalness:.1,transparent:true,opacity:.95}):new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96});
+  const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,sphereWidth,sphereHeight),visorMaterial);visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);
+  const cargoBox=createCargoParcel(.82);cargoBox.position.set(0,1.02,.94);cargoBox.visible=false;group.add(cargoBox);group.userData.cargoBox=cargoBox;group.userData.target=new THREE.Vector3();group.userData.rotation=0;group.userData.skinMaterial=mat;group.userData.skinColor=selectedColor;return group
+}
 function applySelectedSkin(model,color){if(!model||renderMode!=='3d')return;const selectedColor=COLORS[color]?color:'white';if(model.userData.skinColor===selectedColor)return;const material=model.userData.skinMaterial;if(material?.color){material.color.setHex(COLORS[selectedColor]);material.needsUpdate=true}model.userData.skinColor=selectedColor}
 function syncModels(){
   if(!state)return;
@@ -641,45 +688,29 @@ function animate(){
   animationFrameId=requestAnimationFrame(animate);
   try{
     if(!clock)return;
-    const dt=Math.min(clock.getDelta(),.05);
+    const now=performance.now(),dt=Math.min(clock.getDelta(),.05);
     if(state?.phase==='playing'&&localModel&&!securityOpen)moveLocal(dt);
     for(const m of models.values()){
-      if(m!==localModel&&m?.position&&m?.userData?.target){
-        const a=1-Math.exp(-12*dt);
-        m.position.lerp(m.userData.target,a);
-        m.rotation.y=dampAngle(m.rotation.y,Number(m.userData.rotation||0),16,dt);
-      }
+      if(m!==localModel&&m?.position&&m?.userData?.target){const a=1-Math.exp(-12*dt);m.position.lerp(m.userData.target,a);m.rotation.y=dampAngle(m.rotation.y,Number(m.userData.rotation||0),16,dt)}
     }
-    updateNearest();
+    if(now-lastNearestUpdateAt>=50){lastNearestUpdateAt=now;updateNearest()}
+    const sceneFrameMs=PERFORMANCE_LOW_POWER?25:16.5;
+    const shouldRenderScene=now-lastSceneRenderAt>=sceneFrameMs;
     if(renderMode==='3d'&&renderer&&scene&&camera){
-      updateLockerVisuals(dt);
-      updateCargoCarryVisual();
-      updateFacilityLighting(dt);
-      updateCamera(dt);
-      updateEnclosureCameraLayer();
-      // HUD側で問題が起きても、ゲーム画面だけは先に描画して見える状態を保つ。
-      renderer.render(scene,camera);
-    }else if(renderMode==='2d'){
-      draw2DMap();
-    }
+      if(shouldRenderScene&&!securityOpen){
+        lastSceneRenderAt=now;updateLockerVisuals(dt);updateCargoCarryVisual();updateFacilityLighting(dt);updateCamera(dt);updateEnclosureCameraLayer();renderer.render(scene,camera);recordRenderedFrame(now)
+      }else if(securityOpen&&now-lastLightCullAt>260){updateFacilityLighting(Math.min(dt,.05))}
+    }else if(renderMode==='2d'&&shouldRenderScene){lastSceneRenderAt=now;draw2DMap()}
     if(securityOpen)renderSecurityFeed();
-    if(miniMapEnabled){
-      try{drawMiniMap()}catch(error){
-        miniMapEnabled=false;
-        console.error('[Hidden Crew] Mini map disabled',error);
-        if(ui.miniMap)ui.miniMap.style.display='none';
-        showNotice('ミニマップを停止してゲームを続行します。');
-      }
+    if(miniMapEnabled&&now-lastMiniMapRenderAt>=100){
+      lastMiniMapRenderAt=now;
+      try{drawMiniMap()}catch(error){miniMapEnabled=false;console.error('[Hidden Crew] Mini map disabled',error);if(ui.miniMap)ui.miniMap.style.display='none';showNotice('ミニマップを停止してゲームを続行します。')}
     }
-    updateCooldown();
-    updateSabotage();
+    if(now-lastHudUpdateAt>=250){lastHudUpdateAt=now;updateCooldown();updateSabotage()}
     animationErrorShown=false;
   }catch(error){
     console.error('[Hidden Crew] Animation frame error',error);
-    if(!animationErrorShown){
-      animationErrorShown=true;
-      showNotice(`描画エラーを回避しました: ${error?.message||error}`);
-    }
+    if(!animationErrorShown){animationErrorShown=true;showNotice(`描画エラーを回避しました: ${error?.message||error}`)}
   }
 }
 function collidesWithMap(x,z,r=.62){
@@ -986,8 +1017,7 @@ function ensureSecurityViewer(){
       securityRenderer.outputColorSpace=THREE.SRGBColorSpace;
       securityRenderer.toneMapping=THREE.ACESFilmicToneMapping;
       securityRenderer.toneMappingExposure=1.42;
-      securityRenderer.shadowMap.enabled=true;
-      securityRenderer.shadowMap.type=THREE.PCFSoftShadowMap;
+      securityRenderer.shadowMap.enabled=false;
       canvas.addEventListener('webglcontextlost',event=>{
         event.preventDefault();
         securityViewerFailed=true;
@@ -1017,7 +1047,7 @@ function resizeSecurityViewer(){
   if(width!==securityRenderWidth||height!==securityRenderHeight){
     securityRenderWidth=width;
     securityRenderHeight=height;
-    securityRenderer.setPixelRatio(Math.min(devicePixelRatio||1,coarse?1.25:1.6));
+    securityRenderer.setPixelRatio(Math.min(performancePixelRatio,coarse?.85:1));
     securityRenderer.setSize(width,height,false);
     securityCamera.aspect=width/height;
     securityCamera.updateProjectionMatrix();
@@ -1064,7 +1094,7 @@ function drawSecurityLiveScene(){
   return true;
 }
 function renderSecurityFeed(){
-  const now=performance.now();if(now-securityLastRender<50)return;securityLastRender=now;
+  const now=performance.now();if(now-securityLastRender<84)return;securityLastRender=now;
   updateSecurityCameraUi();
   if(renderMode==='3d'&&!securityViewerFailed){
     try{
@@ -1740,7 +1770,7 @@ function setupJoystick(){
     document.addEventListener('touchcancel',touchEnd,{passive:false});
   }
 }
-function resize(){const canvas=$('gameCanvas');if(!canvas)return;const viewport=window.visualViewport;const width=Math.max(1,Math.round(viewport?.width||innerWidth));const height=Math.max(1,Math.round(viewport?.height||innerHeight));document.documentElement.style.setProperty('--app-height',`${height}px`);if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(width*ratio));canvas.height=Math.max(1,Math.floor(height*ratio));canvas.style.width=width+'px';canvas.style.height=height+'px';return}if(!camera||!renderer)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setSize(width,height,false)}
+function resize(){const canvas=$('gameCanvas');if(!canvas)return;const viewport=window.visualViewport;const width=Math.max(1,Math.round(viewport?.width||innerWidth));const height=Math.max(1,Math.round(viewport?.height||innerHeight));document.documentElement.style.setProperty('--app-height',`${height}px`);if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(width*ratio));canvas.height=Math.max(1,Math.floor(height*ratio));canvas.style.width=width+'px';canvas.style.height=height+'px';return}if(!camera||!renderer)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setPixelRatio(performancePixelRatio);renderer.setSize(width,height,false)}
 setInterval(()=>{if(state?.phase==='meeting')$('meetingTimer').textContent=`残り ${Math.max(0,Math.ceil((state.meetingEndsAt-Date.now())/1000))}秒`},500);
 
 $('profileSummary').textContent=profileText();
