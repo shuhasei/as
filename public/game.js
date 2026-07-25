@@ -1599,58 +1599,42 @@ function adjustHudLayout(){
     lastHudLayoutKey=key;
     for(const el of [action,hint]){
       if(!el)continue;
-      for(const property of ['left','right','bottom','transform','maxWidth'])el.style.removeProperty(property.replace(/[A-Z]/g,m=>`-${m.toLowerCase()}`));
+      for(const property of ['left','right','bottom','width','transform','maxWidth','justifyContent']){
+        el.style.removeProperty(property.replace(/[A-Z]/g,m=>`-${m.toLowerCase()}`));
+      }
     }
     return;
   }
   if(action.classList.contains('hidden'))return;
-  const taskRect=$('taskPanel')?.getBoundingClientRect();
-  const mapRect=$('miniMap')?.getBoundingClientRect();
   const chatRect=chat.getBoundingClientRect();
-  const actionBefore=action.getBoundingClientRect();
-  const actionTop=Number.isFinite(actionBefore.top)?actionBefore.top:window.innerHeight-90;
-  const overlapsActionHeight=rect=>!!rect&&rect.width>0&&rect.bottom>actionTop-10&&rect.top<window.innerHeight-8;
-  const leftLimit=Math.round(chatRect.right+16);
-  let rightLimit=Math.round(window.innerWidth-18);
-  // Right-side panels only restrict the action bar when they actually occupy the same vertical area.
-  if(overlapsActionHeight(taskRect))rightLimit=Math.min(rightLimit,Math.round(taskRect.left-16));
-  if(overlapsActionHeight(mapRect))rightLimit=Math.min(rightLimit,Math.round(mapRect.left-16));
-  const available=Math.max(180,rightLimit-leftLimit);
-  const naturalWidth=Math.min(action.scrollWidth||action.getBoundingClientRect().width,available);
-  const half=naturalWidth/2;
-  let center=Math.round(window.innerWidth/2);
-  center=Math.max(center,Math.ceil(leftLimit+half));
-  center=Math.min(center,Math.floor(rightLimit-half));
-  const actionWidth=Math.max(180,Math.min(naturalWidth,available));
-  const desiredLeft=Math.round((window.innerWidth-actionWidth)/2);
-  const actionLeft=Math.max(leftLimit,Math.min(desiredLeft,rightLimit-actionWidth));
-  const narrow=available<naturalWidth+8;
-  const actionHeight=Math.round(action.getBoundingClientRect().height||66);
-  const hintBottom=Math.max(actionHeight+30,88);
-  const key=[window.innerWidth,window.innerHeight,chat.classList.contains('collapsed'),leftLimit,rightLimit,Math.round(actionWidth),actionLeft,actionHeight,narrow].join(':');
+  const left=Math.max(18,Math.ceil(chatRect.right+16));
+  const right=18;
+  const available=Math.max(300,window.innerWidth-left-right);
+  const key=[window.innerWidth,window.innerHeight,chat.classList.contains('collapsed'),left,available].join(':');
   if(key===lastHudLayoutKey)return;
   lastHudLayoutKey=key;
+  setHudStyle(action,'left',`${left}px`);
+  setHudStyle(action,'right',`${right}px`);
   setHudStyle(action,'bottom','calc(18px + env(safe-area-inset-bottom,0px))');
-  setHudStyle(action,'left',`${actionLeft}px`);
-  setHudStyle(action,'right','auto');
-  setHudStyle(action,'width',`${actionWidth}px`);
-  setHudStyle(action,'maxWidth',`${available}px`);
+  setHudStyle(action,'width','auto');
+  setHudStyle(action,'maxWidth','none');
   setHudStyle(action,'transform','none');
   setHudStyle(action,'justifyContent','center');
+  const actionHeight=Math.max(54,Math.ceil(action.getBoundingClientRect().height||54));
   if(hint){
-    const hintCenter=actionLeft+actionWidth/2;
-    setHudStyle(hint,'left',`${hintCenter}px`);
-    setHudStyle(hint,'right','auto');
-    setHudStyle(hint,'bottom',`${hintBottom}px`);
-    setHudStyle(hint,'transform','translateX(-50%)');
-    setHudStyle(hint,'maxWidth',`${actionWidth}px`);
+    setHudStyle(hint,'left',`${left}px`);
+    setHudStyle(hint,'right',`${right}px`);
+    setHudStyle(hint,'bottom',`${actionHeight+30}px`);
+    setHudStyle(hint,'width','auto');
+    setHudStyle(hint,'maxWidth','none');
+    setHudStyle(hint,'transform','none');
+    setHudStyle(hint,'textAlign','center');
   }
 }
 window.addEventListener('resize',queueHudLayout,{passive:true});
 window.addEventListener('orientationchange',()=>setTimeout(queueHudLayout,120),{passive:true});
 new MutationObserver(()=>{lastHudLayoutKey='';queueHudLayout()}).observe(chatPanel,{attributes:true,attributeFilter:['class']});
 new MutationObserver(()=>{lastHudLayoutKey='';queueHudLayout()}).observe(ui.actionBar,{attributes:true,attributeFilter:['class']});
-if('ResizeObserver' in window){const hudResizeObserver=new ResizeObserver(()=>{lastHudLayoutKey='';queueHudLayout()});hudResizeObserver.observe(chatPanel);hudResizeObserver.observe(ui.actionBar);if($('taskPanel'))hudResizeObserver.observe($('taskPanel'))}
 queueHudLayout();
 
 const RTC_CONFIG={iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun2.l.google.com:19302']},{urls:'stun:global.stun.twilio.com:3478'}],iceCandidatePoolSize:8};
@@ -2538,6 +2522,29 @@ $('profileSummary').textContent=profileText();
     /* PC layout: keyboard operation only. Prevent the touch stick from covering chat. */
     @media (min-width:901px){
       #joystick{display:none !important}
+    }
+
+    @media (min-width:901px){
+      #actionBar{
+        left:calc(min(430px,100vw - 36px) + 34px) !important;
+        right:18px !important;
+        bottom:18px !important;
+        width:auto !important;
+        max-width:none !important;
+        transform:none !important;
+        justify-content:center !important;
+        flex-wrap:wrap !important;
+      }
+      #controlHint{
+        left:calc(min(430px,100vw - 36px) + 34px) !important;
+        right:18px !important;
+        width:auto !important;
+        max-width:none !important;
+        transform:none !important;
+        text-align:center !important;
+      }
+      #globalChatPanel{width:430px !important;max-width:430px !important}
+      #globalChatPanel.collapsed{width:360px !important;max-width:360px !important}
     }
 
     @media (pointer:coarse) and (orientation:landscape) and (max-height:560px){
