@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "aurora-meeting-voice-v24";
+const MAP_VERSION = "aurora-attack-fix-v25";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -228,18 +228,8 @@ export class GameRoom extends DurableObject {
   }
 
   publicState(forId = null) {
-    return {
-      room: this.roomCode,
-      phase: this.phase,
-      hostId: this.hostId,
-      winner: this.winner,
-      sabotage: this.sabotage,
-      meetingEndsAt: this.meetingEndsAt,
-      practiceMode: this.practiceMode,
-      mapVersion: MAP_VERSION,
-      settings: this.settings,
-      serverTime: Date.now(),
-      players: [...this.players.values()].map((p) => ({
+    const viewer = forId ? this.players.get(forId) : null;
+    const visiblePlayers = [...this.players.values()].map((p) => ({
         id: p.id,
         name: p.name,
         color: p.color,
@@ -266,7 +256,46 @@ export class GameRoom extends DurableObject {
         shielded: Boolean(p.shielded) && (p.id === forId || this.phase === "finished"),
         abilityUsed: p.id === forId ? Boolean(p.abilityUsed) : undefined,
         downedAt: p.id === forId || !p.alive ? Number(p.downedAt || 0) : undefined,
-      })),
+        attackable: Boolean(
+          viewer && viewer.role === "impostor" && viewer.alive && !viewer.spectator &&
+          p.id !== forId && p.alive && p.role !== "impostor" && !p.spectator && !p.hidden
+        ),
+      }));
+    if (this.practiceMode && this.phase === "playing" && viewer?.role === "impostor") {
+      visiblePlayers.push({
+        id: "__practice_target__",
+        name: "訓練用ターゲット",
+        color: "cyan",
+        x: -2.0,
+        z: -3.5,
+        rotation: Math.PI / 2,
+        alive: true,
+        connected: false,
+        host: false,
+        reported: false,
+        ghost: false,
+        spectator: false,
+        hidden: false,
+        hiddenAt: null,
+        carryingCargo: false,
+        hat: "none",
+        shielded: false,
+        practiceTarget: true,
+        attackable: true,
+      });
+    }
+    return {
+      room: this.roomCode,
+      phase: this.phase,
+      hostId: this.hostId,
+      winner: this.winner,
+      sabotage: this.sabotage,
+      meetingEndsAt: this.meetingEndsAt,
+      practiceMode: this.practiceMode,
+      mapVersion: MAP_VERSION,
+      settings: this.settings,
+      serverTime: Date.now(),
+      players: visiblePlayers,
     };
   }
 
@@ -414,7 +443,7 @@ export class GameRoom extends DurableObject {
       completedTasks: new Set(),
       tasksDone: 0,
       emergencyUsed: false,
-      lastKillAt: Date.now(),
+      lastKillAt: 0,
       reported: joiningAfterFinish,
       spectator: joiningAfterFinish,
       hidden: false,
@@ -508,7 +537,7 @@ export class GameRoom extends DurableObject {
         completedTasks: new Set(),
         tasksDone: 0,
         emergencyUsed: false,
-        lastKillAt: Date.now(),
+        lastKillAt: 0,
         reported: false,
         spectator: false,
         hidden: false,
@@ -587,12 +616,26 @@ export class GameRoom extends DurableObject {
       this.send(player.id, { type: "error", message: `攻撃可能まであと${Math.ceil(remaining / 1000)}秒です。` });
       return;
     }
-    const target = this.players.get(String(message.targetId || ""));
+    const targetId = String(message.targetId || "");
+    if (this.practiceMode && targetId === "__practice_target__") {
+      const practiceTarget = { x: -2.0, z: -3.5 };
+      if (dist(player, practiceTarget) > 2.8) {
+        this.send(player.id, { type: "error", message: "訓練用ターゲットにもう少し近づいてください。" });
+        return;
+      }
+      player.lastKillAt = Date.now();
+      await this.persist();
+      this.broadcast({ type: "killEffect", killerId: player.id, targetId });
+      this.send(player.id, { type: "abilityResult", message: "訓練用ターゲットへの攻撃に成功しました。" });
+      this.syncAll();
+      return;
+    }
+    const target = this.players.get(targetId);
     if (!target || !target.alive || target.role === "impostor" || target.spectator || target.hidden) {
       this.send(player.id, { type: "error", message: "攻撃できる対象が見つかりません。" });
       return;
     }
-    if (dist(player, target) > 2.35) {
+    if (dist(player, target) > 2.8) {
       this.send(player.id, { type: "error", message: "対象から離れすぎています。" });
       return;
     }
