@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-security-access-v50';
+const MAP_VERSION='aurora-dead-meeting-spectator-v51';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -248,7 +248,7 @@ function handle(m){
     if(currentSelf?.alive){spectatorTargetId=null;lastKnownAlive=true}else if(currentSelf){lastKnownAlive=false}
     updateSpectatorUI();
     if(activeCallPeer){const callTarget=state.players?.find(p=>p.id===activeCallPeer);if(!callTarget?.connected||!callTarget?.alive){showNotice('通話相手が退出したため通話を終了しました。');hangUpCall(false)}else updateCallUi()}
-    if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open)updateMeetingVoiceUi();
+    if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open){updateMeetingParticipationUi();updateMeetingVoiceUi();}
   }else if(m.type==='playerMoved'){
     const o=models.get(m.id);if(o){
       o.userData.target.set(m.x,0,m.z);o.userData.rotation=m.rotation;
@@ -841,7 +841,7 @@ function updateCooldown(){
   if(ui.killCooldown)ui.killCooldown.textContent=remaining>0?`${Math.ceil(remaining/1000)}秒`:'';
   if(ui.kill&&isWerewolf)ui.kill.disabled=!ready;
 }
-function updateUI(){if(!state)return;const p=me();if(p&&COLORS[p.color]){const colorSelect=$('colorSelect');if(colorSelect&&colorSelect.value!==p.color)colorSelect.value=p.color;localStorage.setItem('hiddenCrewSelectedColor',p.color)}if(p&&HAT_TYPES.has(p.hat||'none')){const hatSelect=$('hatSelect');if(hatSelect&&hatSelect.value!==(p.hat||'none'))hatSelect.value=p.hat||'none';localStorage.setItem('hiddenCrewSelectedHat',p.hat||'none')}ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.filter(x=>!x.practiceTarget).length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'} ${x.practiceTarget?'practice-target':''}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${x.practiceTarget?'🎯 ':''}${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId&&!x.practiceTarget?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive||!x.connected?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing'||!p?.alive);ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p||!p.alive);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing'||(!p?.alive&&!!spectatorTargetId));if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();updateDoorLockdownVisuals();updateSpectatorUI();queueHudLayout();}
+function updateUI(){if(!state)return;const p=me();if(p&&COLORS[p.color]){const colorSelect=$('colorSelect');if(colorSelect&&colorSelect.value!==p.color)colorSelect.value=p.color;localStorage.setItem('hiddenCrewSelectedColor',p.color)}if(p&&HAT_TYPES.has(p.hat||'none')){const hatSelect=$('hatSelect');if(hatSelect&&hatSelect.value!==(p.hat||'none'))hatSelect.value=p.hat||'none';localStorage.setItem('hiddenCrewSelectedHat',p.hat||'none')}ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.filter(x=>!x.practiceTarget).length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'} ${x.practiceTarget?'practice-target':''}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${x.practiceTarget?'🎯 ':''}${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId&&!x.practiceTarget?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!p?.alive||state.phase==='meeting'||!x.alive||!x.connected?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing'||!p?.alive);ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p||!p.alive);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing'||(!p?.alive&&!!spectatorTargetId));if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();updateDoorLockdownVisuals();updateSpectatorUI();queueHudLayout();}
 function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;if(ui.sabotageTitle)ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind]||'妨害発生';if(ui.sabotageTimer)ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
 let animationFrameId=0;
 let miniMapEnabled=true;
@@ -1542,10 +1542,32 @@ function openTask(id){
 }
 function finishTask(id){const counts=activeTaskCountsProgress&&activeTaskCompletionId===id;if(counts){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.tasks=(s.tasks||0)+1;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));send('taskComplete',{task:id})}closeDialog('taskDialog');showNotice(counts?'タスク完了！':'模擬操作完了（進捗には加算されません）')}
 $('taskDialog').addEventListener('close',()=>{resetTaskRuntime();resetPerformanceSampling({restoreQuality:true,delay:6000})});
-function openMeeting(reason){if(activeCallPeer)hangUpCall(true);stopMeetingVoice();updateGroupVoiceUi();$('meetingReason').textContent=reason;renderVotes();openDialog('meetingDialog');setVoiceStatus('「音声を聞く」を押すと、会議中の全員の声が聞こえます。');updateMeetingVoiceUi();enableMeetingAudio(false)}
-function renderVotes(){if(!state)return;const root=$('voteList');root.innerHTML='';state.players.filter(p=>p.alive).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});$('skipVoteButton').onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
+function updateMeetingParticipationUi(){
+  const alive=!!me()?.alive;
+  const form=$('meetingChatForm'),input=$('meetingChatInput'),submit=form?.querySelector('button');
+  if(input){input.disabled=!alive;input.placeholder=alive?'会議チャット':'死亡しているため会議へ参加できません';if(!alive)input.value=''}
+  if(submit)submit.disabled=!alive;
+  if(form)form.classList.toggle('meeting-spectator-locked',!alive);
+  const skip=$('skipVoteButton');if(skip)skip.disabled=!alive;
+  const voiceStatus=$('voiceStatus');
+  if(!alive&&voiceStatus)voiceStatus.textContent='観戦中です。死亡したプレイヤーは投票・発言・音声参加ができません。';
+}
+function openMeeting(reason){
+  if(activeCallPeer)hangUpCall(true);
+  stopMeetingVoice();updateGroupVoiceUi();$('meetingReason').textContent=reason;
+  renderVotes();openDialog('meetingDialog');updateMeetingParticipationUi();
+  if(me()?.alive){setVoiceStatus('「音声を聞く」を押すと、会議中の全員の声が聞こえます。');updateMeetingVoiceUi();enableMeetingAudio(false)}
+  else{setVoiceStatus('観戦中です。死亡したプレイヤーは会議へ参加できません。');updateMeetingVoiceUi()}
+}
+function renderVotes(){
+  if(!state)return;
+  const root=$('voteList');root.innerHTML='';
+  if(!me()?.alive){root.innerHTML='<p class="meeting-spectator-note">👻 観戦中：死亡したプレイヤーは投票できません。</p>';const skip=$('skipVoteButton');if(skip)skip.disabled=true;return}
+  state.players.filter(p=>p.alive).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});
+  const skip=$('skipVoteButton');if(skip){skip.disabled=false;skip.onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
+}
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
-function bindChatForm(formId,inputId){const form=$(formId),input=$(inputId);if(!form||!input)return;form.onsubmit=e=>{e.preventDefault();const text=input.value.trim();if(!text)return;if(socket?.readyState!==WebSocket.OPEN){showNotice('チャットサーバーへ接続されていません');return}send('chat',{text});input.value='';input.focus()}}
+function bindChatForm(formId,inputId){const form=$(formId),input=$(inputId);if(!form||!input)return;form.onsubmit=e=>{e.preventDefault();if(formId==='meetingChatForm'&&state?.phase==='meeting'&&!me()?.alive){showNotice('死亡しているため会議チャットには参加できません。');return}const text=input.value.trim();if(!text)return;if(socket?.readyState!==WebSocket.OPEN){showNotice('チャットサーバーへ接続されていません');return}send('chat',{text});input.value='';input.focus()}}
 bindChatForm('globalChatForm','globalChatInput');bindChatForm('meetingChatForm','meetingChatInput');
 function appendChat(m){const phase={lobby:'ロビー',playing:'ゲーム',meeting:'会議',finished:'終了'}[m.phase]||'';for(const id of ['globalChatLog','meetingChatLog']){const log=$(id);if(!log)continue;const d=document.createElement('div');d.className='chat-line';const ghost=m.alive===false?'👻 ':'';d.innerHTML=`<span class="chat-name">${ghost}${escapeHtml(m.from)}</span><span class="chat-phase">${escapeHtml(phase)}</span><br>${escapeHtml(m.text)}`;log.append(d);log.scrollTop=log.scrollHeight}}
 const chatPanel=$('globalChatPanel'),chatToggle=$('chatToggleButton');
@@ -1780,7 +1802,7 @@ function updateMeetingVoiceUi(){
   const audioReady=context?.state==='running';
   speaker.disabled=!context;
   speaker.textContent=audioReady?'🔊 音声ON':'🔊 音声を聞く';
-  if(!player?.alive){button.disabled=true;button.textContent='👻 発言できません';button.classList.remove('muted');return}
+  if(!player?.alive){speaker.disabled=true;speaker.textContent='👻 観戦中';button.disabled=true;button.textContent='👻 発言できません';button.classList.remove('muted');return}
   button.disabled=meetingVoiceStarting;
   if(meetingVoiceStarting){button.textContent='🎙 準備中…';button.classList.remove('muted');return}
   if(!meetingVoiceStream){button.textContent='🎙 マイク開始';button.classList.remove('muted');return}
@@ -1833,7 +1855,7 @@ function stopMeetingVoice(){
   updateMeetingVoiceUi();
 }
 async function handleMeetingVoiceAudio(message){
-  if(!meetingVoiceActive()||!message.fromId||message.fromId===myId||typeof message.data!=='string'||message.data.length>16000)return;
+  if(!me()?.alive||!meetingVoiceActive()||!message.fromId||message.fromId===myId||typeof message.data!=='string'||message.data.length>16000)return;
   const context=getVoiceAudioContext();if(!context)return;
   if(context.state!=='running'){setVoiceStatus('会議音声を聞くには「音声を聞く」を押してください。');updateMeetingVoiceUi();return}
   try{
@@ -1996,7 +2018,7 @@ function stopVoiceChat(){
   clearVoiceFallbackTimer();stopVoiceRelay(false);for(const id of [...voicePeers.keys()])closeVoicePeer(id);for(const track of localVoiceStream?.getTracks()||[])track.stop();localVoiceStream=null;voiceStarting=false;micMuted=false;setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi();
 }
 function updateMicButton(){const button=$('micButton');if(!button)return;if(meetingVoiceActive()){updateMeetingVoiceUi();return}if(!activeCallPeer){button.textContent='🎙 通話相手なし';button.disabled=true;button.classList.remove('muted');return}button.disabled=false;if(!localVoiceStream){button.textContent='🎙 マイク開始';button.classList.remove('muted');return}button.textContent=micMuted?'🔇 マイクOFF':'🎙 マイクON';button.classList.toggle('muted',micMuted)}
-$('speakerButton').onclick=()=>enableMeetingAudio(true);
+$('speakerButton').onclick=()=>{if(!me()?.alive){showNotice('死亡しているため会議音声には参加できません。');return}enableMeetingAudio(true)};
 $('micButton').onclick=async()=>{if(meetingVoiceActive()){await enableMeetingAudio(false);if(!meetingVoiceStream){await startMeetingVoice();return}meetingVoiceMuted=!meetingVoiceMuted;for(const track of meetingVoiceStream.getAudioTracks())track.enabled=!meetingVoiceMuted;updateMeetingVoiceUi();setVoiceStatus(meetingVoiceMuted?'会議音声を聞いています。マイクはOFFです。':'会議音声に接続しました。マイクはONです。',true);return}await unlockRemoteAudio();if(!activeCallPeer){showNotice('先にメンバー一覧の📞から通話相手を選んでください。');updateCallUi();return}if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const track of localVoiceStream.getAudioTracks())track.enabled=!micMuted;updateCallUi();setVoiceStatus(micMuted?'マイクをミュートしています。':voiceRelayActive?'音声中継モードで接続しました。':'音声通話に接続しました。',!micMuted)};
 async function placeCall(peerId){
   if(!peerId||peerId===myId)return;if(activeCallPeer){showNotice('先に現在の通話を終了してください。');return}
@@ -2191,6 +2213,9 @@ $('profileSummary').textContent=profileText();
 
     .meeting-voice-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
     .meeting-voice-actions button{min-height:42px;white-space:nowrap}
+    .meeting-spectator-note{margin:10px 0;padding:14px;border:1px solid rgba(130,220,255,.34);border-radius:12px;background:rgba(13,36,55,.72);color:#cdefff;line-height:1.55;text-align:center}
+    .meeting-spectator-locked{opacity:.62}
+    .meeting-spectator-locked input,.meeting-spectator-locked button{cursor:not-allowed}
     #speakerButton{border-color:rgba(76,224,255,.65)}
     #speakerButton.hidden{display:none!important}
     @media(max-width:640px){.voice-header{align-items:flex-start;gap:8px}.meeting-voice-actions{width:100%;justify-content:stretch}.meeting-voice-actions button{flex:1}}
