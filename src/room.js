@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "aurora-attack-fix-v25";
+const MAP_VERSION = "aurora-spectator-last-survivor-v26";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -948,7 +948,9 @@ export class GameRoom extends DurableObject {
     const crew = alive.filter((item) => item.role !== "impostor" && !item.spectator).length;
     if (impostors === 0) {
       await this.finish("crew");
-    } else if (impostors >= crew) {
+    } else if (crew === 0) {
+      // 人狼は人数が同数になっただけでは勝利しません。
+      // 生存しているクルーを最後の1人まで倒した時点でのみ勝利します。
       await this.finish("impostor");
     }
   }
