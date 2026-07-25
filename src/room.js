@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "aurora-group-talk-layout-v40";
+const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
+const MAP_VERSION = "aurora-group-talk-hats-v41";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -130,6 +131,7 @@ export class GameRoom extends DurableObject {
       ...p,
       completedTasks: new Set(p.completedTasks || []),
       carryingCargo: Boolean(p.carryingCargo),
+      groupVoiceJoined: Boolean(p.groupVoiceJoined),
     }]));
     this.votes = new Map(saved.votes || []);
 
@@ -401,6 +403,9 @@ export class GameRoom extends DurableObject {
       case "meetingVoiceAudio":
         this.meetingVoiceAudio(player, message);
         break;
+      case "groupVoiceControl":
+        await this.groupVoiceControl(player, message);
+        break;
       case "groupVoiceAudio":
         this.groupVoiceAudio(player, message);
         break;
@@ -487,7 +492,8 @@ export class GameRoom extends DurableObject {
       hidden: false,
       hiddenAt: null,
       carryingCargo: false,
-      hat: String(message.hat || "none").slice(0, 12),
+      hat: HATS.has(String(message.hat || "none")) ? String(message.hat || "none") : "none",
+      groupVoiceJoined: false,
       shielded: false,
       abilityUsed: false,
       downedAt: 0,
@@ -857,8 +863,17 @@ export class GameRoom extends DurableObject {
     }
   }
 
+  async groupVoiceControl(player, message) {
+    if (!this.sessions.has(player.id)) return;
+    const action = String(message.action || "");
+    if (action === "join") player.groupVoiceJoined = true;
+    else if (action === "leave") player.groupVoiceJoined = false;
+    else return;
+    await this.persist();
+  }
+
   groupVoiceAudio(player, message) {
-    if (this.phase === "meeting" || !this.sessions.has(player.id)) return;
+    if (this.phase === "meeting" || !this.sessions.has(player.id) || !player.groupVoiceJoined) return;
     const data = typeof message.data === "string" ? message.data : "";
     if (!data || data.length > 16000) return;
     const now = Date.now();
@@ -867,7 +882,7 @@ export class GameRoom extends DurableObject {
     const rate = clamp(Number(message.rate) || 16000, 8000, 24000);
     const seq = Math.max(0, Math.floor(Number(message.seq) || 0));
     for (const target of this.players.values()) {
-      if (target.id === player.id || !this.sessions.has(target.id)) continue;
+      if (target.id === player.id || !this.sessions.has(target.id) || !target.groupVoiceJoined) continue;
       this.send(target.id, {
         type: "groupVoiceAudio",
         fromId: player.id,
@@ -920,7 +935,8 @@ export class GameRoom extends DurableObject {
     if (this.phase !== "lobby") return;
     const color = String(message.color || "");
     if (COLORS.includes(color)) player.color = color;
-    player.hat = String(message.hat || "none").replace(/[^a-z0-9_-]/gi, "").slice(0, 12) || "none";
+    const requestedHat = String(message.hat || "none").replace(/[^a-z0-9_-]/gi, "").slice(0, 12) || "none";
+    player.hat = HATS.has(requestedHat) ? requestedHat : "none";
     await this.persist();
     this.syncAll();
   }
