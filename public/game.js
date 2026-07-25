@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-selected-skin-v28';
+const MAP_VERSION='aurora-enclosed-facility-v29';
 const TASKS={
   reactor:['リアクター安定化',-28,18],
   engine:['エンジン出力調整',-28,6],
@@ -92,6 +92,7 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();
+let ceilingGroup=null,facilityAmbientLight=null,facilityKeyLight=null;const facilityLights=[],emergencyLights=[];
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
   const group=new THREE.Group();group.scale.setScalar(scale);
@@ -371,7 +372,7 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   const cameraButton=$('cameraButton');if(cameraButton){cameraButton.disabled=false;cameraButton.textContent=cameraMode===0?'近い視点へ切替':cameraMode===1?'一人称視点へ切替':'見下ろし視点へ切替';}
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0x020711);
-  scene.fog=new THREE.FogExp2(0x020711,.018);
+  scene.fog=new THREE.FogExp2(0x020711,.012);
   camera=new THREE.PerspectiveCamera(54,Math.max(1,innerWidth)/Math.max(1,innerHeight),.06,180);
   camera.position.set(0,15,10);
   camera.lookAt(0,.8,0);
@@ -383,10 +384,11 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
   renderer.setSize(Math.max(1,innerWidth),Math.max(1,innerHeight),false);
   renderer.setClearColor(0x020711,1);
+  renderer.outputColorSpace=THREE.SRGBColorSpace;
   renderer.shadowMap.enabled=true;
   renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure=1.28;
+  renderer.toneMappingExposure=1.16;
   clock=new THREE.Clock();
   buildWorld();
   installRuntimeHandlers();
@@ -398,11 +400,87 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   startAnimationLoop();
   showNotice('見下ろし: 方向移動／一人称: 前後移動＋左右旋回　使用: E　通報: R');
 }
+function createHazardTexture(){
+  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=64;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#1a2028';ctx.fillRect(0,0,256,64);
+  ctx.save();ctx.translate(-64,0);ctx.rotate(-Math.PI/4);ctx.fillStyle='#e2aa2d';
+  for(let x=-128;x<512;x+=52)ctx.fillRect(x,-180,24,420);ctx.restore();
+  const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.repeat.set(2,1);return texture;
+}
+function addBulkheadFrame(zone,door,materials,hazardTexture){
+  const [side,offset=0,width=3.6]=door;const group=new THREE.Group();
+  const horizontal=side==='north'||side==='south';
+  const x=zone.x+(horizontal?offset:(side==='east'?zone.w/2:-zone.w/2));
+  const z=zone.z+(horizontal?(side==='north'?zone.d/2:-zone.d/2):offset);
+  group.position.set(x,0,z);if(horizontal)group.rotation.y=Math.PI/2;
+  const half=Math.max(1.15,width/2),postGeo=new THREE.BoxGeometry(.22,2.8,.32);
+  for(const sign of [-1,1]){const post=new THREE.Mesh(postGeo,materials.frame);post.position.set(0,1.4,sign*(half-.12));post.castShadow=true;post.receiveShadow=true;group.add(post)}
+  const lintel=new THREE.Mesh(new THREE.BoxGeometry(.34,.28,width),materials.frame);lintel.position.set(0,2.72,0);lintel.castShadow=true;group.add(lintel);
+  const status=new THREE.Mesh(new THREE.BoxGeometry(.05,.11,.7),materials.status);status.position.set(-.19,2.7,0);group.add(status);
+  const threshold=new THREE.Mesh(new THREE.PlaneGeometry(.9,width),new THREE.MeshStandardMaterial({map:hazardTexture,metalness:.35,roughness:.58,side:THREE.DoubleSide}));threshold.rotation.y=Math.PI/2;threshold.rotation.x=-Math.PI/2;threshold.position.set(0,.018,0);group.add(threshold);
+  scene.add(group);
+}
+function buildFacilityEnclosure(){
+  ceilingGroup=new THREE.Group();ceilingGroup.name='sealed-ceiling';
+  const ceilingMat=new THREE.MeshStandardMaterial({color:0x101d29,metalness:.82,roughness:.38});
+  const beamMat=new THREE.MeshStandardMaterial({color:0x263b4c,metalness:.9,roughness:.26});
+  const lampMat=new THREE.MeshStandardMaterial({color:0xd8f6ff,emissive:0x8edcff,emissiveIntensity:3.2,metalness:.12,roughness:.2});
+  const ventMat=new THREE.MeshStandardMaterial({color:0x08121b,metalness:.88,roughness:.42});
+  for(const zone of MAP_ZONES){
+    const slab=new THREE.Mesh(new THREE.BoxGeometry(Math.max(.6,zone.w-.14),.18,Math.max(.6,zone.d-.14)),ceilingMat);
+    slab.position.set(zone.x,3.48,zone.z);slab.receiveShadow=true;slab.layers.set(2);ceilingGroup.add(slab);
+    const longX=zone.w>=zone.d,span=Math.min(longX?zone.w:zone.d,5.2);
+    const fixture=new THREE.Mesh(new THREE.BoxGeometry(longX?span:.38,.08,longX?.38:span),lampMat);
+    fixture.position.set(zone.x,3.34,zone.z);fixture.layers.set(2);ceilingGroup.add(fixture);
+    const vent=new THREE.Mesh(new THREE.BoxGeometry(longX?1.15:.65,.07,longX?.65:1.15),ventMat);
+    vent.position.set(zone.x+(longX?0:Math.min(zone.w*.23,1.4)),3.335,zone.z+(longX?Math.min(zone.d*.23,1.4):0));vent.layers.set(2);ceilingGroup.add(vent);
+    if(zone.w>11||zone.d>10){
+      const beam=new THREE.Mesh(new THREE.BoxGeometry(longX?.22:zone.w*.82,.22,longX?zone.d*.82:.22),beamMat);
+      beam.position.set(zone.x,3.25,zone.z);beam.layers.set(2);ceilingGroup.add(beam);
+    }
+  }
+  scene.add(ceilingGroup);
+  const lightColorByRoom={reactorRoom:0xffb0a1,engineRoom:0xffd59a,weaponsRoom:0xffb8c4,medicalRoom:0xb6f4ff,storageRoom:0xffdda1,commsRoom:0xa6fff4,shieldRoom:0xa8fff2,navigationRoom:0xb9ddff,adminRoom:0xb9e9ff,securityRoom:0xb8d8ff,atrium:0xc6e8ff,hub:0xd8f5ff};
+  ROOMS.forEach((room,index)=>{
+    const color=lightColorByRoom[room.id]||0xc7efff;
+    const baseIntensity=room.id==='hub'?2.6:2.05;
+    const light=new THREE.PointLight(color,baseIntensity,Math.max(room.w,room.d)*1.16+4,1.72);
+    light.position.set(room.x,2.9,room.z);light.castShadow=false;scene.add(light);
+    facilityLights.push({light,baseIntensity,phase:index*.73});
+  });
+  const emergencyPositions=[[-27,18],[-27,6],[-16,-2],[0,0],[20,-15],[29,0],[23,15]];
+  const emergencyMat=new THREE.MeshStandardMaterial({color:0x46131a,emissive:0xff2438,emissiveIntensity:1.5,metalness:.45,roughness:.28});
+  emergencyPositions.forEach(([x,z],index)=>{
+    const dome=new THREE.Mesh(new THREE.SphereGeometry(.13,14,8),emergencyMat);dome.scale.y=.45;dome.position.set(x,2.78,z);dome.layers.set(2);ceilingGroup.add(dome);
+    const light=new THREE.PointLight(0xff3348,.08,7,2);light.position.set(x,2.55,z);scene.add(light);emergencyLights.push({light,phase:index*.91});
+  });
+  const frameMaterials={frame:new THREE.MeshStandardMaterial({color:0x344d60,metalness:.9,roughness:.25}),status:new THREE.MeshStandardMaterial({color:0x63e7ff,emissive:0x25bce0,emissiveIntensity:2.6,metalness:.25,roughness:.25})};
+  const hazardTexture=createHazardTexture();
+  for(const room of ROOMS){if(room.doors?.length)addBulkheadFrame(room,room.doors[0],frameMaterials,hazardTexture)}
+  const baseMat=new THREE.MeshStandardMaterial({color:0x1f4559,emissive:0x061a24,emissiveIntensity:.8,metalness:.86,roughness:.28});
+  const lowerTrim=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),baseMat,WALLS.length);const helper=new THREE.Object3D();
+  WALLS.forEach((wall,index)=>{helper.position.set(wall.x,.22,wall.z);helper.scale.set(wall.w+.04,.16,wall.d+.04);helper.updateMatrix();lowerTrim.setMatrixAt(index,helper.matrix)});
+  lowerTrim.instanceMatrix.needsUpdate=true;scene.add(lowerTrim);
+}
+function updateFacilityLighting(dt=.016){
+  if(!facilityAmbientLight)return;
+  const lightsOut=state?.sabotage?.kind==='lights';const now=performance.now()/1000;
+  const ambientTarget=lightsOut?.16:1.08;facilityAmbientLight.intensity+=((ambientTarget)-facilityAmbientLight.intensity)*(1-Math.exp(-5*dt));
+  if(facilityKeyLight){const target=lightsOut?.08:.72;facilityKeyLight.intensity+=(target-facilityKeyLight.intensity)*(1-Math.exp(-4*dt))}
+  for(const entry of facilityLights){
+    const flicker=lightsOut?(Math.sin(now*18+entry.phase)>0.78?.34:.055):1;
+    const target=entry.baseIntensity*flicker;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-(lightsOut?14:5)*dt));
+  }
+  for(const entry of emergencyLights){const pulse=.78+.22*Math.sin(now*4.8+entry.phase);const target=lightsOut?1.45*pulse:.09;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-8*dt))}
+}
+function updateEnclosureCameraLayer(){
+  if(!camera)return;camera.layers.enable(0);if(cameraMode===2)camera.layers.enable(2);else camera.layers.disable(2);
+}
 function buildWorld(){
-  scene.add(new THREE.HemisphereLight(0xb9efff,0x101927,3.15));
-  const cameraLight=new THREE.PointLight(0xc8f3ff,2.8,13,1.4);cameraLight.position.set(0,.15,.15);camera.add(cameraLight);
-  const headLamp=new THREE.SpotLight(0xe4f8ff,5.2,18,Math.PI/4,.55,1.15);headLamp.position.set(0,.05,.1);headLamp.target.position.set(0,-.15,6);camera.add(headLamp);camera.add(headLamp.target);
-  const sun=new THREE.DirectionalLight(0xffffff,2.7);sun.position.set(8,24,12);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-40;sun.shadow.camera.right=40;sun.shadow.camera.top=30;sun.shadow.camera.bottom=-30;scene.add(sun);
+  facilityAmbientLight=new THREE.HemisphereLight(0xb9efff,0x07101a,1.08);scene.add(facilityAmbientLight);
+  const cameraLight=new THREE.PointLight(0xc8f3ff,.7,8,1.7);cameraLight.position.set(0,.12,.1);camera.add(cameraLight);
+  const headLamp=new THREE.SpotLight(0xe4f8ff,2.5,15,Math.PI/5,.62,1.3);headLamp.position.set(0,.05,.1);headLamp.target.position.set(0,-.12,7);camera.add(headLamp);camera.add(headLamp.target);
+  facilityKeyLight=new THREE.DirectionalLight(0xd7efff,.72);facilityKeyLight.position.set(8,18,12);facilityKeyLight.castShadow=true;facilityKeyLight.shadow.mapSize.set(2048,2048);facilityKeyLight.shadow.camera.left=-40;facilityKeyLight.shadow.camera.right=40;facilityKeyLight.shadow.camera.top=30;facilityKeyLight.shadow.camera.bottom=-30;scene.add(facilityKeyLight);
   const mapWidth=MAP_BOUNDS.maxX-MAP_BOUNDS.minX,mapDepth=MAP_BOUNDS.maxZ-MAP_BOUNDS.minZ;
   const floor=new THREE.Mesh(new THREE.BoxGeometry(mapWidth+2,.5,mapDepth+2),new THREE.MeshPhysicalMaterial({color:0x061522,metalness:.58,roughness:.34,clearcoat:.7}));floor.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,-.32,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);floor.receiveShadow=true;scene.add(floor);
   for(const zone of MAP_ZONES){const m=new THREE.Mesh(new THREE.BoxGeometry(zone.w,.07,zone.d),new THREE.MeshStandardMaterial({color:zone.color||0x1a3146,metalness:.32,roughness:.52}));m.position.set(zone.x,-.025,zone.z);m.receiveShadow=true;scene.add(m)}
@@ -416,6 +494,7 @@ function buildWorld(){
   const matrixObject=new THREE.Object3D();
   WALLS.forEach((o,index)=>{matrixObject.position.set(o.x,1.6,o.z);matrixObject.scale.set(o.w,3.2,o.d);matrixObject.updateMatrix();wallInstances.setMatrixAt(index,matrixObject.matrix);matrixObject.position.set(o.x,3.24,o.z);matrixObject.scale.set(o.w+.06,.09,o.d+.06);matrixObject.updateMatrix();trimInstances.setMatrixAt(index,matrixObject.matrix)});
   wallInstances.instanceMatrix.needsUpdate=true;trimInstances.instanceMatrix.needsUpdate=true;wallInstances.castShadow=true;wallInstances.receiveShadow=true;scene.add(wallInstances,trimInstances);
+  buildFacilityEnclosure();
   const addFloorLabel=(text,x,z)=>{const c=document.createElement('canvas');c.width=512;c.height=112;const ctx=c.getContext('2d');ctx.fillStyle='rgba(4,17,30,.82)';ctx.fillRect(0,0,512,112);ctx.strokeStyle='#59dfff';ctx.lineWidth=4;ctx.strokeRect(3,3,506,106);ctx.fillStyle='#e4fbff';ctx.font='bold 34px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,256,56);const m=new THREE.Mesh(new THREE.PlaneGeometry(4.1,.9),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthWrite:false}));m.position.set(x,.055,z);m.rotation.x=-Math.PI/2;scene.add(m)};
   ROOMS.forEach(room=>addFloorLabel(room.name,room.x,room.z));
   const addCrate=(x,z,color=0x765733,w=1.4,d=1.4)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,1.15,d),new THREE.MeshStandardMaterial({color,metalness:.25,roughness:.7}));m.position.set(x,.57,z);m.castShadow=true;scene.add(m)};
@@ -575,7 +654,9 @@ function animate(){
     if(renderMode==='3d'&&renderer&&scene&&camera){
       updateLockerVisuals(dt);
       updateCargoCarryVisual();
+      updateFacilityLighting(dt);
       updateCamera(dt);
+      updateEnclosureCameraLayer();
       // HUD側で問題が起きても、ゲーム画面だけは先に描画して見える状態を保つ。
       renderer.render(scene,camera);
     }else if(renderMode==='2d'){
