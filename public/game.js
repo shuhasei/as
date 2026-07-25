@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-enclosed-facility-v29';
+const MAP_VERSION='aurora-balanced-lighting-v30';
 const TASKS={
   reactor:['リアクター安定化',-28,18],
   engine:['エンジン出力調整',-28,6],
@@ -180,7 +180,7 @@ function handle(m){
   }else if(m.type==='joined'){
     if(m.id)myId=m.id;finishJoin(m.room);
   }else if(m.type==='state'){
-    if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('新旧ファイルが混在していますが、互換モードで接続しました。')}
+    if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('更新ファイルがそろっていません。src/room.jsも上書きしてください。')}
     const previousSelf=state?.players?.find(player=>player.id===myId);
     const wasAlive=previousSelf?.alive;
     state=m.state;syncCargoCarryState();
@@ -388,7 +388,7 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   renderer.shadowMap.enabled=true;
   renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure=1.16;
+  renderer.toneMappingExposure=1.34;
   clock=new THREE.Clock();
   buildWorld();
   installRuntimeHandlers();
@@ -422,9 +422,9 @@ function addBulkheadFrame(zone,door,materials,hazardTexture){
 }
 function buildFacilityEnclosure(){
   ceilingGroup=new THREE.Group();ceilingGroup.name='sealed-ceiling';
-  const ceilingMat=new THREE.MeshStandardMaterial({color:0x101d29,metalness:.82,roughness:.38});
-  const beamMat=new THREE.MeshStandardMaterial({color:0x263b4c,metalness:.9,roughness:.26});
-  const lampMat=new THREE.MeshStandardMaterial({color:0xd8f6ff,emissive:0x8edcff,emissiveIntensity:3.2,metalness:.12,roughness:.2});
+  const ceilingMat=new THREE.MeshStandardMaterial({color:0x182b3a,emissive:0x02070b,emissiveIntensity:.42,metalness:.78,roughness:.44});
+  const beamMat=new THREE.MeshStandardMaterial({color:0x314c60,emissive:0x031018,emissiveIntensity:.35,metalness:.86,roughness:.31});
+  const lampMat=new THREE.MeshStandardMaterial({color:0xc7e2ea,emissive:0x75c7dc,emissiveIntensity:1.15,metalness:.08,roughness:.38});
   const ventMat=new THREE.MeshStandardMaterial({color:0x08121b,metalness:.88,roughness:.42});
   for(const zone of MAP_ZONES){
     const slab=new THREE.Mesh(new THREE.BoxGeometry(Math.max(.6,zone.w-.14),.18,Math.max(.6,zone.d-.14)),ceilingMat);
@@ -443,10 +443,18 @@ function buildFacilityEnclosure(){
   const lightColorByRoom={reactorRoom:0xffb0a1,engineRoom:0xffd59a,weaponsRoom:0xffb8c4,medicalRoom:0xb6f4ff,storageRoom:0xffdda1,commsRoom:0xa6fff4,shieldRoom:0xa8fff2,navigationRoom:0xb9ddff,adminRoom:0xb9e9ff,securityRoom:0xb8d8ff,atrium:0xc6e8ff,hub:0xd8f5ff};
   ROOMS.forEach((room,index)=>{
     const color=lightColorByRoom[room.id]||0xc7efff;
-    const baseIntensity=room.id==='hub'?2.6:2.05;
-    const light=new THREE.PointLight(color,baseIntensity,Math.max(room.w,room.d)*1.16+4,1.72);
+    const baseIntensity=room.id==='hub'?3.25:2.72;
+    const light=new THREE.PointLight(color,baseIntensity,Math.max(room.w,room.d)*1.32+5,1.48);
     light.position.set(room.x,2.9,room.z);light.castShadow=false;scene.add(light);
     facilityLights.push({light,baseIntensity,phase:index*.73});
+  });
+  // 通路は部屋の照明だけでは暗くなるため、低負荷の補助灯を間引いて配置する。
+  CORRIDORS.forEach((corridor,index)=>{
+    if(index%2!==0)return;
+    const baseIntensity=1.48;
+    const light=new THREE.PointLight(0xb8e8ff,baseIntensity,Math.max(corridor.w,corridor.d)*1.65+4,1.58);
+    light.position.set(corridor.x,2.65,corridor.z);light.castShadow=false;scene.add(light);
+    facilityLights.push({light,baseIntensity,phase:(ROOMS.length+index)*.61});
   });
   const emergencyPositions=[[-27,18],[-27,6],[-16,-2],[0,0],[20,-15],[29,0],[23,15]];
   const emergencyMat=new THREE.MeshStandardMaterial({color:0x46131a,emissive:0xff2438,emissiveIntensity:1.5,metalness:.45,roughness:.28});
@@ -465,8 +473,8 @@ function buildFacilityEnclosure(){
 function updateFacilityLighting(dt=.016){
   if(!facilityAmbientLight)return;
   const lightsOut=state?.sabotage?.kind==='lights';const now=performance.now()/1000;
-  const ambientTarget=lightsOut?.16:1.08;facilityAmbientLight.intensity+=((ambientTarget)-facilityAmbientLight.intensity)*(1-Math.exp(-5*dt));
-  if(facilityKeyLight){const target=lightsOut?.08:.72;facilityKeyLight.intensity+=(target-facilityKeyLight.intensity)*(1-Math.exp(-4*dt))}
+  const ambientTarget=lightsOut?.16:1.62;facilityAmbientLight.intensity+=((ambientTarget)-facilityAmbientLight.intensity)*(1-Math.exp(-5*dt));
+  if(facilityKeyLight){const target=lightsOut?.08:1.05;facilityKeyLight.intensity+=(target-facilityKeyLight.intensity)*(1-Math.exp(-4*dt))}
   for(const entry of facilityLights){
     const flicker=lightsOut?(Math.sin(now*18+entry.phase)>0.78?.34:.055):1;
     const target=entry.baseIntensity*flicker;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-(lightsOut?14:5)*dt));
@@ -477,17 +485,17 @@ function updateEnclosureCameraLayer(){
   if(!camera)return;camera.layers.enable(0);if(cameraMode===2)camera.layers.enable(2);else camera.layers.disable(2);
 }
 function buildWorld(){
-  facilityAmbientLight=new THREE.HemisphereLight(0xb9efff,0x07101a,1.08);scene.add(facilityAmbientLight);
-  const cameraLight=new THREE.PointLight(0xc8f3ff,.7,8,1.7);cameraLight.position.set(0,.12,.1);camera.add(cameraLight);
-  const headLamp=new THREE.SpotLight(0xe4f8ff,2.5,15,Math.PI/5,.62,1.3);headLamp.position.set(0,.05,.1);headLamp.target.position.set(0,-.12,7);camera.add(headLamp);camera.add(headLamp.target);
-  facilityKeyLight=new THREE.DirectionalLight(0xd7efff,.72);facilityKeyLight.position.set(8,18,12);facilityKeyLight.castShadow=true;facilityKeyLight.shadow.mapSize.set(2048,2048);facilityKeyLight.shadow.camera.left=-40;facilityKeyLight.shadow.camera.right=40;facilityKeyLight.shadow.camera.top=30;facilityKeyLight.shadow.camera.bottom=-30;scene.add(facilityKeyLight);
+  facilityAmbientLight=new THREE.HemisphereLight(0xc8f4ff,0x0d1c29,1.62);scene.add(facilityAmbientLight);
+  const cameraLight=new THREE.PointLight(0xd7f6ff,1.38,10,1.5);cameraLight.position.set(0,.12,.1);camera.add(cameraLight);
+  const headLamp=new THREE.SpotLight(0xe8f9ff,3.2,18,Math.PI/4.5,.7,1.15);headLamp.position.set(0,.05,.1);headLamp.target.position.set(0,-.12,7);camera.add(headLamp);camera.add(headLamp.target);
+  facilityKeyLight=new THREE.DirectionalLight(0xe0f3ff,1.05);facilityKeyLight.position.set(8,18,12);facilityKeyLight.castShadow=true;facilityKeyLight.shadow.mapSize.set(2048,2048);facilityKeyLight.shadow.camera.left=-40;facilityKeyLight.shadow.camera.right=40;facilityKeyLight.shadow.camera.top=30;facilityKeyLight.shadow.camera.bottom=-30;scene.add(facilityKeyLight);
   const mapWidth=MAP_BOUNDS.maxX-MAP_BOUNDS.minX,mapDepth=MAP_BOUNDS.maxZ-MAP_BOUNDS.minZ;
   const floor=new THREE.Mesh(new THREE.BoxGeometry(mapWidth+2,.5,mapDepth+2),new THREE.MeshPhysicalMaterial({color:0x061522,metalness:.58,roughness:.34,clearcoat:.7}));floor.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,-.32,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);floor.receiveShadow=true;scene.add(floor);
   for(const zone of MAP_ZONES){const m=new THREE.Mesh(new THREE.BoxGeometry(zone.w,.07,zone.d),new THREE.MeshStandardMaterial({color:zone.color||0x1a3146,metalness:.32,roughness:.52}));m.position.set(zone.x,-.025,zone.z);m.receiveShadow=true;scene.add(m)}
   for(let x=MAP_BOUNDS.minX+1;x<MAP_BOUNDS.maxX;x+=2.5){const l=new THREE.Mesh(new THREE.BoxGeometry(.025,.02,mapDepth),new THREE.MeshBasicMaterial({color:0x16405e,transparent:true,opacity:.42}));l.position.set(x,.005,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);scene.add(l)}
   for(let z=MAP_BOUNDS.minZ+1;z<MAP_BOUNDS.maxZ;z+=2.5){const l=new THREE.Mesh(new THREE.BoxGeometry(mapWidth,.02,.025),new THREE.MeshBasicMaterial({color:0x123651,transparent:true,opacity:.42}));l.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,.006,z);scene.add(l)}
-  const wallMat=new THREE.MeshStandardMaterial({color:0x14263d,metalness:.76,roughness:.42});
-  const trimMat=new THREE.MeshStandardMaterial({color:0x356784,metalness:.86,roughness:.24,emissive:0x071828});
+  const wallMat=new THREE.MeshStandardMaterial({color:0x223b52,emissive:0x06131d,emissiveIntensity:.58,metalness:.7,roughness:.5});
+  const trimMat=new THREE.MeshStandardMaterial({color:0x4b7892,metalness:.82,roughness:.29,emissive:0x0b2634,emissiveIntensity:.72});
   // 大型マップでもスマホの描画が重くならないよう、壁を2つのInstancedMeshへ集約する。
   const wallInstances=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),wallMat,WALLS.length);
   const trimInstances=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),trimMat,WALLS.length);
