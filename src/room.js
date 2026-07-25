@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "aurora-synced-cache-v19";
+const MAP_VERSION = "aurora-meeting-voice-v24";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -335,6 +335,9 @@ export class GameRoom extends DurableObject {
         break;
       case "voiceAudio":
         this.voiceAudio(player, message);
+        break;
+      case "meetingVoiceAudio":
+        this.meetingVoiceAudio(player, message);
         break;
       case "callControl":
         this.callControl(player, message);
@@ -735,6 +738,28 @@ export class GameRoom extends DurableObject {
     const rate = clamp(Number(message.rate) || 16000, 8000, 24000);
     const seq = Math.max(0, Math.floor(Number(message.seq) || 0));
     this.send(targetId, { type: "voiceAudio", fromId: player.id, rate, seq, data });
+  }
+
+  meetingVoiceAudio(player, message) {
+    if (this.phase !== "meeting" || !player.alive || !this.sessions.has(player.id)) return;
+    const data = typeof message.data === "string" ? message.data : "";
+    if (!data || data.length > 16000) return;
+    const now = Date.now();
+    if (player.lastMeetingVoiceAt && now - player.lastMeetingVoiceAt < 18) return;
+    player.lastMeetingVoiceAt = now;
+    const rate = clamp(Number(message.rate) || 16000, 8000, 24000);
+    const seq = Math.max(0, Math.floor(Number(message.seq) || 0));
+    for (const target of this.players.values()) {
+      if (target.id === player.id || !target.alive || !this.sessions.has(target.id)) continue;
+      this.send(target.id, {
+        type: "meetingVoiceAudio",
+        fromId: player.id,
+        from: player.name,
+        rate,
+        seq,
+        data,
+      });
+    }
   }
 
   callControl(player, message) {
