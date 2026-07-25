@@ -1,7 +1,26 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-balanced-lighting-v30';
+const MAP_VERSION='aurora-task-quality-stable-v33';
+const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
+const CPU_CORES=Number(navigator.hardwareConcurrency||0);
+const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
+const LOW_POWER_DEVICE=COARSE_POINTER||(DEVICE_MEMORY>0&&DEVICE_MEMORY<=4)||(CPU_CORES>0&&CPU_CORES<=4);
+const HIGH_POWER_DEVICE=!LOW_POWER_DEVICE&&(DEVICE_MEMORY===0||DEVICE_MEMORY>=8)&&(CPU_CORES===0||CPU_CORES>=6);
+const PERF={
+  lowPower:LOW_POWER_DEVICE,
+  maxPixelRatio:LOW_POWER_DEVICE?1:1.35,
+  targetFps:LOW_POWER_DEVICE?30:60,
+  enableShadows:HIGH_POWER_DEVICE,
+  shadowMapSize:1024,
+  shadowFps:10,
+  securityFps:LOW_POWER_DEVICE?8:12,
+  miniMapFps:LOW_POWER_DEVICE?6:10,
+  nearestFps:12,
+  hudFps:4,
+  lightFps:LOW_POWER_DEVICE?8:15,
+  moveInterval:LOW_POWER_DEVICE?70:50
+};
 const TASKS={
   reactor:['リアクター安定化',-28,18],
   engine:['エンジン出力調整',-28,6],
@@ -91,38 +110,9 @@ const SOLID_PROPS=[
   {x:18.2,z:-16.8,w:1.6,d:1.6},{x:25.5,z:13,w:1.5,d:1.5},
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
+const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
 let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();
-let ceilingGroup=null,facilityAmbientLight=null,facilityKeyLight=null;const facilityLights=[],emergencyLights=[];
-const PERFORMANCE_COARSE=matchMedia('(pointer:coarse)').matches;
-const PERFORMANCE_LOW_POWER=PERFORMANCE_COARSE||(Number(navigator.hardwareConcurrency)||8)<=4||(Number(navigator.deviceMemory)||8)<=4;
-const PERFORMANCE_SHADOWS=!PERFORMANCE_LOW_POWER;
-const PERFORMANCE_MAX_DPR=PERFORMANCE_COARSE?.9:PERFORMANCE_LOW_POWER?1:1.35;
-const PERFORMANCE_MIN_DPR=.72;
-let performancePixelRatio=Math.max(PERFORMANCE_MIN_DPR,Math.min(Number(devicePixelRatio)||1,PERFORMANCE_MAX_DPR));
-let performanceFrameWindowStart=performance.now(),performanceRenderedFrames=0,performanceQualityReduced=false;
-let lastSceneRenderAt=0,lastMiniMapRenderAt=0,lastHudUpdateAt=0,lastNearestUpdateAt=0,lastLightCullAt=0;
-function applyPerformancePixelRatio(){
-  if(!renderer)return;
-  renderer.setPixelRatio(performancePixelRatio);
-  const viewport=window.visualViewport;
-  renderer.setSize(Math.max(1,Math.round(viewport?.width||innerWidth)),Math.max(1,Math.round(viewport?.height||innerHeight)),false);
-}
-function recordRenderedFrame(now){
-  performanceRenderedFrames++;
-  const elapsed=now-performanceFrameWindowStart;
-  if(elapsed<3000)return;
-  const fps=performanceRenderedFrames*1000/Math.max(1,elapsed);
-  performanceFrameWindowStart=now;performanceRenderedFrames=0;
-  if(fps<38&&performancePixelRatio>PERFORMANCE_MIN_DPR+.02){
-    performancePixelRatio=Math.max(PERFORMANCE_MIN_DPR,performancePixelRatio-.15);
-    applyPerformancePixelRatio();
-  }else if(fps<29&&!performanceQualityReduced){
-    performanceQualityReduced=true;
-    if(renderer)renderer.shadowMap.enabled=false;
-    if(facilityKeyLight)facilityKeyLight.castShadow=false;
-  }
-}
-
+let ceilingGroup=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
   const group=new THREE.Group();group.scale.setScalar(scale);
@@ -210,7 +200,7 @@ function handle(m){
   }else if(m.type==='joined'){
     if(m.id)myId=m.id;finishJoin(m.room);
   }else if(m.type==='state'){
-    if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('新旧ファイルが混在していますが、互換モードで接続しました。')}
+    if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion)}
     const previousSelf=state?.players?.find(player=>player.id===myId);
     const wasAlive=previousSelf?.alive;
     state=m.state;syncCargoCarryState();
@@ -401,8 +391,8 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   renderMode='3d';canvas2d=null;
   const cameraButton=$('cameraButton');if(cameraButton){cameraButton.disabled=false;cameraButton.textContent=cameraMode===0?'近い視点へ切替':cameraMode===1?'一人称視点へ切替':'見下ろし視点へ切替';}
   scene=new THREE.Scene();
-  scene.background=new THREE.Color(0x020711);
-  scene.fog=new THREE.FogExp2(0x020711,.012);
+  scene.background=new THREE.Color(0x06111c);
+  scene.fog=new THREE.FogExp2(0x06111c,.0065);
   camera=new THREE.PerspectiveCamera(54,Math.max(1,innerWidth)/Math.max(1,innerHeight),.06,180);
   camera.position.set(0,15,10);
   camera.lookAt(0,.8,0);
@@ -410,15 +400,19 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   const canvas=$('gameCanvas');
   if(!canvas)throw new Error('gameCanvas が見つかりません');
   canvas.style.display='block';
-  renderer=new THREE.WebGLRenderer({canvas,antialias:!PERFORMANCE_LOW_POWER,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
-  renderer.setPixelRatio(performancePixelRatio);
+  renderer=new THREE.WebGLRenderer({canvas,antialias:!PERF.lowPower,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
+  preferredRendererPixelRatio=Math.min(devicePixelRatio||1,PERF.maxPixelRatio);
+  currentRendererPixelRatio=preferredRendererPixelRatio;
+  renderer.setPixelRatio(currentRendererPixelRatio);
   renderer.setSize(Math.max(1,innerWidth),Math.max(1,innerHeight),false);
-  renderer.setClearColor(0x020711,1);
+  renderer.setClearColor(0x06111c,1);
   renderer.outputColorSpace=THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled=PERFORMANCE_SHADOWS;
+  renderer.shadowMap.enabled=PERF.enableShadows;
   renderer.shadowMap.type=THREE.PCFShadowMap;
+  renderer.shadowMap.autoUpdate=false;
+  renderer.shadowMap.needsUpdate=PERF.enableShadows;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure=1.34;
+  renderer.toneMappingExposure=1.52;
   clock=new THREE.Clock();
   buildWorld();
   installRuntimeHandlers();
@@ -445,16 +439,16 @@ function addBulkheadFrame(zone,door,materials,hazardTexture){
   group.position.set(x,0,z);if(horizontal)group.rotation.y=Math.PI/2;
   const half=Math.max(1.15,width/2),postGeo=new THREE.BoxGeometry(.22,2.8,.32);
   for(const sign of [-1,1]){const post=new THREE.Mesh(postGeo,materials.frame);post.position.set(0,1.4,sign*(half-.12));post.castShadow=true;post.receiveShadow=true;group.add(post)}
-  const lintel=new THREE.Mesh(new THREE.BoxGeometry(.34,.28,width),materials.frame);lintel.position.set(0,2.72,0);lintel.castShadow=true;group.add(lintel);
+  const lintel=new THREE.Mesh(new THREE.BoxGeometry(.34,.28,width),materials.frame);lintel.position.set(0,2.72,0);lintel.castShadow=PERF.enableShadows;group.add(lintel);
   const status=new THREE.Mesh(new THREE.BoxGeometry(.05,.11,.7),materials.status);status.position.set(-.19,2.7,0);group.add(status);
   const threshold=new THREE.Mesh(new THREE.PlaneGeometry(.9,width),new THREE.MeshStandardMaterial({map:hazardTexture,metalness:.35,roughness:.58,side:THREE.DoubleSide}));threshold.rotation.y=Math.PI/2;threshold.rotation.x=-Math.PI/2;threshold.position.set(0,.018,0);group.add(threshold);
   scene.add(group);
 }
 function buildFacilityEnclosure(){
   ceilingGroup=new THREE.Group();ceilingGroup.name='sealed-ceiling';
-  const ceilingMat=new THREE.MeshStandardMaterial({color:0x1b2c3a,emissive:0x061018,emissiveIntensity:.35,metalness:.72,roughness:.48});
-  const beamMat=new THREE.MeshStandardMaterial({color:0x385368,emissive:0x07131d,emissiveIntensity:.28,metalness:.82,roughness:.34});
-  const lampMat=new THREE.MeshStandardMaterial({color:0xcdeeff,emissive:0x75c8e8,emissiveIntensity:1.65,metalness:.08,roughness:.42});
+  const ceilingMat=new THREE.MeshStandardMaterial({color:0x29465a,emissive:0x0b2130,emissiveIntensity:.58,metalness:.72,roughness:.48});
+  const beamMat=new THREE.MeshStandardMaterial({color:0x496b83,emissive:0x0b2030,emissiveIntensity:.42,metalness:.82,roughness:.34});
+  const lampMat=new THREE.MeshStandardMaterial({color:0xdff7ff,emissive:0x8fdcf5,emissiveIntensity:1.15,metalness:.08,roughness:.42});
   const ventMat=new THREE.MeshStandardMaterial({color:0x08121b,metalness:.88,roughness:.42});
   for(const zone of MAP_ZONES){
     const slab=new THREE.Mesh(new THREE.BoxGeometry(Math.max(.6,zone.w-.14),.18,Math.max(.6,zone.d-.14)),ceilingMat);
@@ -473,16 +467,16 @@ function buildFacilityEnclosure(){
   const lightColorByRoom={reactorRoom:0xffb0a1,engineRoom:0xffd59a,weaponsRoom:0xffb8c4,medicalRoom:0xb6f4ff,storageRoom:0xffdda1,commsRoom:0xa6fff4,shieldRoom:0xa8fff2,navigationRoom:0xb9ddff,adminRoom:0xb9e9ff,securityRoom:0xb8d8ff,atrium:0xc6e8ff,hub:0xd8f5ff};
   ROOMS.forEach((room,index)=>{
     const color=lightColorByRoom[room.id]||0xc7efff;
-    const baseIntensity=room.id==='hub'?3.45:2.85;
-    const light=new THREE.PointLight(color,baseIntensity,Math.max(room.w,room.d)*1.42+7,1.45);
+    const baseIntensity=room.id==='hub'?4.6:3.85;
+    const light=new THREE.PointLight(color,baseIntensity,Math.max(room.w,room.d)*1.62+9,1.25);
     light.position.set(room.x,2.9,room.z);light.castShadow=false;scene.add(light);
-    facilityLights.push({light,baseIntensity,phase:index*.73});
+    facilityLights.push({light,baseIntensity,phase:index*.73,x:room.x,z:room.z});
   });
   const emergencyPositions=[[-27,18],[-27,6],[-16,-2],[0,0],[20,-15],[29,0],[23,15]];
   const emergencyMat=new THREE.MeshStandardMaterial({color:0x46131a,emissive:0xff2438,emissiveIntensity:1.5,metalness:.45,roughness:.28});
   emergencyPositions.forEach(([x,z],index)=>{
     const dome=new THREE.Mesh(new THREE.SphereGeometry(.13,14,8),emergencyMat);dome.scale.y=.45;dome.position.set(x,2.78,z);dome.layers.set(2);ceilingGroup.add(dome);
-    const light=new THREE.PointLight(0xff3348,.08,7,2);light.position.set(x,2.55,z);scene.add(light);emergencyLights.push({light,phase:index*.91});
+    const light=new THREE.PointLight(0xff3348,.08,7,2);light.position.set(x,2.55,z);scene.add(light);emergencyLights.push({light,phase:index*.91,x,z});
   });
   const frameMaterials={frame:new THREE.MeshStandardMaterial({color:0x344d60,metalness:.9,roughness:.25}),status:new THREE.MeshStandardMaterial({color:0x63e7ff,emissive:0x25bce0,emissiveIntensity:2.6,metalness:.25,roughness:.25})};
   const hazardTexture=createHazardTexture();
@@ -494,42 +488,56 @@ function buildFacilityEnclosure(){
 }
 function updateFacilityLighting(dt=.016){
   if(!facilityAmbientLight)return;
-  const lightsOut=state?.sabotage?.kind==='lights';const nowMs=performance.now(),now=nowMs/1000;
-  const viewer=(securityOpen&&securityCamera)?securityCamera.position:(localModel?.position||camera?.position);
-  if(viewer&&nowMs-lastLightCullAt>260){
-    lastLightCullAt=nowMs;
-    const limit=securityOpen?(PERFORMANCE_LOW_POWER?4:6):(cameraMode===0?(PERFORMANCE_LOW_POWER?5:7):(PERFORMANCE_LOW_POWER?3:5));
-    const ranked=facilityLights.map((entry,index)=>({index,d:(entry.light.position.x-viewer.x)**2+(entry.light.position.z-viewer.z)**2})).sort((a,b)=>a.d-b.d);
-    const active=new Set(ranked.slice(0,limit).map(item=>item.index));
-    facilityLights.forEach((entry,index)=>entry.light.visible=active.has(index));
-    emergencyLights.forEach(entry=>{const d=(entry.light.position.x-viewer.x)**2+(entry.light.position.z-viewer.z)**2;entry.light.visible=lightsOut&&d<900});
+  const lightsOut=state?.sabotage?.kind==='lights';const now=performance.now()/1000;
+  const securityPreset=securityOpen?SECURITY_CAMERAS[securityCameraIndex]:null;
+  const subject=securityPreset?{x:securityPreset.target[0],z:securityPreset.target[2]}:(cameraViewSubject?.().model?.position||localModel?.position||camera?.position||{x:0,z:0});
+  const lightRadius=PERF.lowPower?16:22,lightRadiusSq=lightRadius*lightRadius;
+  const ambientTarget=lightsOut?.24:2.15;facilityAmbientLight.intensity+=((ambientTarget)-facilityAmbientLight.intensity)*(1-Math.exp(-5*dt));
+  if(facilityKeyLight){const target=lightsOut?.12:1.2;facilityKeyLight.intensity+=(target-facilityKeyLight.intensity)*(1-Math.exp(-4*dt))}
+  for(const entry of facilityLights){
+    const dx=entry.x-subject.x,dz=entry.z-subject.z;
+    const active=dx*dx+dz*dz<=lightRadiusSq;
+    entry.light.visible=active;
+    if(!active)continue;
+    const flicker=lightsOut?(Math.sin(now*18+entry.phase)>0.78?.34:.055):1;
+    const target=entry.baseIntensity*flicker;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-(lightsOut?14:5)*dt));
   }
-  const ambientTarget=lightsOut?.18:1.48;facilityAmbientLight.intensity+=((ambientTarget)-facilityAmbientLight.intensity)*(1-Math.exp(-5*dt));
-  if(facilityKeyLight){const target=lightsOut?.09:1.05;facilityKeyLight.intensity+=(target-facilityKeyLight.intensity)*(1-Math.exp(-4*dt))}
-  for(const entry of facilityLights){if(!entry.light.visible)continue;const flicker=lightsOut?(Math.sin(now*18+entry.phase)>0.78?.34:.055):1;const target=entry.baseIntensity*flicker;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-(lightsOut?14:5)*dt))}
-  for(const entry of emergencyLights){if(!entry.light.visible)continue;const pulse=.78+.22*Math.sin(now*4.8+entry.phase);const target=lightsOut?1.45*pulse:.09;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-8*dt))}
+  for(const entry of emergencyLights){
+    const dx=entry.x-subject.x,dz=entry.z-subject.z;
+    const active=lightsOut&&dx*dx+dz*dz<=(lightRadiusSq*1.25);
+    entry.light.visible=active;
+    if(!active)continue;
+    const pulse=.78+.22*Math.sin(now*4.8+entry.phase);const target=1.45*pulse;entry.light.intensity+=(target-entry.light.intensity)*(1-Math.exp(-8*dt));
+  }
 }
 function updateEnclosureCameraLayer(){
-  if(!camera)return;camera.layers.enable(0);if(cameraMode===2)camera.layers.enable(2);else camera.layers.disable(2);
+  if(!camera||lastEnclosureMode===cameraMode)return;
+  lastEnclosureMode=cameraMode;camera.layers.enable(0);
+  if(cameraMode===2)camera.layers.enable(2);else camera.layers.disable(2);
+  if(cameraFillLight)cameraFillLight.visible=cameraMode===2;
+  if(headLamp)headLamp.visible=cameraMode===2;
 }
 function buildWorld(){
-  facilityAmbientLight=new THREE.HemisphereLight(0xd7f5ff,0x152536,1.48);scene.add(facilityAmbientLight);
-  const cameraLight=new THREE.PointLight(0xd8f7ff,.95,10,1.55);cameraLight.position.set(0,.12,.1);camera.add(cameraLight);
-  const headLamp=new THREE.SpotLight(0xeafaff,1.35,17,Math.PI/4.2,.72,1.15);headLamp.position.set(0,.05,.1);headLamp.target.position.set(0,-.12,7);camera.add(headLamp);camera.add(headLamp.target);
-  facilityKeyLight=new THREE.DirectionalLight(0xe4f6ff,1.05);facilityKeyLight.position.set(8,18,12);facilityKeyLight.castShadow=PERFORMANCE_SHADOWS;facilityKeyLight.shadow.mapSize.set(1024,1024);facilityKeyLight.shadow.camera.left=-34;facilityKeyLight.shadow.camera.right=34;facilityKeyLight.shadow.camera.top=27;facilityKeyLight.shadow.camera.bottom=-27;facilityKeyLight.shadow.bias=-.00035;scene.add(facilityKeyLight);
+  facilityAmbientLight=new THREE.HemisphereLight(0xe6f8ff,0x29445a,2.15);scene.add(facilityAmbientLight);
+  facilityKeyLight=new THREE.DirectionalLight(0xe4f6ff,1.18);facilityKeyLight.position.set(8,18,12);facilityKeyLight.castShadow=PERF.enableShadows;
+  if(PERF.enableShadows){facilityKeyLight.shadow.mapSize.set(PERF.shadowMapSize,PERF.shadowMapSize);facilityKeyLight.shadow.camera.left=-38;facilityKeyLight.shadow.camera.right=38;facilityKeyLight.shadow.camera.top=28;facilityKeyLight.shadow.camera.bottom=-28;facilityKeyLight.shadow.bias=-.00035}
+  scene.add(facilityKeyLight);
+  facilityFillLight=new THREE.DirectionalLight(0x80b9d8,.72);facilityFillLight.position.set(12,9,-14);scene.add(facilityFillLight);
+  cameraFillLight=new THREE.PointLight(0xe7f9ff,1.12,12,1.35);cameraFillLight.position.set(0,.12,.1);cameraFillLight.visible=false;camera.add(cameraFillLight);
+  headLamp=new THREE.SpotLight(0xeafaff,1.18,16,Math.PI/4.2,.72,1.15);headLamp.position.set(0,.05,.1);headLamp.target.position.set(0,-.12,7);headLamp.visible=false;camera.add(headLamp);camera.add(headLamp.target);
   const mapWidth=MAP_BOUNDS.maxX-MAP_BOUNDS.minX,mapDepth=MAP_BOUNDS.maxZ-MAP_BOUNDS.minZ;
   const floor=new THREE.Mesh(new THREE.BoxGeometry(mapWidth+2,.5,mapDepth+2),new THREE.MeshPhysicalMaterial({color:0x061522,metalness:.58,roughness:.34,clearcoat:.7}));floor.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,-.32,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);floor.receiveShadow=true;scene.add(floor);
   for(const zone of MAP_ZONES){const m=new THREE.Mesh(new THREE.BoxGeometry(zone.w,.07,zone.d),new THREE.MeshStandardMaterial({color:zone.color||0x1a3146,metalness:.32,roughness:.52}));m.position.set(zone.x,-.025,zone.z);m.receiveShadow=true;scene.add(m)}
-  const gridSize=Math.max(mapWidth,mapDepth),gridDivisions=Math.max(12,Math.round(gridSize/2.5));
-  const floorGrid=new THREE.GridHelper(gridSize,gridDivisions,0x1b4c69,0x123651);floorGrid.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,.006,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);floorGrid.scale.set(mapWidth/gridSize,1,mapDepth/gridSize);floorGrid.material.transparent=true;floorGrid.material.opacity=.42;floorGrid.material.depthWrite=false;scene.add(floorGrid);
-  const wallMat=new THREE.MeshStandardMaterial({color:0x263d55,emissive:0x07131f,emissiveIntensity:.42,metalness:.64,roughness:.5});
-  const trimMat=new THREE.MeshStandardMaterial({color:0x4b7d99,metalness:.76,roughness:.32,emissive:0x0a2230,emissiveIntensity:.5});
+  for(let x=MAP_BOUNDS.minX+1;x<MAP_BOUNDS.maxX;x+=2.5){const l=new THREE.Mesh(new THREE.BoxGeometry(.025,.02,mapDepth),new THREE.MeshBasicMaterial({color:0x16405e,transparent:true,opacity:.42}));l.position.set(x,.005,(MAP_BOUNDS.minZ+MAP_BOUNDS.maxZ)/2);scene.add(l)}
+  for(let z=MAP_BOUNDS.minZ+1;z<MAP_BOUNDS.maxZ;z+=2.5){const l=new THREE.Mesh(new THREE.BoxGeometry(mapWidth,.02,.025),new THREE.MeshBasicMaterial({color:0x123651,transparent:true,opacity:.42}));l.position.set((MAP_BOUNDS.minX+MAP_BOUNDS.maxX)/2,.006,z);scene.add(l)}
+  const wallMat=new THREE.MeshStandardMaterial({color:0x385873,emissive:0x0d2638,emissiveIntensity:.72,metalness:.64,roughness:.5});
+  const trimMat=new THREE.MeshStandardMaterial({color:0x6399b7,metalness:.68,roughness:.36,emissive:0x12394d,emissiveIntensity:.75});
   // 大型マップでもスマホの描画が重くならないよう、壁を2つのInstancedMeshへ集約する。
   const wallInstances=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),wallMat,WALLS.length);
   const trimInstances=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),trimMat,WALLS.length);
   const matrixObject=new THREE.Object3D();
   WALLS.forEach((o,index)=>{matrixObject.position.set(o.x,1.6,o.z);matrixObject.scale.set(o.w,3.2,o.d);matrixObject.updateMatrix();wallInstances.setMatrixAt(index,matrixObject.matrix);matrixObject.position.set(o.x,3.24,o.z);matrixObject.scale.set(o.w+.06,.09,o.d+.06);matrixObject.updateMatrix();trimInstances.setMatrixAt(index,matrixObject.matrix)});
-  wallInstances.instanceMatrix.needsUpdate=true;trimInstances.instanceMatrix.needsUpdate=true;wallInstances.castShadow=true;wallInstances.receiveShadow=true;scene.add(wallInstances,trimInstances);
+  wallInstances.instanceMatrix.needsUpdate=true;trimInstances.instanceMatrix.needsUpdate=true;wallInstances.castShadow=PERF.enableShadows;wallInstances.receiveShadow=PERF.enableShadows;scene.add(wallInstances,trimInstances);
   buildFacilityEnclosure();
   const addFloorLabel=(text,x,z)=>{const c=document.createElement('canvas');c.width=512;c.height=112;const ctx=c.getContext('2d');ctx.fillStyle='rgba(4,17,30,.82)';ctx.fillRect(0,0,512,112);ctx.strokeStyle='#59dfff';ctx.lineWidth=4;ctx.strokeRect(3,3,506,106);ctx.fillStyle='#e4fbff';ctx.font='bold 34px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,256,56);const m=new THREE.Mesh(new THREE.PlaneGeometry(4.1,.9),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthWrite:false}));m.position.set(x,.055,z);m.rotation.x=-Math.PI/2;scene.add(m)};
   ROOMS.forEach(room=>addFloorLabel(room.name,room.x,room.z));
@@ -539,21 +547,10 @@ function buildWorld(){
   const table=new THREE.Mesh(new THREE.CylinderGeometry(2.15,2.3,.72,40),new THREE.MeshStandardMaterial({color:0x355064,metalness:.75,roughness:.28}));table.position.set(0,.36,0);table.castShadow=true;scene.add(table);const emergency=new THREE.Mesh(new THREE.CylinderGeometry(.52,.6,.25,32),new THREE.MeshStandardMaterial({color:0xd82e3c,emissive:0x5b0810}));emergency.position.set(0,.86,0);scene.add(emergency);
   Object.entries(TASKS).forEach(([id,[,x,z]],i)=>{const g=new THREE.Group();const base=new THREE.Mesh(new THREE.BoxGeometry(1.25,1.35,.65),new THREE.MeshStandardMaterial({color:0x26384b,metalness:.72,roughness:.3}));base.position.y=.68;base.castShadow=true;g.add(base);const screen=new THREE.Mesh(new THREE.PlaneGeometry(.86,.48),new THREE.MeshBasicMaterial({color:[0x48eaff,0x73ff93,0xffcb4e,0xff719e][i%4]}));screen.position.set(0,.88,.331);g.add(screen);g.position.set(x,0,z);scene.add(g)});
   const cargoDock=new THREE.Group();const dockBase=new THREE.Mesh(new THREE.BoxGeometry(1.8,.25,1.5),new THREE.MeshStandardMaterial({color:0x75512f,metalness:.18,roughness:.72}));dockBase.position.y=.13;dockBase.castShadow=true;cargoDock.add(dockBase);const dockGlow=new THREE.Mesh(new THREE.PlaneGeometry(1.45,1.15),new THREE.MeshBasicMaterial({color:0xffc95c,transparent:true,opacity:.32,side:THREE.DoubleSide}));dockGlow.rotation.x=-Math.PI/2;dockGlow.position.y=.265;cargoDock.add(dockGlow);cargoDock.position.set(CARGO_DELIVERY.x,0,CARGO_DELIVERY.z);scene.add(cargoDock);
-  const addLocker=(locker)=>{const group=new THREE.Group();const shellMat=new THREE.MeshStandardMaterial({color:0x28445a,metalness:.78,roughness:.3});const darkMat=new THREE.MeshStandardMaterial({color:0x07131f,metalness:.35,roughness:.55});const shell=new THREE.Mesh(new THREE.BoxGeometry(1.15,2.55,.9),shellMat);shell.position.y=1.275;shell.castShadow=true;group.add(shell);const recess=new THREE.Mesh(new THREE.BoxGeometry(.86,2.15,.08),darkMat);recess.position.set(0,1.25,.47);group.add(recess);const doorPivot=new THREE.Group();doorPivot.position.set(-.46,0,.52);const door=new THREE.Mesh(new THREE.BoxGeometry(.9,2.18,.08),new THREE.MeshStandardMaterial({color:0x3b6680,metalness:.82,roughness:.25}));door.position.set(.45,1.25,0);door.castShadow=true;doorPivot.add(door);const handle=new THREE.Mesh(new THREE.BoxGeometry(.06,.3,.07),new THREE.MeshBasicMaterial({color:0x9cecff}));handle.position.set(.78,1.2,.07);doorPivot.add(handle);group.add(doorPivot);const lamp=new THREE.Mesh(new THREE.SphereGeometry(.08,12,8),new THREE.MeshBasicMaterial({color:0x63f4ff}));lamp.position.set(0,2.38,.53);group.add(lamp);group.position.set(locker.x,0,locker.z);group.rotation.y=locker.rot;group.userData={doorPivot,lamp,open:0,lockerId:locker.id};scene.add(group);lockerVisuals.set(locker.id,group)};LOCKERS.forEach(addLocker);
-  const starGeo=new THREE.BufferGeometry(),pts=[];for(let i=0;i<(PERFORMANCE_LOW_POWER?450:900);i++)pts.push((Math.random()-.5)*150,Math.random()*52+5,(Math.random()-.5)*150);starGeo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:.09})));
+  const addLocker=(locker)=>{const group=new THREE.Group();const shellMat=new THREE.MeshStandardMaterial({color:0x28445a,metalness:.78,roughness:.3});const darkMat=new THREE.MeshStandardMaterial({color:0x07131f,metalness:.35,roughness:.55});const shell=new THREE.Mesh(new THREE.BoxGeometry(1.15,2.55,.9),shellMat);shell.position.y=1.275;shell.castShadow=PERF.enableShadows;group.add(shell);const recess=new THREE.Mesh(new THREE.BoxGeometry(.86,2.15,.08),darkMat);recess.position.set(0,1.25,.47);group.add(recess);const doorPivot=new THREE.Group();doorPivot.position.set(-.46,0,.52);const door=new THREE.Mesh(new THREE.BoxGeometry(.9,2.18,.08),new THREE.MeshStandardMaterial({color:0x3b6680,metalness:.82,roughness:.25}));door.position.set(.45,1.25,0);door.castShadow=true;doorPivot.add(door);const handle=new THREE.Mesh(new THREE.BoxGeometry(.06,.3,.07),new THREE.MeshBasicMaterial({color:0x9cecff}));handle.position.set(.78,1.2,.07);doorPivot.add(handle);group.add(doorPivot);const lamp=new THREE.Mesh(new THREE.SphereGeometry(.08,12,8),new THREE.MeshBasicMaterial({color:0x63f4ff}));lamp.position.set(0,2.38,.53);group.add(lamp);group.position.set(locker.x,0,locker.z);group.rotation.y=locker.rot;group.userData={doorPivot,lamp,open:0,lockerId:locker.id};scene.add(group);lockerVisuals.set(locker.id,group)};LOCKERS.forEach(addLocker);
+  const starGeo=new THREE.BufferGeometry(),pts=[];for(let i=0;i<1500;i++)pts.push((Math.random()-.5)*150,Math.random()*52+5,(Math.random()-.5)*150);starGeo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:.09})));
 }
-function createCrewmate(c){
-  const selectedColor=COLORS[c]?c:'white',group=new THREE.Group();
-  const mat=PERFORMANCE_LOW_POWER?new THREE.MeshStandardMaterial({color:COLORS[selectedColor],roughness:.24,metalness:.04}):new THREE.MeshPhysicalMaterial({color:COLORS[selectedColor],roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1});
-  const body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,PERFORMANCE_LOW_POWER?7:10,PERFORMANCE_LOW_POWER?13:22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=PERFORMANCE_SHADOWS;group.add(body);
-  [-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,PERFORMANCE_LOW_POWER?6:8,PERFORMANCE_LOW_POWER?10:16),mat);l.position.set(x,.28,0);l.castShadow=PERFORMANCE_SHADOWS;group.add(l)});
-  const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=PERFORMANCE_SHADOWS;group.add(pack);
-  const sphereWidth=PERFORMANCE_LOW_POWER?18:32,sphereHeight=PERFORMANCE_LOW_POWER?10:18;
-  const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,sphereWidth,sphereHeight),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);
-  const visorMaterial=PERFORMANCE_LOW_POWER?new THREE.MeshStandardMaterial({color:0xa8eaff,emissive:0x173b4a,emissiveIntensity:.35,roughness:.12,metalness:.1,transparent:true,opacity:.95}):new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96});
-  const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,sphereWidth,sphereHeight),visorMaterial);visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);
-  const cargoBox=createCargoParcel(.82);cargoBox.position.set(0,1.02,.94);cargoBox.visible=false;group.add(cargoBox);group.userData.cargoBox=cargoBox;group.userData.target=new THREE.Vector3();group.userData.rotation=0;group.userData.skinMaterial=mat;group.userData.skinColor=selectedColor;return group
-}
+function createCrewmate(c){const selectedColor=COLORS[c]?c:'white',group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[selectedColor],roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=PERF.enableShadows;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=PERF.enableShadows;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=PERF.enableShadows;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);const cargoBox=createCargoParcel(.82);cargoBox.position.set(0,1.02,.94);cargoBox.visible=false;group.add(cargoBox);group.userData.cargoBox=cargoBox;group.userData.target=new THREE.Vector3();group.userData.rotation=0;group.userData.skinMaterial=mat;group.userData.skinColor=selectedColor;return group}
 function applySelectedSkin(model,color){if(!model||renderMode!=='3d')return;const selectedColor=COLORS[color]?color:'white';if(model.userData.skinColor===selectedColor)return;const material=model.userData.skinMaterial;if(material?.color){material.color.setHex(COLORS[selectedColor]);material.needsUpdate=true}model.userData.skinColor=selectedColor}
 function syncModels(){
   if(!state)return;
@@ -684,38 +681,114 @@ function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabota
 let animationFrameId=0;
 let miniMapEnabled=true;
 let animationErrorShown=false;
-function animate(){
+function resetPerformanceSampling({restoreQuality=false,delay=5500}={}){
+  performanceFrameCount=0;
+  performanceWindowStart=0;
+  lowFpsWindows=0;
+  highFpsWindows=0;
+  qualitySamplingResumeAt=performance.now()+Math.max(0,delay);
+  if(restoreQuality&&renderer&&currentRendererPixelRatio!==preferredRendererPixelRatio){
+    currentRendererPixelRatio=preferredRendererPixelRatio;
+    renderer.setPixelRatio(currentRendererPixelRatio);
+    resize();
+  }
+}
+function qualitySamplingBlocked(now){
+  return document.hidden||securityOpen||now<qualitySamplingResumeAt||!!document.querySelector('dialog[open]');
+}
+function reduceRenderLoadIfNeeded(now){
+  // タスクやダイアログのアニメーションは通常プレイの性能判定に含めない。
+  if(qualitySamplingBlocked(now)){
+    performanceFrameCount=0;
+    performanceWindowStart=0;
+    return;
+  }
+  performanceFrameCount++;
+  if(!performanceWindowStart)performanceWindowStart=now;
+  const elapsed=now-performanceWindowStart;
+  if(elapsed<4000)return;
+  const fps=performanceFrameCount*1000/elapsed;
+  performanceFrameCount=0;
+  performanceWindowStart=now;
+  if(fps<PERF.targetFps*.68){
+    lowFpsWindows++;
+    highFpsWindows=0;
+  }else if(fps>PERF.targetFps*.9){
+    highFpsWindows++;
+    lowFpsWindows=0;
+  }else{
+    lowFpsWindows=0;
+    highFpsWindows=0;
+  }
+  // 一時的な引っ掛かりでは画質を下げず、通常プレイで低FPSが3回続いた時だけ調整する。
+  if(renderer&&lowFpsWindows>=3&&currentRendererPixelRatio>.8){
+    lowFpsWindows=0;
+    currentRendererPixelRatio=Math.max(.8,Math.round((currentRendererPixelRatio-.1)*100)/100);
+    renderer.setPixelRatio(currentRendererPixelRatio);
+    resize();
+    console.info(`[ゲーム] 通常プレイの負荷に合わせて描画倍率を調整しました (${currentRendererPixelRatio}x)`);
+  }
+  // 動作が安定したら少しずつ本来の画質へ戻す。
+  if(renderer&&highFpsWindows>=3&&currentRendererPixelRatio<preferredRendererPixelRatio){
+    highFpsWindows=0;
+    currentRendererPixelRatio=Math.min(preferredRendererPixelRatio,Math.round((currentRendererPixelRatio+.1)*100)/100);
+    renderer.setPixelRatio(currentRendererPixelRatio);
+    resize();
+  }
+}
+function animate(now=performance.now()){
   animationFrameId=requestAnimationFrame(animate);
   try{
-    if(!clock)return;
-    const now=performance.now(),dt=Math.min(clock.getDelta(),.05);
+    if(!clock||document.hidden)return;
+    const frameInterval=1000/PERF.targetFps;
+    if(animationLastTime&&now-animationLastTime<frameInterval*.86)return;
+    const dt=Math.min(animationLastTime?(now-animationLastTime)/1000:1/PERF.targetFps,.05);
+    animationLastTime=now;
     if(state?.phase==='playing'&&localModel&&!securityOpen)moveLocal(dt);
     for(const m of models.values()){
-      if(m!==localModel&&m?.position&&m?.userData?.target){const a=1-Math.exp(-12*dt);m.position.lerp(m.userData.target,a);m.rotation.y=dampAngle(m.rotation.y,Number(m.userData.rotation||0),16,dt)}
+      if(m!==localModel&&m?.position&&m?.userData?.target){
+        const a=1-Math.exp(-12*dt);
+        m.position.lerp(m.userData.target,a);
+        m.rotation.y=dampAngle(m.rotation.y,Number(m.userData.rotation||0),16,dt);
+      }
     }
-    if(now-lastNearestUpdateAt>=50){lastNearestUpdateAt=now;updateNearest()}
-    const sceneFrameMs=PERFORMANCE_LOW_POWER?25:16.5;
-    const shouldRenderScene=now-lastSceneRenderAt>=sceneFrameMs;
+    if(now-lastNearestUpdate>=1000/PERF.nearestFps){lastNearestUpdate=now;updateNearest()}
     if(renderMode==='3d'&&renderer&&scene&&camera){
-      if(shouldRenderScene&&!securityOpen){
-        lastSceneRenderAt=now;updateLockerVisuals(dt);updateCargoCarryVisual();updateFacilityLighting(dt);updateCamera(dt);updateEnclosureCameraLayer();renderer.render(scene,camera);recordRenderedFrame(now)
-      }else if(securityOpen&&now-lastLightCullAt>260){updateFacilityLighting(Math.min(dt,.05))}
-    }else if(renderMode==='2d'&&shouldRenderScene){lastSceneRenderAt=now;draw2DMap()}
-    if(securityOpen)renderSecurityFeed();
-    if(miniMapEnabled&&now-lastMiniMapRenderAt>=100){
-      lastMiniMapRenderAt=now;
-      try{drawMiniMap()}catch(error){miniMapEnabled=false;console.error('[Hidden Crew] Mini map disabled',error);if(ui.miniMap)ui.miniMap.style.display='none';showNotice('ミニマップを停止してゲームを続行します。')}
+      updateLockerVisuals(dt);
+      updateCargoCarryVisual();
+      if(now-lastLightUpdate>=1000/PERF.lightFps){const lightDt=Math.min((now-lastLightUpdate)/1000,.15)||dt;lastLightUpdate=now;updateFacilityLighting(lightDt)}
+      updateCamera(dt);
+      updateEnclosureCameraLayer();
+      if(PERF.enableShadows&&now-lastShadowUpdate>=1000/PERF.shadowFps){lastShadowUpdate=now;renderer.shadowMap.needsUpdate=true}
+      // 監視画面を開いている間は、背後の3D画面を再描画せず監視映像へGPUを集中させる。
+      if(!securityOpen)renderer.render(scene,camera);
+    }else if(renderMode==='2d'&&!securityOpen){
+      draw2DMap();
     }
-    if(now-lastHudUpdateAt>=250){lastHudUpdateAt=now;updateCooldown();updateSabotage()}
+    if(securityOpen)renderSecurityFeed();
+    if(miniMapEnabled&&now-lastMiniMapRender>=1000/PERF.miniMapFps){
+      lastMiniMapRender=now;
+      try{drawMiniMap()}catch(error){
+        miniMapEnabled=false;
+        console.error('[Hidden Crew] Mini map disabled',error);
+        if(ui.miniMap)ui.miniMap.style.display='none';
+        showNotice('ミニマップを停止してゲームを続行します。');
+      }
+    }
+    if(now-lastHudUpdate>=1000/PERF.hudFps){lastHudUpdate=now;updateCooldown();updateSabotage()}
+    reduceRenderLoadIfNeeded(now);
     animationErrorShown=false;
   }catch(error){
     console.error('[Hidden Crew] Animation frame error',error);
-    if(!animationErrorShown){animationErrorShown=true;showNotice(`描画エラーを回避しました: ${error?.message||error}`)}
+    if(!animationErrorShown){
+      animationErrorShown=true;
+      showNotice(`描画エラーを回避しました: ${error?.message||error}`);
+    }
   }
 }
 function collidesWithMap(x,z,r=.62){
   if(x-r<MAP_BOUNDS.minX||x+r>MAP_BOUNDS.maxX||z-r<MAP_BOUNDS.minZ||z+r>MAP_BOUNDS.maxZ)return true;
-  for(const o of [...WALLS,...SOLID_PROPS])if(Math.abs(x-o.x)<o.w/2+r&&Math.abs(z-o.z)<o.d/2+r)return true;
+  for(const o of COLLISION_OBJECTS)if(Math.abs(x-o.x)<o.w/2+r&&Math.abs(z-o.z)<o.d/2+r)return true;
   if(Math.hypot(x-EMERGENCY_BUTTON.x,z-EMERGENCY_BUTTON.z)<2.05+r)return true;
   return false;
 }
@@ -790,7 +863,7 @@ function moveLocal(dt){
   // 長いフレームでも小刻みに当たり判定し、壁際の引っ掛かりやガクつきを抑える。
   let remaining=Math.min(dt,.05);
   while(remaining>0){
-    const step=Math.min(remaining,1/120);
+    const step=Math.min(remaining,1/75);
     const nx=localModel.position.x+localVelocity.x*step;
     const nz=localModel.position.z+localVelocity.y*step;
     if(!collidesWithMap(nx,localModel.position.z))localModel.position.x=nx;else localVelocity.x=0;
@@ -806,7 +879,7 @@ function moveLocal(dt){
   }
   localModel.userData.target.copy(localModel.position);
   localModel.userData.rotation=localModel.rotation.y;
-  if(performance.now()-lastMove>30){
+  if(performance.now()-lastMove>PERF.moveInterval){
     lastMove=performance.now();
     send('move',{x:localModel.position.x,z:localModel.position.z,rotation:localModel.rotation.y,clientTime:Date.now()});
   }
@@ -848,10 +921,14 @@ function cameraViewSubject(){
   if(target){const model=models.get(target.id);if(model)return{player:target,model,following:true}}
   return{player:self,model:localModel,following:false};
 }
+function setCameraLens(targetCamera,fov,near){
+  if(!targetCamera)return;
+  if(Math.abs(targetCamera.fov-fov)>.01||Math.abs(targetCamera.near-near)>.001){targetCamera.fov=fov;targetCamera.near=near;targetCamera.updateProjectionMatrix()}
+}
 function snapCameraToCurrentMode(subjectModel=cameraViewSubject().model){
   if(!camera||!subjectModel||cameraMode===2)return;
   const pose=getThirdPersonCameraPose(subjectModel.position);
-  camera.fov=pose.fov;camera.near=.06;camera.updateProjectionMatrix();
+  setCameraLens(camera,pose.fov,.06);
   camera.position.copy(pose.position);camera.lookAt(pose.target);
 }
 function updateCamera(dt=.016){
@@ -859,7 +936,7 @@ function updateCamera(dt=.016){
   const subject=cameraViewSubject(),viewModel=subject.model,viewPlayer=subject.player;
   if(!viewModel){
     restoreSpectatorHiddenModel();
-    camera.fov=54;camera.near=.06;camera.updateProjectionMatrix();
+    setCameraLens(camera,54,.06);
     const idlePosition=new THREE.Vector3(0,15,10);
     if(!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z))camera.position.copy(idlePosition);
     else camera.position.lerp(idlePosition,1-Math.exp(-5*Math.max(.001,dt)));
@@ -877,7 +954,7 @@ function updateCamera(dt=.016){
     }else{
       restoreSpectatorHiddenModel();viewModel.visible=false;
     }
-    camera.fov=74;camera.near=.045;camera.updateProjectionMatrix();
+    setCameraLens(camera,74,.045);
     const observedYaw=subject.following?Number(viewModel.rotation.y||viewModel.userData?.rotation||viewPlayer?.rotation||0):firstPersonYaw;
     const eye=new THREE.Vector3(pos.x,pos.y+1.72,pos.z);
     const forward=new THREE.Vector3(Math.sin(observedYaw),-.035,Math.cos(observedYaw)).normalize();
@@ -887,7 +964,7 @@ function updateCamera(dt=.016){
   if(localModel){const self=me();localModel.visible=playerVisibleToLocalViewer(self)}
   if(viewModel&&viewPlayer)viewModel.visible=playerVisibleToLocalViewer(viewPlayer);
   const pose=getThirdPersonCameraPose(pos);
-  camera.fov=pose.fov;camera.near=.06;camera.updateProjectionMatrix();
+  setCameraLens(camera,pose.fov,.06);
   const invalidCamera=!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z);
   if(invalidCamera||camera.position.distanceToSquared(pose.position)>900)camera.position.copy(pose.position);
   else camera.position.lerp(pose.position,1-Math.exp(-(cameraMode===0?7:10)*Math.max(.001,dt)));
@@ -1007,7 +1084,7 @@ function ensureSecurityViewer(){
     if(!securityRenderer){
       securityRenderer=new THREE.WebGLRenderer({
         canvas,
-        antialias:true,
+        antialias:false,
         alpha:false,
         powerPreference:'high-performance',
         failIfMajorPerformanceCaveat:false,
@@ -1040,14 +1117,14 @@ function resizeSecurityViewer(){
   const cssWidth=Math.max(280,Math.floor(canvas.clientWidth||640));
   const cssHeight=Math.max(158,Math.floor(canvas.clientHeight||cssWidth*9/16));
   const coarse=matchMedia('(pointer:coarse)').matches;
-  const maxWidth=coarse?520:900;
+  const maxWidth=coarse?420:680;
   const scale=Math.min(1,maxWidth/cssWidth);
   const width=Math.max(280,Math.round(cssWidth*scale));
   const height=Math.max(158,Math.round(cssHeight*scale));
   if(width!==securityRenderWidth||height!==securityRenderHeight){
     securityRenderWidth=width;
     securityRenderHeight=height;
-    securityRenderer.setPixelRatio(Math.min(performancePixelRatio,coarse?.85:1));
+    securityRenderer.setPixelRatio(Math.min(devicePixelRatio||1,1));
     securityRenderer.setSize(width,height,false);
     securityCamera.aspect=width/height;
     securityCamera.updateProjectionMatrix();
@@ -1063,7 +1140,7 @@ function drawSecurityFallback(){
   const ctx=securityFeedContext;if(!ctx)return;
   const width=Math.max(280,Math.floor(canvas.clientWidth||640));
   const height=Math.max(158,Math.floor(canvas.clientHeight||width*9/16));
-  const ratio=Math.min(devicePixelRatio||1,1.5);
+  const ratio=Math.min(devicePixelRatio||1,1);
   if(canvas.width!==Math.floor(width*ratio)||canvas.height!==Math.floor(height*ratio)){canvas.width=Math.floor(width*ratio);canvas.height=Math.floor(height*ratio)}
   ctx.setTransform(ratio,0,0,ratio,0,0);
   const preset=SECURITY_CAMERAS[securityCameraIndex],viewRadius=preset.radius;
@@ -1094,7 +1171,7 @@ function drawSecurityLiveScene(){
   return true;
 }
 function renderSecurityFeed(){
-  const now=performance.now();if(now-securityLastRender<84)return;securityLastRender=now;
+  const now=performance.now();if(now-securityLastRender<1000/PERF.securityFps)return;securityLastRender=now;
   updateSecurityCameraUi();
   if(renderMode==='3d'&&!securityViewerFailed){
     try{
@@ -1284,7 +1361,7 @@ function openTask(id){
   openDialog('taskDialog');
 }
 function finishTask(id){const counts=activeTaskCountsProgress&&activeTaskCompletionId===id;if(counts){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.tasks=(s.tasks||0)+1;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));send('taskComplete',{task:id})}closeDialog('taskDialog');showNotice(counts?'タスク完了！':'模擬操作完了（進捗には加算されません）')}
-$('taskDialog').addEventListener('close',resetTaskRuntime);
+$('taskDialog').addEventListener('close',()=>{resetTaskRuntime();resetPerformanceSampling({restoreQuality:true,delay:6000})});
 function openMeeting(reason){if(activeCallPeer)hangUpCall(true);stopMeetingVoice();$('meetingReason').textContent=reason;renderVotes();openDialog('meetingDialog');setVoiceStatus('「音声を聞く」を押すと、会議中の全員の声が聞こえます。');updateMeetingVoiceUi();enableMeetingAudio(false)}
 function renderVotes(){if(!state)return;const root=$('voteList');root.innerHTML='';state.players.filter(p=>p.alive).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});$('skipVoteButton').onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
@@ -1675,7 +1752,7 @@ updateCallUi();
 addEventListener('beforeunload',()=>{stopMeetingVoice();hangUpCall(false);clearIncomingCall(false)});
 
 function openResult(w){restoreSpectatorHiddenModel();$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'WEREWOLF VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'人狼の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).filter(p=>!p.practiceTarget).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('resultCloseButton').onclick=()=>closeDialog('resultDialog');$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
-function openDialog(id){const d=$(id);if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(id==='securityDialog'){securityOpen=false;clearKeys()}if(d?.open)d.close()}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
+function openDialog(id){const d=$(id);resetPerformanceSampling({delay:7000});if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(id==='securityDialog'){securityOpen=false;clearKeys()}if(d?.open)d.close();setTimeout(()=>resetPerformanceSampling({restoreQuality:true,delay:5500}),80)}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
 function setupJoystick(){
   if(!ui.joystick||!ui.stick)return;
   let active=false;
@@ -1770,7 +1847,7 @@ function setupJoystick(){
     document.addEventListener('touchcancel',touchEnd,{passive:false});
   }
 }
-function resize(){const canvas=$('gameCanvas');if(!canvas)return;const viewport=window.visualViewport;const width=Math.max(1,Math.round(viewport?.width||innerWidth));const height=Math.max(1,Math.round(viewport?.height||innerHeight));document.documentElement.style.setProperty('--app-height',`${height}px`);if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(width*ratio));canvas.height=Math.max(1,Math.floor(height*ratio));canvas.style.width=width+'px';canvas.style.height=height+'px';return}if(!camera||!renderer)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setPixelRatio(performancePixelRatio);renderer.setSize(width,height,false)}
+function resize(){const canvas=$('gameCanvas');if(!canvas)return;const viewport=window.visualViewport;const width=Math.max(1,Math.round(viewport?.width||innerWidth));const height=Math.max(1,Math.round(viewport?.height||innerHeight));document.documentElement.style.setProperty('--app-height',`${height}px`);if(renderMode==='2d'){const ratio=Math.min(devicePixelRatio||1,PERF.maxPixelRatio);canvas.width=Math.max(1,Math.floor(width*ratio));canvas.height=Math.max(1,Math.floor(height*ratio));canvas.style.width=width+'px';canvas.style.height=height+'px';return}if(!camera||!renderer)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setSize(width,height,false)}
 setInterval(()=>{if(state?.phase==='meeting')$('meetingTimer').textContent=`残り ${Math.max(0,Math.ceil((state.meetingEndsAt-Date.now())/1000))}秒`},500);
 
 $('profileSummary').textContent=profileText();
@@ -1785,6 +1862,7 @@ $('profileSummary').textContent=profileText();
     #gameScreen{overflow:hidden;isolation:isolate;background:#020711;touch-action:none}
     #gameCanvas{position:absolute;inset:0;z-index:0;width:100%;height:100%;display:block;background:#020711;touch-action:none}
     input,select,textarea,dialog{touch-action:auto}
+    dialog::backdrop{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:rgba(1,7,16,.76)}
 
     .meeting-voice-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
     .meeting-voice-actions button{min-height:42px;white-space:nowrap}
