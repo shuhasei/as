@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-attack-fix-v25';
+const MAP_VERSION='aurora-spectator-last-survivor-v26';
 const TASKS={
   reactor:['リアクター安定化',-28,18],
   engine:['エンジン出力調整',-28,6],
@@ -91,7 +91,7 @@ const SOLID_PROPS=[
   {x:18.2,z:-16.8,w:1.6,d:1.6},{x:25.5,z:13,w:1.5,d:1.5},
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
   const group=new THREE.Group();group.scale.setScalar(scale);
@@ -180,10 +180,20 @@ function handle(m){
     if(m.id)myId=m.id;finishJoin(m.room);
   }else if(m.type==='state'){
     if(m.state?.mapVersion&&m.state.mapVersion!==MAP_VERSION){console.warn('[Hidden Crew] client/server version mismatch',MAP_VERSION,m.state.mapVersion);showNotice('新旧ファイルが混在していますが、互換モードで接続しました。')}
+    const previousSelf=state?.players?.find(player=>player.id===myId);
+    const wasAlive=previousSelf?.alive;
     state=m.state;syncCargoCarryState();
     if(state.phase!=='meeting'&&(meetingVoiceStream||meetingVoiceProcessor))stopMeetingVoice();
     if(joinPending&&myId&&state.players?.some(player=>player.id===myId))finishJoin(state.room);
     ui.start.disabled=false;ui.start.textContent='ゲーム開始';updateUI();updateAdvancedUI();syncModels();
+    const currentSelf=me();
+    if(wasAlive===true&&currentSelf&&!currentSelf.alive){
+      spectatorTargetId=null;clearKeys();localVelocity.set(0,0);
+      for(const dialogId of ['taskDialog','securityDialog','sabotageDialog','incomingCallDialog'])closeDialog(dialogId);
+      showNotice('倒されました。観戦モードへ切り替えました。');
+    }
+    if(currentSelf?.alive){spectatorTargetId=null;lastKnownAlive=true}else if(currentSelf){lastKnownAlive=false}
+    updateSpectatorUI();
     if(activeCallPeer){const callTarget=state.players?.find(p=>p.id===activeCallPeer);if(!callTarget?.connected||!callTarget?.alive){showNotice('通話相手が退出したため通話を終了しました。');hangUpCall(false)}else updateCallUi()}
     if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open)updateMeetingVoiceUi();
   }else if(m.type==='playerMoved'){
@@ -464,6 +474,56 @@ function syncModels(){
   }
 }
 function me(){return state?.players.find(p=>p.id===myId)}
+function livingSpectatorCandidates(){
+  return (state?.players||[]).filter(player=>player.id!==myId&&!player.practiceTarget&&player.alive&&player.connected!==false);
+}
+function spectatorTarget(){
+  if(!spectatorTargetId)return null;
+  const player=(state?.players||[]).find(item=>item.id===spectatorTargetId&&item.alive&&item.connected!==false&&!item.practiceTarget);
+  if(!player)spectatorTargetId=null;
+  return player||null;
+}
+function restoreSpectatorHiddenModel(){
+  if(!spectatorHiddenModelId)return;
+  const model=models.get(spectatorHiddenModelId),player=(state?.players||[]).find(item=>item.id===spectatorHiddenModelId);
+  if(model&&player)model.visible=!player.reported&&!player.hidden;
+  spectatorHiddenModelId=null;
+}
+function setSpectatorTarget(id){
+  restoreSpectatorHiddenModel();
+  const self=me();
+  if(!self||self.alive||state?.phase!=='playing')return;
+  spectatorTargetId=id||null;localVelocity.set(0,0);clearKeys();joy={x:0,y:0};
+  if(spectatorTargetId){
+    const target=spectatorTarget();
+    if(target){cameraMode=2;showNotice(`${target.name}の視点を観戦しています`)}
+  }else showNotice('自由観戦へ戻りました');
+  updateSpectatorUI();
+}
+function cycleSpectatorTarget(direction=1){
+  const candidates=livingSpectatorCandidates();
+  if(!candidates.length){setSpectatorTarget(null);showNotice('観戦できる生存者がいません');return}
+  const currentIndex=candidates.findIndex(player=>player.id===spectatorTargetId);
+  const nextIndex=currentIndex<0?(direction>0?0:candidates.length-1):(currentIndex+direction+candidates.length)%candidates.length;
+  setSpectatorTarget(candidates[nextIndex].id);
+}
+function updateSpectatorUI(){
+  const panel=$('spectatorPanel'),status=$('spectatorStatus'),free=$('spectatorFreeButton'),prev=$('spectatorPrevButton'),next=$('spectatorNextButton');
+  const self=me(),active=state?.phase==='playing'&&self&&!self.alive&&!self.spectator;
+  panel?.classList.toggle('hidden',!active);
+  if(!active){restoreSpectatorHiddenModel();spectatorTargetId=null;return}
+  const target=spectatorTarget(),candidates=livingSpectatorCandidates();
+  if(status)status.textContent=target?`${target.name}の視点を共有中`:'自由観戦中（自分で移動可能）';
+  if(free){free.disabled=!target;free.classList.toggle('primary',!target)}
+  if(prev)prev.disabled=!candidates.length;
+  if(next)next.disabled=!candidates.length;
+  if(ui.joystick)ui.joystick.classList.toggle('hidden',!!target);
+  const cameraButton=$('cameraButton');
+  if(cameraButton&&target){const labels=['見下ろし','近い視点','一人称'];cameraButton.textContent=`観戦：${labels[(cameraMode+1)%3]}へ切替`}
+}
+$('spectatorFreeButton').onclick=()=>setSpectatorTarget(null);
+$('spectatorPrevButton').onclick=()=>cycleSpectatorTarget(-1);
+$('spectatorNextButton').onclick=()=>cycleSpectatorTarget(1);
 function killCooldownRemainingMs(){
   const p=me();
   if(!p||p.role!=='impostor')return 0;
@@ -484,7 +544,7 @@ function updateCooldown(){
   if(ui.killCooldown)ui.killCooldown.textContent=remaining>0?`${Math.ceil(remaining/1000)}秒`:'';
   if(ui.kill&&isWerewolf)ui.kill.disabled=!ready;
 }
-function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.filter(x=>!x.practiceTarget).length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'} ${x.practiceTarget?'practice-target':''}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${x.practiceTarget?'🎯 ':''}${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId&&!x.practiceTarget?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive||!x.connected?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing');ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing');if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();queueHudLayout();}
+function updateUI(){if(!state)return;const p=me();ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.filter(x=>!x.practiceTarget).length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'} ${x.practiceTarget?'practice-target':''}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${x.practiceTarget?'🎯 ':''}${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId&&!x.practiceTarget?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive||!x.connected?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing'||!p?.alive);ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p||!p.alive);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing'||(!p?.alive&&!!spectatorTargetId));if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();updateSpectatorUI();queueHudLayout();}
 function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;if(ui.sabotageTitle)ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind]||'妨害発生';if(ui.sabotageTimer)ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
 let animationFrameId=0;
 let miniMapEnabled=true;
@@ -560,7 +620,7 @@ function dampAngle(current,target,rate,dt){
 }
 function moveLocal(dt){
   const p=me();
-  if(!p||p.hidden)return;
+  if(!p||p.hidden||(!p.alive&&spectatorTargetId))return;
   if(collidesWithMap(localModel.position.x,localModel.position.z)){
     const safe=findNearestWalkablePosition(p.x,p.z);
     localModel.position.set(safe.x,0,safe.z);
@@ -662,38 +722,49 @@ function getThirdPersonCameraPose(pos,mode=cameraMode){
     target:new THREE.Vector3(pos.x,pos.y+(wide?.75:1.0),pos.z-(wide?1.8:1.15))
   };
 }
-function snapCameraToCurrentMode(){
-  if(!camera||!localModel||cameraMode===2)return;
-  const pose=getThirdPersonCameraPose(localModel.position);
+function cameraViewSubject(){
+  const self=me(),target=!self?.alive?spectatorTarget():null;
+  if(target){const model=models.get(target.id);if(model)return{player:target,model,following:true}}
+  return{player:self,model:localModel,following:false};
+}
+function snapCameraToCurrentMode(subjectModel=cameraViewSubject().model){
+  if(!camera||!subjectModel||cameraMode===2)return;
+  const pose=getThirdPersonCameraPose(subjectModel.position);
   camera.fov=pose.fov;camera.near=.06;camera.updateProjectionMatrix();
   camera.position.copy(pose.position);camera.lookAt(pose.target);
 }
 function updateCamera(dt=.016){
   if(!camera)return;
-  if(!localModel){
+  const subject=cameraViewSubject(),viewModel=subject.model,viewPlayer=subject.player;
+  if(!viewModel){
+    restoreSpectatorHiddenModel();
     camera.fov=54;camera.near=.06;camera.updateProjectionMatrix();
     const idlePosition=new THREE.Vector3(0,15,10);
     if(!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z))camera.position.copy(idlePosition);
     else camera.position.lerp(idlePosition,1-Math.exp(-5*Math.max(.001,dt)));
-    camera.lookAt(0,.8,0);
-    return;
+    camera.lookAt(0,.8,0);return;
   }
-
-  const pos=localModel.position;
+  const pos=viewModel.position;
   if(!Number.isFinite(pos.x)||!Number.isFinite(pos.y)||!Number.isFinite(pos.z)){
-    const p=me();pos.set(Number(p?.x)||0,0,Number(p?.z)||0);localVelocity.set(0,0);
+    pos.set(Number(viewPlayer?.x)||0,0,Number(viewPlayer?.z)||0);localVelocity.set(0,0);
   }
-
   if(cameraMode===2){
-    localModel.visible=false;
+    if(subject.following){
+      if(spectatorHiddenModelId&&spectatorHiddenModelId!==viewPlayer.id)restoreSpectatorHiddenModel();
+      viewModel.visible=false;spectatorHiddenModelId=viewPlayer.id;
+      if(localModel&&localModel!==viewModel){const self=me();localModel.visible=self?!self.reported&&!self.hidden:true}
+    }else{
+      restoreSpectatorHiddenModel();viewModel.visible=false;
+    }
     camera.fov=74;camera.near=.045;camera.updateProjectionMatrix();
+    const observedYaw=subject.following?Number(viewModel.rotation.y||viewModel.userData?.rotation||viewPlayer?.rotation||0):firstPersonYaw;
     const eye=new THREE.Vector3(pos.x,pos.y+1.72,pos.z);
-    const forward=new THREE.Vector3(Math.sin(firstPersonYaw),-.035,Math.cos(firstPersonYaw)).normalize();
-    camera.position.copy(eye);camera.lookAt(eye.clone().addScaledVector(forward,12));
-    return;
+    const forward=new THREE.Vector3(Math.sin(observedYaw),-.035,Math.cos(observedYaw)).normalize();
+    camera.position.copy(eye);camera.lookAt(eye.clone().addScaledVector(forward,12));return;
   }
-
-  const p=me();localModel.visible=p?!p.reported&&!p.hidden:true;
+  restoreSpectatorHiddenModel();
+  if(localModel){const self=me();localModel.visible=self?!self.reported&&!self.hidden:true}
+  if(viewModel&&viewPlayer)viewModel.visible=!viewPlayer.reported&&!viewPlayer.hidden;
   const pose=getThirdPersonCameraPose(pos);
   camera.fov=pose.fov;camera.near=.06;camera.updateProjectionMatrix();
   const invalidCamera=!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z);
@@ -726,12 +797,12 @@ function updateNearest(){
 function updateLockerVisuals(dt){const p=me();for(const locker of LOCKERS){const visual=lockerVisuals.get(locker.id);if(!visual)continue;const occupied=(state?.players||[]).some(x=>x.hidden&&x.hiddenAt===locker.id);const nearby=nearest.locker?.id===locker.id;const target=occupied?1:(nearby?.22:0);visual.userData.open+=(target-visual.userData.open)*(1-Math.exp(-10*dt));visual.userData.doorPivot.rotation.y=-visual.userData.open*1.45;visual.userData.lamp.material.color.setHex(occupied?0xffb347:nearby?0x77ff9c:0x63f4ff)}}
 function useAction(){const p=me();if(!p||!p.alive||p.spectator)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(nearest.cargoDelivery&&cargoCarryActive){openTask('cargoDelivery');return}if(!nearest.task)return;if(nearest.task==='cargo'&&cargoCarryActive){showNotice('荷物を管理室の搬入口まで運んでください');return}if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}openTask(nearest.task)}
 function reportAction(){if(nearest.body)send('report',{bodyId:nearest.body});else showNotice('近くに通報できる対象がありません')}function attackAction(){const p=me();if(!p||state?.phase!=='playing')return;if(p.role!=='impostor'){showNotice('攻撃は人狼だけが使えます');return}if(!canKill()){showNotice('攻撃のクールダウン中です');return}if(!nearest.player){showNotice(state?.practiceMode?'近くの訓練用ターゲットへ近づいてください':'攻撃できるクルーに近づいてください');return}send('kill',{targetId:nearest.player})}function meetingAction(){if(!nearest.emergency){showNotice('中央の緊急ボタンに近づいてください');return}send('meeting')}
-ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{if(renderMode!=='3d'||!camera){showNotice('軽量マップでは見下ろし視点で固定されます。');return}cameraMode=(cameraMode+1)%3;if(cameraMode===2&&localModel){const currentYaw=Number(localModel.rotation.y);firstPersonYaw=clearFirstPersonDirection(Number.isFinite(currentYaw)?currentYaw:Math.PI);firstPersonTargetYaw=firstPersonYaw;firstPersonInputBaseYaw=firstPersonYaw;firstPersonInputSignature='';camera.position.set(localModel.position.x,localModel.position.y+1.72,localModel.position.z)}else{const p=me();if(localModel)localModel.visible=p?!p.reported&&!p.hidden:true;snapCameraToCurrentMode()}const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(labels[cameraMode]);$('cameraButton').textContent=`${labels[(cameraMode+1)%3]}へ切替`};
+ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{if(renderMode!=='3d'||!camera){showNotice('軽量マップでは見下ろし視点で固定されます。');return}const subject=cameraViewSubject();cameraMode=(cameraMode+1)%3;if(cameraMode===2&&subject.model&&!subject.following){const currentYaw=Number(subject.model.rotation.y);firstPersonYaw=clearFirstPersonDirection(Number.isFinite(currentYaw)?currentYaw:Math.PI);firstPersonTargetYaw=firstPersonYaw;firstPersonInputBaseYaw=firstPersonYaw;firstPersonInputSignature='';camera.position.set(subject.model.position.x,subject.model.position.y+1.72,subject.model.position.z)}else snapCameraToCurrentMode(subject.model);const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(subject.following?`${subject.player.name}：${labels[cameraMode]}`:labels[cameraMode]);$('cameraButton').textContent=subject.following?`観戦：${labels[(cameraMode+1)%3]}へ切替`:`${labels[(cameraMode+1)%3]}へ切替`;updateSpectatorUI()};
 ui.settings.onclick=()=>{const s=state.settings||{};$('settingImpostors').value=s.impostors;$('settingTasks').value=s.tasks;$('settingSpeed').value=s.speed;$('settingKillCooldown').value=s.killCooldown;$('settingMeeting').value=s.meetingTime;$('settingReveal').value=s.revealRoles?'yes':'no';openDialog('settingsDialog')};$('saveSettingsButton').onclick=()=>{send('settings',{settings:{impostors:+$('settingImpostors').value,tasks:+$('settingTasks').value,speed:+$('settingSpeed').value,killCooldown:+$('settingKillCooldown').value,meetingTime:+$('settingMeeting').value,revealRoles:$('settingReveal').value==='yes'}});closeDialog('settingsDialog')};document.querySelectorAll('[data-sabotage]').forEach(b=>b.onclick=()=>{send('sabotage',{kind:b.dataset.sabotage});closeDialog('sabotageDialog')});document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog(b.dataset.close));
 
 const ROLE_LABELS={crew:'クルー',impostor:'人狼',doctor:'医者',detective:'探偵',guard:'警備員',spectator:'観戦者'};
 function abilityAction(){const p=me();if(!p||p.abilityUsed){showNotice('能力は使用済みです');return}if(p.role==='doctor'&&nearest.body)send('revive',{targetId:nearest.body});else if(p.role==='detective'&&nearest.body)send('inspect',{targetId:nearest.body});else if(p.role==='guard'&&nearest.player)send('protect',{targetId:nearest.player});else showNotice('能力を使える対象に近づいてください')}
-function updateAdvancedUI(){const p=me(),b=$('abilityButton');if(!p||!b)return;const labels={doctor:'救助',detective:'調査',guard:'守る'};b.classList.toggle('hidden',!labels[p.role]||state.phase!=='playing');b.textContent=p.abilityUsed?`${labels[p.role]||'能力'}（使用済み）`:labels[p.role]||'能力';b.disabled=!!p.abilityUsed;b.classList.toggle('ability-ready',!p.abilityUsed&&!!labels[p.role]);ui.role.textContent=`役職：${ROLE_LABELS[p.role]||p.role}${p.spectator?'（途中参加）':''}`;$('hideButton').disabled=!p.alive||p.spectator||(!p.hidden&&!nearest.locker);$('profileSummary').textContent=profileText()}
+function updateAdvancedUI(){const p=me(),b=$('abilityButton');if(!p||!b)return;const labels={doctor:'救助',detective:'調査',guard:'守る'};b.classList.toggle('hidden',!labels[p.role]||state.phase!=='playing');b.textContent=p.abilityUsed?`${labels[p.role]||'能力'}（使用済み）`:labels[p.role]||'能力';b.disabled=!!p.abilityUsed;b.classList.toggle('ability-ready',!p.abilityUsed&&!!labels[p.role]);ui.role.textContent=`役職：${ROLE_LABELS[p.role]||p.role}${p.spectator?'（途中参加）':!p.alive?'（観戦中）':''}`;$('hideButton').disabled=!p.alive||p.spectator||(!p.hidden&&!nearest.locker);$('profileSummary').textContent=profileText()}
 function profileText(){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');const title=s.wins>=10?'宇宙の英雄':s.wins>=3?'熟練クルー':s.games>=1?'新人隊員':'初参加';return `称号：${title}　対戦 ${s.games}　勝利 ${s.wins}　今日の目標：タスクを3回完了`}
 function saveResult(w){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.games++;const p=me();if((w==='impostor'&&p?.role==='impostor')||(w==='crew'&&p?.role!=='impostor'))s.wins++;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));$('profileSummary').textContent=profileText()}
 function updateSecurityTaskUi(){
@@ -1483,7 +1554,7 @@ $('acceptCallButton').onclick=acceptIncomingCall;$('declineCallButton').onclick=
 updateCallUi();
 addEventListener('beforeunload',()=>{stopMeetingVoice();hangUpCall(false);clearIncomingCall(false)});
 
-function openResult(w){$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'WEREWOLF VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'人狼の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
+function openResult(w){restoreSpectatorHiddenModel();$('resultTitle').textContent=w==='crew'?'CREW VICTORY':'WEREWOLF VICTORY';$('resultText').textContent=w==='crew'?'クルーの勝利です！':'人狼の勝利です。';$('resultPlayers').innerHTML=(state?.players||[]).filter(p=>!p.practiceTarget).map(p=>`<span class="result-pill">${escapeHtml(p.name)}</span>`).join('');$('returnLobbyButton').classList.toggle('hidden',state?.hostId!==myId);openDialog('resultDialog')}$('resultCloseButton').onclick=()=>closeDialog('resultDialog');$('returnLobbyButton').onclick=()=>{send('returnLobby');closeDialog('resultDialog')};
 function openDialog(id){const d=$(id);if(!d.open)d.showModal()}function closeDialog(id){const d=$(id);if(id==='securityDialog'){securityOpen=false;clearKeys()}if(d?.open)d.close()}function flashScreen(){document.body.animate([{filter:'brightness(1)'},{filter:'brightness(2) saturate(2)'},{filter:'brightness(1)'}],{duration:450})}
 function setupJoystick(){
   if(!ui.joystick||!ui.stick)return;
@@ -1765,6 +1836,18 @@ $('profileSummary').textContent=profileText();
 
     .reactor-panel{display:grid;grid-template-columns:1fr 190px;gap:18px;align-items:center}.reactor-rods{display:grid;gap:14px}.reactor-rods label{display:grid;grid-template-columns:70px 1fr 24px;gap:10px;align-items:center;padding:12px;border-radius:10px;background:#101c29;border:1px solid #344b60}.reactor-rods label i{width:18px;height:18px;border-radius:50%;background:#ff5d65}.reactor-rods label.aligned{border-color:#5cffad}.reactor-rods label.aligned i{background:#5cffad;box-shadow:0 0 14px #5cffad}.reactor-core{display:grid;gap:14px;text-align:center;padding:22px;border-radius:50%;aspect-ratio:1;background:radial-gradient(circle,#173b50,#07111a 70%);border:3px solid #467b91;place-content:center}.reactor-core span{font-weight:900}
 
+    .spectator-panel{
+      position:fixed !important;z-index:64;left:50%;bottom:112px;transform:translateX(-50%);
+      width:min(650px,calc(100vw - 40px));padding:12px 14px;display:grid;gap:9px;text-align:center;
+    }
+    .spectator-panel.hidden{display:none !important}
+    .spectator-heading{display:flex;justify-content:center;align-items:center;gap:14px;flex-wrap:wrap}
+    .spectator-heading strong{color:#72e9ff;letter-spacing:.08em}
+    .spectator-actions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+    .spectator-actions button{min-height:42px}
+    .spectator-panel small{opacity:.78;line-height:1.4}
+    .result-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:16px}
+
     @media(max-width:640px){
       #taskDialog .dialog-card{width:96vw;padding:11px;max-height:94dvh;overflow:auto}
       #taskGame.task-realistic{min-height:270px;gap:8px}.task-board{height:260px}.task-guide{font-size:13px}.cargo-crate{width:58px;height:50px;font-size:15px}.wire-board{height:275px}.wire-socket{width:48px;height:48px;margin-top:-24px}.scan-console{grid-template-columns:1fr;gap:8px}.scan-hand{height:145px;font-size:78px}.scan-readout{font-size:22px}.engine-console{grid-template-columns:105px 1fr;gap:10px;padding:6px}.engine-track{height:235px;width:60px}.engine-knob{width:82px;margin-left:-41px}.engine-gauge b{font-size:35px}.security-sequence{grid-template-columns:repeat(2,1fr)}.security-sequence button{min-height:70px}.shield-sector{width:66px;height:52px;margin:-26px -33px;transform:rotate(var(--angle)) translateY(-112px) rotate(var(--counter))}.reactor-panel{grid-template-columns:1fr}.reactor-core{width:150px;margin:auto}.nav-radar,.weapon-range,.filter-chamber{height:260px}
@@ -1805,6 +1888,10 @@ $('profileSummary').textContent=profileText();
       #playerPanel{top:118px;left:8px;width:min(44vw,170px);max-height:210px}
       #taskPanel{top:118px;right:8px;width:min(44vw,170px);max-height:210px}
       #miniMap{display:none}
+      .spectator-panel{left:8px;right:8px;bottom:146px;transform:none;width:auto;padding:9px;gap:6px}
+      .spectator-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
+      .spectator-actions button{min-width:0;padding:7px 5px;font-size:11px}
+      .spectator-panel small{font-size:10px}
       #globalChatPanel{bottom:calc(142px + env(safe-area-inset-bottom,0px)) !important}
       #joystick{bottom:calc(220px + env(safe-area-inset-bottom,0px)) !important}
       #actionBar{padding:8px;gap:6px;max-height:132px;overflow:auto;-webkit-overflow-scrolling:touch}
