@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-compact-pc-hud-v49';
+const MAP_VERSION='aurora-security-access-v50';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -118,6 +118,14 @@ const LOCKERS=[
   {id:'storage',x:-12,z:-19.5,exitX:-10.4,exitZ:-19.5,rot:-Math.PI/2}
 ];
 const SECURITY_CONSOLE={x:-18,z:-2};
+const SECURITY_TASK_POINT={x:TASKS.security[1],z:TASKS.security[2]};
+const SECURITY_ACCESS_RADIUS=3.4;
+function distanceToSecurityAccess(x,z){
+  return Math.min(
+    Math.hypot(x-SECURITY_CONSOLE.x,z-SECURITY_CONSOLE.z),
+    Math.hypot(x-SECURITY_TASK_POINT.x,z-SECURITY_TASK_POINT.z)
+  );
+}
 const SECURITY_CAMERAS=[
   {id:'hub',name:'中央アトリウム',position:[-5.5,7.2,-5.5],target:[1,.7,3.5],radius:12},
   {id:'reactor',name:'リアクター・機関室',position:[-20.5,7.4,11.5],target:[-27,.7,12],radius:14},
@@ -1143,7 +1151,7 @@ function updateNearest(){
   best=99;
   for(const other of state.players){if(other.id===myId)continue;const hasBody=corpseIsVisible(other),targetX=hasBody?Number(other.bodyX):Number(other.x),targetZ=hasBody?Number(other.bodyZ):Number(other.z),d=Math.hypot(localModel.position.x-targetX,localModel.position.z-targetZ);if(!other.practiceTarget&&hasBody&&d<2.8&&d<best){best=d;nearest.body=other.id}else if(other.attackable===true&&d<2.8&&d<best){best=d;nearest.player=other.id}}
   if(p?.hidden&&p.hiddenAt){nearest.locker=LOCKERS.find(l=>l.id===p.hiddenAt)||null}else if(!p?.hidden){nearest.locker=LOCKERS.map(l=>({...l,d:Math.hypot(localModel.position.x-l.exitX,localModel.position.z-l.exitZ)})).filter(l=>l.d<=2.0).sort((a,b)=>a.d-b.d)[0]||null}
-  nearest.security=Math.hypot(localModel.position.x-SECURITY_CONSOLE.x,localModel.position.z-SECURITY_CONSOLE.z)<=2.2;
+  nearest.security=distanceToSecurityAccess(localModel.position.x,localModel.position.z)<=SECURITY_ACCESS_RADIUS;
   nearest.emergency=Math.hypot(localModel.position.x-EMERGENCY_BUTTON.x,localModel.position.z-EMERGENCY_BUTTON.z)<=2.8;
   nearest.cargoDelivery=cargoCarryActive&&Math.hypot(localModel.position.x-CARGO_DELIVERY.x,localModel.position.z-CARGO_DELIVERY.z)<=2.25;
   ui.use.disabled=!nearest.task&&!nearest.cargoDelivery;ui.use.innerHTML=nearest.cargoDelivery?'荷物を置く <kbd>E</kbd>':'使用 <kbd>E</kbd>';
@@ -1370,7 +1378,7 @@ function openSecurity(options={}){
   updateSecurityTaskUi();openDialog('securityDialog');
   requestAnimationFrame(()=>{ensureSecurityViewer();resizeSecurityViewer();setSecurityCamera(securityCameraIndex);renderSecurityFeed();scheduleSecurityTaskView()});
 }
-$('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{if(!nearest.security){showNotice('SECURITYの監視端末に近づいてください');return}openSecurity()};$('securityPrevButton').onclick=()=>setSecurityCamera(securityCameraIndex-1);$('securityNextButton').onclick=()=>setSecurityCamera(securityCameraIndex+1);$('securityTaskComplete').onclick=completeSecurityCameraTask;$('securityDialog').addEventListener('close',()=>{securityOpen=false;clearKeys();resetSecurityTaskMode()});$('tutorialButton').onclick=()=>openDialog('tutorialDialog');const savedSkin=localStorage.getItem('hiddenCrewSelectedColor');if(savedSkin&&COLORS[savedSkin])$('colorSelect').value=savedSkin;const savedHat=localStorage.getItem('hiddenCrewSelectedHat');if(savedHat&&HAT_TYPES.has(savedHat))$('hatSelect').value=savedHat;$('colorSelect').onchange=()=>{localStorage.setItem('hiddenCrewSelectedColor',$('colorSelect').value);if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};$('hatSelect').onchange=()=>{localStorage.setItem('hiddenCrewSelectedHat',$('hatSelect').value);if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
+$('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{const p=me();const distance=localModel?distanceToSecurityAccess(localModel.position.x,localModel.position.z):Infinity;if(!p?.alive||p?.spectator){showNotice('生存中のプレイヤーだけが監視端末を使用できます');return}if(p.hidden){showNotice('ロッカーから出て監視端末へ近づいてください');return}if(distance>SECURITY_ACCESS_RADIUS){showNotice('セキュリティ室の監視端末へ近づいてください');return}nearest.security=true;openSecurity()};$('securityPrevButton').onclick=()=>setSecurityCamera(securityCameraIndex-1);$('securityNextButton').onclick=()=>setSecurityCamera(securityCameraIndex+1);$('securityTaskComplete').onclick=completeSecurityCameraTask;$('securityDialog').addEventListener('close',()=>{securityOpen=false;clearKeys();resetSecurityTaskMode()});$('tutorialButton').onclick=()=>openDialog('tutorialDialog');const savedSkin=localStorage.getItem('hiddenCrewSelectedColor');if(savedSkin&&COLORS[savedSkin])$('colorSelect').value=savedSkin;const savedHat=localStorage.getItem('hiddenCrewSelectedHat');if(savedHat&&HAT_TYPES.has(savedHat))$('hatSelect').value=savedHat;$('colorSelect').onchange=()=>{localStorage.setItem('hiddenCrewSelectedColor',$('colorSelect').value);if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};$('hatSelect').onchange=()=>{localStorage.setItem('hiddenCrewSelectedHat',$('hatSelect').value);if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
 let activeTaskCleanup=()=>{},activeTaskFinished=false,activeTaskId=null,activeTaskCompletionId=null,activeTaskCountsProgress=false;
 function resetTaskRuntime(){
   const cleanup=activeTaskCleanup;activeTaskCleanup=()=>{};
