@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-pc-chat-action-v45';
+const MAP_VERSION='aurora-compact-pc-hud-v49';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -2545,6 +2545,116 @@ $('profileSummary').textContent=profileText();
       }
       #globalChatPanel{width:430px !important;max-width:430px !important}
       #globalChatPanel.collapsed{width:360px !important;max-width:360px !important}
+    }
+
+
+    /* Compact desktop HUD: keep the centre of the game visible. */
+    @media (min-width:901px){
+      #topBar{
+        top:10px !important;
+        max-width:620px !important;
+        padding:8px 12px !important;
+        gap:12px !important;
+        font-size:14px !important;
+      }
+      #topBar button{
+        min-height:34px !important;
+        padding:6px 10px !important;
+        font-size:13px !important;
+      }
+
+      #playerPanel,#taskPanel{
+        top:86px !important;
+        width:250px !important;
+        max-width:250px !important;
+        padding:11px !important;
+        border-radius:15px !important;
+        font-size:13px !important;
+      }
+      #playerPanel{left:12px !important;max-height:250px !important}
+      #taskPanel{right:12px !important;max-height:270px !important}
+      #playerPanel .panel-title,#taskPanel .panel-title{margin-bottom:7px !important}
+      #playerPanel .panel-title h2,#taskPanel .panel-title h2{font-size:16px !important;margin:0 !important}
+      #playerPanel .player-row,#taskPanel .task-row{
+        min-height:36px !important;
+        padding:7px 9px !important;
+        margin-bottom:5px !important;
+        font-size:13px !important;
+      }
+      #playerPanel .call-controls{font-size:11px !important;margin-top:5px !important}
+      #playerPanel .call-member{min-width:34px !important;min-height:32px !important;padding:4px 7px !important}
+      #taskList{max-height:190px !important;overflow:auto !important}
+      #taskPanel .progress{height:8px !important;margin-top:7px !important}
+
+      #miniMap{
+        width:176px !important;
+        height:128px !important;
+        right:12px !important;
+        transform:scale(.86) !important;
+        transform-origin:top right !important;
+      }
+
+      #globalChatPanel{
+        left:12px !important;
+        bottom:12px !important;
+        width:306px !important;
+        max-width:306px !important;
+        max-height:320px !important;
+        padding:10px 12px !important;
+        border-radius:15px !important;
+        font-size:13px !important;
+      }
+      #globalChatPanel .chat-panel-header{margin-bottom:5px !important}
+      #globalChatPanel .chat-panel-header strong{font-size:16px !important}
+      #globalChatPanel .chat-panel-header button{min-height:32px !important;padding:5px 9px !important}
+      #globalChatPanel.collapsed{
+        width:306px !important;
+        max-width:306px !important;
+        min-height:100px !important;
+        max-height:100px !important;
+      }
+      #globalChatPanel .group-voice-bar{gap:5px !important;padding:4px 0 2px !important}
+      #globalChatPanel .group-voice-status{font-size:11px !important;line-height:1.2 !important}
+      #globalChatPanel .group-voice-actions{gap:5px !important}
+      #globalChatPanel .group-voice-actions button{
+        min-height:31px !important;
+        padding:5px 6px !important;
+        font-size:11px !important;
+      }
+      #globalChatPanel .chat-log{max-height:150px !important}
+      #globalChatPanel .chat-form input,#globalChatPanel .chat-form button{min-height:36px !important;font-size:12px !important}
+
+      #actionBar{
+        left:330px !important;
+        right:12px !important;
+        bottom:12px !important;
+        width:auto !important;
+        max-width:none !important;
+        padding:6px 8px !important;
+        gap:6px !important;
+        border-radius:14px !important;
+        transform:none !important;
+        flex-wrap:wrap !important;
+      }
+      #actionBar button{
+        min-height:38px !important;
+        padding:7px 10px !important;
+        font-size:13px !important;
+      }
+      #actionBar kbd{font-size:10px !important;padding:2px 4px !important}
+
+      #controlHint{
+        left:330px !important;
+        right:12px !important;
+        bottom:62px !important;
+        width:auto !important;
+        max-width:none !important;
+        padding:5px 9px !important;
+        font-size:11px !important;
+        line-height:1.25 !important;
+        transform:none !important;
+      }
+      #interactionHint,#notice{font-size:12px !important}
     }
 
     @media (pointer:coarse) and (orientation:landscape) and (max-height:560px){
