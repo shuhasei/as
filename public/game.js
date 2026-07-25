@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-door-lock-v37';
+const MAP_VERSION='aurora-visible-corpse-v39';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -135,7 +135,7 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();
 let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
@@ -364,6 +364,7 @@ function draw2DMap(){
   for(const [id,[name,x,z]] of Object.entries(TASKS)){ctx.fillStyle='#46dfff';ctx.fillRect(sx(x)-.35*scale,sz(z)-.35*scale,.7*scale,.7*scale)}
   if(cargoCarryActive){ctx.fillStyle='#ffbd5a';ctx.fillRect(sx(CARGO_DELIVERY.x)-.5*scale,sz(CARGO_DELIVERY.z)-.5*scale,scale,scale)}
   for(const locker of LOCKERS){const occupied=state?.players?.some(p=>p.hidden&&p.hiddenAt===locker.id);ctx.fillStyle=occupied?'#ffb34d':'#3b6680';ctx.fillRect(sx(locker.x)-.45*scale,sz(locker.z)-.35*scale,.9*scale,.7*scale)}
+  for(const p of state?.players||[]){if(!corpseIsVisible(p))continue;const x=sx(Number(p.bodyX)),y=sz(Number(p.bodyZ)),hex=(COLORS[p.color]||0xffffff).toString(16).padStart(6,'0');ctx.save();ctx.translate(x,y);ctx.rotate(Number(p.bodyRotation||0));ctx.strokeStyle='#ff4055';ctx.lineWidth=Math.max(2,.12*scale);ctx.beginPath();ctx.ellipse(0,0,.9*scale,.5*scale,0,0,Math.PI*2);ctx.stroke();ctx.fillStyle=`#${hex}`;ctx.beginPath();ctx.ellipse(0,0,.68*scale,.34*scale,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#a8eaff';ctx.beginPath();ctx.ellipse(.25*scale,-.08*scale,.23*scale,.13*scale,0,0,Math.PI*2);ctx.fill();ctx.restore();ctx.fillStyle='#ffffff';ctx.font=`bold ${Math.max(10,scale*.3)}px sans-serif`;ctx.fillText('遺体',x,y-.85*scale)}
   for(const p of state?.players||[]){if(!playerVisibleToLocalViewer(p))continue;const model=models.get(p.id),x=model?.position?.x??p.x,z=model?.position?.z??p.z;const hex=(COLORS[p.color]||0xffffff).toString(16).padStart(6,'0');ctx.globalAlpha=p.alive?1:.35;ctx.fillStyle=`#${hex}`;ctx.beginPath();ctx.arc(sx(x),sz(z),.52*scale,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.fillStyle='#ffffff';ctx.font=`bold ${Math.max(9,scale*.3)}px sans-serif`;ctx.fillText(p.name,sx(x),sz(z)-.75*scale)}
   ctx.fillStyle='rgba(2,7,17,.75)';ctx.fillRect(10,h-40,340,30);ctx.fillStyle='#dffcff';ctx.textAlign='left';ctx.font='14px sans-serif';ctx.fillText('軽量マップ表示中（操作・機能はそのまま使えます）',20,h-20);
 }
@@ -602,6 +603,61 @@ function buildWorld(){
 }
 function createCrewmate(c){const selectedColor=COLORS[c]?c:'white',group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[selectedColor],roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=PERF.enableShadows;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=PERF.enableShadows;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=PERF.enableShadows;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);const cargoBox=createCargoParcel(.82);cargoBox.position.set(0,1.02,.94);cargoBox.visible=false;group.add(cargoBox);group.userData.cargoBox=cargoBox;group.userData.target=new THREE.Vector3();group.userData.rotation=0;group.userData.skinMaterial=mat;group.userData.skinColor=selectedColor;return group}
 function applySelectedSkin(model,color){if(!model||renderMode!=='3d')return;const selectedColor=COLORS[color]?color:'white';if(model.userData.skinColor===selectedColor)return;const material=model.userData.skinMaterial;if(material?.color){material.color.setHex(COLORS[selectedColor]);material.needsUpdate=true}model.userData.skinColor=selectedColor}
+function createCorpseLabel(){
+  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=88;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='rgba(20,5,9,.88)';ctx.fillRect(8,8,240,72);
+  ctx.strokeStyle='#ff6070';ctx.lineWidth=5;ctx.strokeRect(10,10,236,68);
+  ctx.fillStyle='#ffffff';ctx.font='bold 38px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('遺体',128,45);
+  const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;
+  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthWrite:false,depthTest:true}));
+  sprite.scale.set(1.45,.5,1);sprite.position.set(0,1.55,0);sprite.renderOrder=20;
+  return sprite;
+}
+function createCorpse(color){
+  const group=new THREE.Group();
+  const fallen=createCrewmate(color);fallen.position.set(0,.64,0);fallen.rotation.z=-Math.PI/2;fallen.rotation.x=.08;fallen.scale.set(.82,.82,.82);
+  if(fallen.userData.cargoBox)fallen.userData.cargoBox.visible=false;
+  fallen.traverse(object=>{if(object.material){object.material.transparent=false;object.material.opacity=1;object.material.depthWrite=true}});
+  group.add(fallen);
+  const marker=new THREE.Mesh(new THREE.RingGeometry(.9,1.08,36),new THREE.MeshBasicMaterial({color:0xff3348,transparent:true,opacity:.62,side:THREE.DoubleSide,depthWrite:false}));
+  marker.rotation.x=-Math.PI/2;marker.position.y=.025;marker.renderOrder=5;group.add(marker);
+  const label=createCorpseLabel();group.add(label);
+  group.userData.fallenModel=fallen;group.userData.marker=marker;group.userData.label=label;group.userData.skinColor=color;
+  return group;
+}
+function corpseIsVisible(player){
+  return Boolean(player&&!player.alive&&!player.reported&&!player.spectator&&Number(player.downedAt)>0&&Number.isFinite(Number(player.bodyX))&&Number.isFinite(Number(player.bodyZ)));
+}
+function syncCorpseModels(){
+  if(renderMode!=='3d'||!scene){corpseModels.clear();return}
+  const active=new Set();
+  for(const player of state?.players||[]){
+    if(!corpseIsVisible(player))continue;
+    active.add(player.id);
+    let corpse=corpseModels.get(player.id);
+    if(!corpse){corpse=createCorpse(player.color);corpseModels.set(player.id,corpse);scene.add(corpse)}
+    const selectedColor=COLORS[player.color]?player.color:'white';
+    if(corpse.userData.skinColor!==selectedColor){applySelectedSkin(corpse.userData.fallenModel,selectedColor);corpse.userData.skinColor=selectedColor}
+    corpse.position.set(Number(player.bodyX),0,Number(player.bodyZ));
+    corpse.rotation.y=Number(player.bodyRotation||0);
+    corpse.visible=true;
+  }
+  for(const[id,corpse]of corpseModels){
+    if(active.has(id))continue;
+    scene.remove(corpse);
+    corpse.traverse(object=>{if(object.geometry)object.geometry.dispose?.();if(object.material){const materials=Array.isArray(object.material)?object.material:[object.material];for(const material of materials){material.map?.dispose?.();material.dispose?.()}}});
+    corpseModels.delete(id);
+  }
+}
+function updateCorpseVisuals(now){
+  const pulse=.52+Math.sin(now*.004)*.16;
+  const scale=1+Math.sin(now*.0035)*.035;
+  for(const corpse of corpseModels.values()){
+    if(corpse.userData.marker){corpse.userData.marker.material.opacity=pulse;corpse.userData.marker.scale.setScalar(scale)}
+    if(corpse.userData.label)corpse.userData.label.position.y=1.55+Math.sin(now*.003)*.05;
+  }
+}
 function syncModels(){
   if(!state)return;
   const active=new Set();
@@ -647,6 +703,7 @@ function syncModels(){
     models.delete(id);
     if(m===localModel)localModel=null;
   }
+  syncCorpseModels();
 }
 function me(){return state?.players.find(p=>p.id===myId)}
 function playerVisibleToLocalViewer(player){
@@ -808,6 +865,7 @@ function animate(now=performance.now()){
       if(!securityOpen){
         updateLockerVisuals(dt);
         updateCargoCarryVisual();
+        if(corpseModels.size)updateCorpseVisuals(now);
         if(now-lastLightUpdate>=1000/PERF.lightFps){const lightDt=Math.min((now-lastLightUpdate)/1000,.15)||dt;lastLightUpdate=now;updateFacilityLighting(lightDt)}
         updateCamera(dt);
         updateEnclosureCameraLayer();
@@ -1033,7 +1091,7 @@ function updateNearest(){
   let best=99;
   for(const[id,[,x,z]]of Object.entries(TASKS)){const d=Math.hypot(localModel.position.x-x,localModel.position.z-z);if(d<2&&d<best){best=d;nearest.task=id}}
   best=99;
-  for(const other of state.players){if(other.id===myId)continue;const d=Math.hypot(localModel.position.x-other.x,localModel.position.z-other.z);if(!other.practiceTarget&&!other.alive&&!other.reported&&d<2.8&&d<best){best=d;nearest.body=other.id}else if(other.attackable===true&&d<2.8&&d<best){best=d;nearest.player=other.id}}
+  for(const other of state.players){if(other.id===myId)continue;const hasBody=corpseIsVisible(other),targetX=hasBody?Number(other.bodyX):Number(other.x),targetZ=hasBody?Number(other.bodyZ):Number(other.z),d=Math.hypot(localModel.position.x-targetX,localModel.position.z-targetZ);if(!other.practiceTarget&&hasBody&&d<2.8&&d<best){best=d;nearest.body=other.id}else if(other.attackable===true&&d<2.8&&d<best){best=d;nearest.player=other.id}}
   if(p?.hidden&&p.hiddenAt){nearest.locker=LOCKERS.find(l=>l.id===p.hiddenAt)||null}else if(!p?.hidden){nearest.locker=LOCKERS.map(l=>({...l,d:Math.hypot(localModel.position.x-l.exitX,localModel.position.z-l.exitZ)})).filter(l=>l.d<=2.0).sort((a,b)=>a.d-b.d)[0]||null}
   nearest.security=Math.hypot(localModel.position.x-SECURITY_CONSOLE.x,localModel.position.z-SECURITY_CONSOLE.z)<=2.2;
   nearest.emergency=Math.hypot(localModel.position.x-EMERGENCY_BUTTON.x,localModel.position.z-EMERGENCY_BUTTON.z)<=2.8;
@@ -1045,7 +1103,7 @@ function updateNearest(){
   if(hide){hide.disabled=!p?.alive||p?.spectator||(!p?.hidden&&!nearest.locker);hide.textContent=p?.hidden?'ロッカーから出る':'ロッカーに隠れる';hide.classList.toggle('interaction-ready',!!nearest.locker)}
   if(security){security.disabled=!nearest.security||!!p?.hidden;security.classList.toggle('interaction-ready',nearest.security)}
   if(ui.meeting){ui.meeting.disabled=!nearest.emergency||!!p?.hidden;ui.meeting.classList.toggle('interaction-ready',nearest.emergency)}
-  const hint=$('interactionHint');if(hint){let text='';if(p?.hidden)text='ロッカー内：ボタンを押すと外へ出ます';else if(nearest.locker)text='ロッカーに近づきました：隠れることができます';else if(nearest.security)text='監視端末に近づきました：カメラを確認できます';else if(nearest.emergency)text='緊急ボタンに近づきました：会議を開けます';else if(nearest.cargoDelivery)text='管理室の搬入口です：運んだ荷物を置けます';else if(nearest.task)text='端末に近づきました：使用できます';hint.textContent=text;hint.classList.toggle('show',!!text)}
+  const hint=$('interactionHint');if(hint){let text='';if(p?.hidden)text='ロッカー内：ボタンを押すと外へ出ます';else if(nearest.body)text=p?.role==='doctor'?'倒れている人です：「救助」を押すと助けられます':p?.role==='detective'?'遺体です：「調査」を押すと確認できます':'遺体です：「通報」を押してください';else if(nearest.locker)text='ロッカーに近づきました：隠れることができます';else if(nearest.security)text='監視端末に近づきました：カメラを確認できます';else if(nearest.emergency)text='緊急ボタンに近づきました：会議を開けます';else if(nearest.cargoDelivery)text='管理室の搬入口です：運んだ荷物を置けます';else if(nearest.task)text='端末に近づきました：使用できます';hint.textContent=text;hint.classList.toggle('show',!!text)}
 }
 function updateLockerVisuals(dt){const p=me();for(const locker of LOCKERS){const visual=lockerVisuals.get(locker.id);if(!visual)continue;const occupied=(state?.players||[]).some(x=>x.hidden&&x.hiddenAt===locker.id);const nearby=nearest.locker?.id===locker.id;const target=occupied?1:(nearby?.22:0);visual.userData.open+=(target-visual.userData.open)*(1-Math.exp(-10*dt));visual.userData.doorPivot.rotation.y=-visual.userData.open*1.45;visual.userData.lamp.material.color.setHex(occupied?0xffb347:nearby?0x77ff9c:0x63f4ff)}}
 function useAction(){const p=me();if(!p||!p.alive||p.spectator)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(nearest.cargoDelivery&&cargoCarryActive){openTask('cargoDelivery');return}if(!nearest.task)return;if(nearest.task==='cargo'&&cargoCarryActive){showNotice('荷物を管理室の搬入口まで運んでください');return}if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}openTask(nearest.task)}
@@ -1205,6 +1263,7 @@ function drawSecurityFallback(){
   ctx.save();ctx.beginPath();ctx.rect(0,0,width,height);ctx.clip();
   for(const zone of MAP_ZONES){ctx.fillStyle=`#${Number(zone.color||0x233347).toString(16).padStart(6,'0')}`;ctx.fillRect(mapX(zone.x-zone.w/2),mapY(zone.z+zone.d/2),zone.w*scale,zone.d*scale)}
   ctx.strokeStyle='rgba(115,220,255,.7)';ctx.lineWidth=1.5;for(const wall of WALLS)ctx.strokeRect(mapX(wall.x-wall.w/2),mapY(wall.z+wall.d/2),wall.w*scale,wall.d*scale);
+  for(const player of state?.players||[]){if(!corpseIsVisible(player))continue;const x=mapX(Number(player.bodyX)),y=mapY(Number(player.bodyZ));if(x<-20||x>width+20||y<-20||y>height+20)continue;ctx.save();ctx.translate(x,y);ctx.rotate(Number(player.bodyRotation||0));ctx.strokeStyle='#ff4055';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(0,0,12,7,0,0,Math.PI*2);ctx.stroke();ctx.fillStyle=`#${(COLORS[player.color]||0xffffff).toString(16).padStart(6,'0')}`;ctx.beginPath();ctx.ellipse(0,0,9,5,0,0,Math.PI*2);ctx.fill();ctx.restore();ctx.fillStyle='#fff';ctx.font='bold 11px sans-serif';ctx.fillText('遺体',x+11,y-7)}
   for(const player of state?.players||[]){if(!player.alive||player.hidden)continue;const x=mapX(player.x),y=mapY(player.z);if(x<-20||x>width+20||y<-20||y>height+20)continue;ctx.beginPath();ctx.fillStyle=`#${(COLORS[player.color]||0x29cbd4).toString(16).padStart(6,'0')}`;ctx.arc(x,y,7,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();ctx.fillStyle='#fff';ctx.font='12px sans-serif';ctx.fillText(player.name,x+10,y+4)}
   ctx.restore();ctx.strokeStyle='rgba(84,228,255,.55)';ctx.lineWidth=2;ctx.strokeRect(2,2,width-4,height-4);
   const status=$('securityCameraStatus');if(status)status.textContent=status.textContent.replace('● LIVE','● LIVE MAP');
