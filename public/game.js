@@ -14,7 +14,7 @@ const PERF={
   enableShadows:HIGH_POWER_DEVICE,
   shadowMapSize:1024,
   shadowFps:10,
-  securityFps:LOW_POWER_DEVICE?6:10,
+  securityFps:LOW_POWER_DEVICE?8:(HIGH_POWER_DEVICE?18:14),
   miniMapFps:LOW_POWER_DEVICE?6:10,
   nearestFps:12,
   hudFps:4,
@@ -1172,14 +1172,14 @@ function resizeSecurityViewer(){
   const cssWidth=Math.max(280,Math.floor(canvas.clientWidth||640));
   const cssHeight=Math.max(158,Math.floor(canvas.clientHeight||cssWidth*9/16));
   const coarse=matchMedia('(pointer:coarse)').matches;
-  const maxWidth=coarse?360:(securityTaskActive?520:600);
+  const maxWidth=LOW_POWER_DEVICE?640:(securityTaskActive?960:1280);
   const scale=Math.min(1,maxWidth/cssWidth)*(securityTaskActive?0.96:1);
   const width=Math.max(280,Math.round(cssWidth*scale));
   const height=Math.max(158,Math.round(cssHeight*scale));
   if(width!==securityRenderWidth||height!==securityRenderHeight){
     securityRenderWidth=width;
     securityRenderHeight=height;
-    securityRenderer.setPixelRatio(Math.min(devicePixelRatio||1,1));
+    securityRenderer.setPixelRatio(Math.min(devicePixelRatio||1,LOW_POWER_DEVICE?1.15:1.5));
     securityRenderer.setSize(width,height,false);
     securityCamera.aspect=width/height;
     securityCamera.updateProjectionMatrix();
@@ -1226,7 +1226,7 @@ function drawSecurityLiveScene(){
   return true;
 }
 function renderSecurityFeed(){
-  const now=performance.now();const effectiveSecurityFps=securityTaskActive?(LOW_POWER_DEVICE?5:7):PERF.securityFps;if(now-securityLastRender<1000/effectiveSecurityFps)return;securityLastRender=now;
+  const now=performance.now();const effectiveSecurityFps=securityTaskActive?(LOW_POWER_DEVICE?7:(HIGH_POWER_DEVICE?16:12)):PERF.securityFps;if(now-securityLastRender<1000/effectiveSecurityFps)return;securityLastRender=now;
   updateSecurityCameraUi();
   if(renderMode==='3d'&&!securityViewerFailed){
     try{
@@ -1926,6 +1926,41 @@ $('profileSummary').textContent=profileText();
     #gameCanvas{position:absolute;inset:0;z-index:0;width:100%;height:100%;display:block;background:#020711;touch-action:none}
     input,select,textarea,dialog{touch-action:auto}
     dialog::backdrop{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:rgba(1,7,16,.76)}
+    /* Full-screen terminal mode */
+    #securityDialog,#taskDialog,#sabotageDialog{
+      position:fixed!important;inset:0!important;width:100dvw!important;height:100dvh!important;
+      max-width:none!important;max-height:none!important;margin:0!important;padding:0!important;
+      border:0!important;border-radius:0!important;background:#020711!important;color:#eefaff;
+      overflow:hidden!important;
+    }
+    #securityDialog::backdrop,#taskDialog::backdrop,#sabotageDialog::backdrop{background:#020711!important}
+    #securityDialog .dialog-card,#taskDialog .dialog-card,#sabotageDialog .dialog-card{
+      width:100%!important;height:100%!important;min-height:100%!important;max-width:none!important;max-height:none!important;
+      margin:0!important;border:0!important;border-radius:0!important;box-sizing:border-box!important;
+      padding:calc(16px + env(safe-area-inset-top,0px)) calc(18px + env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) calc(18px + env(safe-area-inset-left,0px))!important;
+      background:linear-gradient(145deg,#07162a,#020914 72%)!important;overflow:auto!important;
+    }
+    #securityDialog .close,#taskDialog .close,#sabotageDialog .close{
+      position:fixed!important;z-index:10005!important;top:calc(12px + env(safe-area-inset-top,0px))!important;
+      right:calc(14px + env(safe-area-inset-right,0px))!important;width:52px!important;height:52px!important;
+      min-width:52px!important;border-radius:50%!important;font-size:28px!important;background:rgba(5,20,38,.94)!important;
+      border:2px solid rgba(135,230,255,.68)!important;box-shadow:0 8px 24px rgba(0,0,0,.4)!important;
+    }
+    #securityDialog .security-dialog-card{display:flex!important;flex-direction:column!important;overflow:hidden!important}
+    #securityDialog .security-monitor{display:grid!important;grid-template-rows:minmax(260px,1fr) auto auto auto auto!important;min-height:0!important;flex:1!important}
+    #securityDialog .security-screen{height:100%!important;min-height:260px!important;max-height:none!important;aspect-ratio:auto!important;border-radius:12px!important}
+    #securityDialog #securityFeed{image-rendering:auto!important}
+    #securityDialog .security-camera-buttons{grid-template-columns:repeat(6,minmax(0,1fr))!important}
+    #securityDialog .security-camera-buttons button{min-height:58px!important;padding:8px 10px!important}
+    #taskDialog .dialog-card{display:flex!important;flex-direction:column!important}
+    #taskDialog #taskTitle{margin:0 70px 12px 0!important;flex:0 0 auto}
+    #taskDialog #taskGame{width:min(1400px,100%)!important;margin:0 auto!important;flex:1 1 auto!important;min-height:0!important}
+    #taskDialog #taskGame.task-realistic{min-height:calc(100dvh - 110px)!important;align-content:center!important}
+    #taskDialog .task-board{height:min(72dvh,760px)!important;min-height:360px!important}
+    #sabotageDialog .dialog-card{display:flex!important;flex-direction:column!important;justify-content:center!important}
+    #sabotageDialog h2{margin:0 70px 28px 0!important;text-align:center!important;font-size:clamp(28px,4vw,48px)!important}
+    #sabotageDialog .sabotage-grid{width:min(1000px,100%)!important;margin:auto!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:20px!important}
+    #sabotageDialog .sabotage-grid button{min-height:clamp(100px,18dvh,180px)!important;font-size:clamp(20px,3vw,34px)!important}
 
     .meeting-voice-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
     .meeting-voice-actions button{min-height:42px;white-space:nowrap}
@@ -2221,6 +2256,21 @@ $('profileSummary').textContent=profileText();
       #joystick{left:12px !important;bottom:78px !important;transform:scale(.72);transform-origin:bottom left;transition:opacity .14s ease}
       #actionBar{left:170px !important;right:8px !important;bottom:4px !important;max-height:70px;overflow:auto}
       #interactionHint,#notice{bottom:82px !important}
+    }
+
+    @media(max-width:760px){
+      #securityDialog .dialog-card,#taskDialog .dialog-card,#sabotageDialog .dialog-card{
+        padding:calc(10px + env(safe-area-inset-top,0px)) calc(10px + env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) calc(10px + env(safe-area-inset-left,0px))!important;
+      }
+      #securityDialog .security-monitor{grid-template-rows:minmax(220px,1fr) auto auto auto auto!important;gap:8px!important}
+      #securityDialog .security-camera-buttons{grid-template-columns:repeat(2,minmax(0,1fr))!important;max-height:28dvh!important;overflow:auto!important}
+      #securityDialog .security-camera-buttons button{min-height:52px!important}
+      #securityDialog .security-help{margin-right:58px!important;font-size:12px!important;padding:7px 9px!important}
+      #securityDialog .security-task-panel{position:relative!important;grid-template-columns:1fr!important;padding:8px!important;gap:6px!important}
+      #taskDialog #taskGame.task-realistic{min-height:calc(100dvh - 82px)!important;align-content:start!important}
+      #taskDialog .task-board{height:min(62dvh,520px)!important;min-height:280px!important}
+      #sabotageDialog .sabotage-grid{grid-template-columns:1fr!important;gap:12px!important}
+      #sabotageDialog .sabotage-grid button{min-height:clamp(72px,15dvh,120px)!important}
     }
 
   `;
