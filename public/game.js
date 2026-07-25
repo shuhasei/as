@@ -319,7 +319,7 @@ function draw2DMap(){
   for(const [id,[name,x,z]] of Object.entries(TASKS)){ctx.fillStyle='#46dfff';ctx.fillRect(sx(x)-.35*scale,sz(z)-.35*scale,.7*scale,.7*scale)}
   if(cargoCarryActive){ctx.fillStyle='#ffbd5a';ctx.fillRect(sx(CARGO_DELIVERY.x)-.5*scale,sz(CARGO_DELIVERY.z)-.5*scale,scale,scale)}
   for(const locker of LOCKERS){const occupied=state?.players?.some(p=>p.hidden&&p.hiddenAt===locker.id);ctx.fillStyle=occupied?'#ffb34d':'#3b6680';ctx.fillRect(sx(locker.x)-.45*scale,sz(locker.z)-.35*scale,.9*scale,.7*scale)}
-  for(const p of state?.players||[]){if(p.reported||p.hidden)continue;const model=models.get(p.id),x=model?.position?.x??p.x,z=model?.position?.z??p.z;const hex=(COLORS[p.color]||0xffffff).toString(16).padStart(6,'0');ctx.globalAlpha=p.alive?1:.35;ctx.fillStyle=`#${hex}`;ctx.beginPath();ctx.arc(sx(x),sz(z),.52*scale,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.fillStyle='#ffffff';ctx.font=`bold ${Math.max(9,scale*.3)}px sans-serif`;ctx.fillText(p.name,sx(x),sz(z)-.75*scale)}
+  for(const p of state?.players||[]){if(!playerVisibleToLocalViewer(p))continue;const model=models.get(p.id),x=model?.position?.x??p.x,z=model?.position?.z??p.z;const hex=(COLORS[p.color]||0xffffff).toString(16).padStart(6,'0');ctx.globalAlpha=p.alive?1:.35;ctx.fillStyle=`#${hex}`;ctx.beginPath();ctx.arc(sx(x),sz(z),.52*scale,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.fillStyle='#ffffff';ctx.font=`bold ${Math.max(9,scale*.3)}px sans-serif`;ctx.fillText(p.name,sx(x),sz(z)-.75*scale)}
   ctx.fillStyle='rgba(2,7,17,.75)';ctx.fillRect(10,h-40,340,30);ctx.fillStyle='#dffcff';ctx.textAlign='left';ctx.font='14px sans-serif';ctx.fillText('軽量マップ表示中（操作・機能はそのまま使えます）',20,h-20);
 }
 function drawMiniMap(){
@@ -352,7 +352,7 @@ function drawMiniMap(){
   const self=me();
   if(!self)return;
   for(const player of state?.players||[]){
-    if(player.reported||player.hidden)continue;
+    if(!playerVisibleToLocalViewer(player))continue;
     if(player.id!==myId&&state?.phase==='playing')continue;
     const model=models.get(player.id);
     const x=model?.position?.x??player.x;
@@ -448,9 +448,9 @@ function syncModels(){
       m.position.set(p.x,0,p.z);
       m.rotation.y=p.rotation||0;
     }
-    m.visible=!p.reported&&!p.hidden;
+    m.visible=playerVisibleToLocalViewer(p);
     if(m.userData.cargoBox)m.userData.cargoBox.visible=Boolean(p.carryingCargo)&&(p.alive&&!p.hidden&&!p.reported);
-    if(renderMode==='3d')m.traverse(o=>{if(o.material){o.material.transparent=!p.alive;o.material.opacity=p.alive?1:.28}});
+    if(renderMode==='3d')m.traverse(o=>{if(o.material){const ghost=!p.alive;o.material.transparent=ghost;o.material.opacity=ghost?.2:1;o.material.depthWrite=!ghost}});
     if(p.id===myId){
       localModel=m;
       if(hiddenChanged){
@@ -474,6 +474,13 @@ function syncModels(){
   }
 }
 function me(){return state?.players.find(p=>p.id===myId)}
+function playerVisibleToLocalViewer(player){
+  if(!player||player.reported||player.hidden)return false;
+  if(player.alive)return true;
+  const viewer=me();
+  // 生存者には幽霊を一切表示しない。倒されたプレイヤー同士だけが確認できる。
+  return Boolean(viewer&&!viewer.alive);
+}
 function livingSpectatorCandidates(){
   return (state?.players||[]).filter(player=>player.id!==myId&&!player.practiceTarget&&player.alive&&player.connected!==false);
 }
@@ -486,7 +493,7 @@ function spectatorTarget(){
 function restoreSpectatorHiddenModel(){
   if(!spectatorHiddenModelId)return;
   const model=models.get(spectatorHiddenModelId),player=(state?.players||[]).find(item=>item.id===spectatorHiddenModelId);
-  if(model&&player)model.visible=!player.reported&&!player.hidden;
+  if(model&&player)model.visible=playerVisibleToLocalViewer(player);
   spectatorHiddenModelId=null;
 }
 function setSpectatorTarget(id){
@@ -752,7 +759,7 @@ function updateCamera(dt=.016){
     if(subject.following){
       if(spectatorHiddenModelId&&spectatorHiddenModelId!==viewPlayer.id)restoreSpectatorHiddenModel();
       viewModel.visible=false;spectatorHiddenModelId=viewPlayer.id;
-      if(localModel&&localModel!==viewModel){const self=me();localModel.visible=self?!self.reported&&!self.hidden:true}
+      if(localModel&&localModel!==viewModel){const self=me();localModel.visible=playerVisibleToLocalViewer(self)}
     }else{
       restoreSpectatorHiddenModel();viewModel.visible=false;
     }
@@ -763,8 +770,8 @@ function updateCamera(dt=.016){
     camera.position.copy(eye);camera.lookAt(eye.clone().addScaledVector(forward,12));return;
   }
   restoreSpectatorHiddenModel();
-  if(localModel){const self=me();localModel.visible=self?!self.reported&&!self.hidden:true}
-  if(viewModel&&viewPlayer)viewModel.visible=!viewPlayer.reported&&!viewPlayer.hidden;
+  if(localModel){const self=me();localModel.visible=playerVisibleToLocalViewer(self)}
+  if(viewModel&&viewPlayer)viewModel.visible=playerVisibleToLocalViewer(viewPlayer);
   const pose=getThirdPersonCameraPose(pos);
   camera.fov=pose.fov;camera.near=.06;camera.updateProjectionMatrix();
   const invalidCamera=!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z);
@@ -963,7 +970,7 @@ function drawSecurityLiveScene(){
   const localPlayer=me();
   const oldFog=scene.fog;
   try{
-    if(localModel&&localPlayer?.alive&&!localPlayer.hidden&&!localPlayer.reported)localModel.visible=true;
+    if(localModel&&localPlayer?.alive&&playerVisibleToLocalViewer(localPlayer))localModel.visible=true;
     // 監視映像では暗くなりすぎないよう、同じ3Dシーンを少し見通しよく描画します。
     if(oldFog)scene.fog=new THREE.FogExp2(0x020711,Math.min(Number(oldFog.density)||.018,.011));
     securityRenderer.render(scene,securityCamera);
