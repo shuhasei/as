@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-group-talk-hats-v41';
+const MAP_VERSION='aurora-pc-chat-joystick-v42';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -1542,7 +1542,7 @@ bindChatForm('globalChatForm','globalChatInput');bindChatForm('meetingChatForm',
 function appendChat(m){const phase={lobby:'ロビー',playing:'ゲーム',meeting:'会議',finished:'終了'}[m.phase]||'';for(const id of ['globalChatLog','meetingChatLog']){const log=$(id);if(!log)continue;const d=document.createElement('div');d.className='chat-line';const ghost=m.alive===false?'👻 ':'';d.innerHTML=`<span class="chat-name">${ghost}${escapeHtml(m.from)}</span><span class="chat-phase">${escapeHtml(phase)}</span><br>${escapeHtml(m.text)}`;log.append(d);log.scrollTop=log.scrollHeight}}
 const chatPanel=$('globalChatPanel'),chatToggle=$('chatToggleButton');
 if(chatPanel&&chatToggle){
-  const mobileChatLayout=()=>matchMedia('(max-width: 640px), (pointer: coarse)').matches;
+  const mobileChatLayout=()=>matchMedia('(max-width: 640px)').matches;
   const setChatCollapsed=collapsed=>{
     chatPanel.classList.toggle('collapsed',collapsed);
     chatToggle.textContent=collapsed?'開く':'最小化';
@@ -1588,7 +1588,7 @@ function adjustHudLayout(){
   const action=ui.actionBar,chat=$('globalChatPanel'),hint=$('controlHint');
   if(!action||!chat)return;
   layoutMiniMap();
-  const mobile=matchMedia('(max-width:900px), (pointer:coarse)').matches;
+  const mobile=matchMedia('(max-width:900px)').matches;
   if(mobile){
     const key=`mobile:${innerWidth}:${innerHeight}`;
     if(key===lastHudLayoutKey)return;
@@ -2495,6 +2495,11 @@ $('profileSummary').textContent=profileText();
         transition:opacity .14s ease;
       }
       #actionBar{z-index:86}
+    }
+
+    /* PC layout: keyboard operation only. Prevent the touch stick from covering chat. */
+    @media (min-width:901px){
+      #joystick{display:none !important}
     }
 
     @media (pointer:coarse) and (orientation:landscape) and (max-height:560px){
