@@ -1560,7 +1560,11 @@ function queueHudLayout(){
   hudLayoutFrame=requestAnimationFrame(()=>{hudLayoutFrame=0;adjustHudLayout()});
 }
 function setHudStyle(el,property,value){
-  if(el&&el.style[property]!==value)el.style[property]=value;
+  if(!el)return;
+  const cssProperty=property.replace(/[A-Z]/g,letter=>`-${letter.toLowerCase()}`);
+  if(el.style.getPropertyValue(cssProperty)!==value||el.style.getPropertyPriority(cssProperty)!=='important'){
+    el.style.setProperty(cssProperty,value,'important');
+  }
 }
 function layoutMiniMap(){
   const map=ui.miniMap,chat=$('globalChatPanel');if(!map||!chat)return;
@@ -1617,28 +1621,29 @@ function adjustHudLayout(){
   let center=Math.round(window.innerWidth/2);
   center=Math.max(center,Math.ceil(leftLimit+half));
   center=Math.min(center,Math.floor(rightLimit-half));
-  const actionWidth=Math.min(naturalWidth,available);
+  const actionWidth=Math.max(180,Math.min(naturalWidth,available));
   const desiredLeft=Math.round((window.innerWidth-actionWidth)/2);
   const actionLeft=Math.max(leftLimit,Math.min(desiredLeft,rightLimit-actionWidth));
   const narrow=available<naturalWidth+8;
   const actionHeight=Math.round(action.getBoundingClientRect().height||66);
-  const chatClearance=Math.max(0,Math.round(window.innerHeight-chatRect.top)+8);
-  const hintBottom=Math.max(chatClearance+actionHeight+12,actionHeight+30,88);
-  const key=[window.innerWidth,window.innerHeight,chat.classList.contains('collapsed'),leftLimit,rightLimit,Math.round(actionWidth),actionLeft,actionHeight,narrow,chatClearance].join(':');
+  const hintBottom=Math.max(actionHeight+30,88);
+  const key=[window.innerWidth,window.innerHeight,chat.classList.contains('collapsed'),leftLimit,rightLimit,Math.round(actionWidth),actionLeft,actionHeight,narrow].join(':');
   if(key===lastHudLayoutKey)return;
   lastHudLayoutKey=key;
   setHudStyle(action,'bottom','calc(18px + env(safe-area-inset-bottom,0px))');
   setHudStyle(action,'left',`${actionLeft}px`);
   setHudStyle(action,'right','auto');
-  setHudStyle(action,'transform','none');
+  setHudStyle(action,'width',`${actionWidth}px`);
   setHudStyle(action,'maxWidth',`${available}px`);
+  setHudStyle(action,'transform','none');
+  setHudStyle(action,'justifyContent','center');
   if(hint){
     const hintCenter=actionLeft+actionWidth/2;
     setHudStyle(hint,'left',`${hintCenter}px`);
     setHudStyle(hint,'right','auto');
     setHudStyle(hint,'bottom',`${hintBottom}px`);
     setHudStyle(hint,'transform','translateX(-50%)');
-    setHudStyle(hint,'maxWidth',`${available}px`);
+    setHudStyle(hint,'maxWidth',`${actionWidth}px`);
   }
 }
 window.addEventListener('resize',queueHudLayout,{passive:true});
