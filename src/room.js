@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "aurora-balanced-lighting-v30";
+const MAP_VERSION = "aurora-door-lock-v37";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -9,6 +9,7 @@ const LOCKERS = [
   { id: "storage", x: -12, z: -19.5, exitX: -10.4, exitZ: -19.5 },
 ];
 const EMERGENCY_BUTTON = { x: 0, z: 0 };
+const DOOR_BARRIERS = Object.freeze([{"x":0,"z":6,"w":4.42,"d":0.56},{"x":-5,"z":-6,"w":3.42,"d":0.56},{"x":4,"z":-6,"w":3.42,"d":0.56},{"x":-7,"z":-2,"w":0.56,"d":3.62},{"x":7,"z":3,"w":0.56,"d":3.62},{"x":0,"z":13,"w":4.22,"d":0.56},{"x":-9,"z":18,"w":0.56,"d":3.82},{"x":9,"z":16,"w":0.56,"d":3.82},{"x":-22,"z":18,"w":0.56,"d":3.82},{"x":-27,"z":13,"w":3.82,"d":0.56},{"x":-27,"z":10,"w":3.82,"d":0.56},{"x":-22,"z":2,"w":0.56,"d":3.02},{"x":-21,"z":2,"w":0.56,"d":3.02},{"x":-11,"z":-2,"w":0.56,"d":3.62},{"x":-20,"z":-6,"w":2.82,"d":0.56},{"x":-20,"z":-12,"w":2.82,"d":0.56},{"x":-19,"z":-17,"w":0.56,"d":3.42},{"x":-5,"z":-12,"w":3.42,"d":0.56},{"x":-14,"z":-16,"w":0.56,"d":3.42},{"x":-2,"z":-17,"w":0.56,"d":3.42},{"x":4,"z":-13,"w":3.42,"d":0.56},{"x":2,"z":-17,"w":0.56,"d":3.42},{"x":12,"z":-16,"w":0.56,"d":3.22},{"x":15,"z":-16,"w":0.56,"d":3.22},{"x":24.5,"z":-11,"w":3.02,"d":0.56},{"x":23,"z":3,"w":0.56,"d":3.22},{"x":24.5,"z":-5,"w":3.02,"d":0.56},{"x":26,"z":5,"w":3.22,"d":0.56},{"x":17,"z":16,"w":0.56,"d":3.42},{"x":19,"z":10.5,"w":3.02,"d":0.56},{"x":26,"z":10.5,"w":3.22,"d":0.56},{"x":11,"z":3,"w":0.56,"d":3.42},{"x":21,"z":3,"w":0.56,"d":3.22},{"x":19,"z":8,"w":3.02,"d":0.56},{"x":-23,"z":2,"w":0.56,"d":2.72},{"x":-20,"z":2,"w":0.56,"d":2.72},{"x":-14,"z":-17,"w":0.56,"d":3.12},{"x":20.75,"z":3,"w":0.56,"d":2.92},{"x":23.25,"z":3,"w":0.56,"d":2.92}]);
 const CARGO_PICKUP = { x: -6, z: -17 };
 const CARGO_DELIVERY = { x: 13.2, z: 6.1 };
 const SPAWNS = [
@@ -28,6 +29,31 @@ const DEFAULT_SETTINGS = {
   revealRoles: false,
 };
 
+const pointHitsDoor = (x, z, radius = 0.58) => DOOR_BARRIERS.some((door) =>
+  Math.abs(x - door.x) < door.w / 2 + radius && Math.abs(z - door.z) < door.d / 2 + radius
+);
+const segmentHitsDoor = (x1, z1, x2, z2, radius = 0.58) => {
+  const distance = Math.hypot(x2 - x1, z2 - z1);
+  const steps = Math.max(1, Math.ceil(distance / 0.16));
+  for (let index = 1; index <= steps; index += 1) {
+    const t = index / steps;
+    if (pointHitsDoor(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, radius)) return true;
+  }
+  return false;
+};
+const pushPlayerOutsideDoors = (player) => {
+  for (const door of DOOR_BARRIERS) {
+    const radius = 0.64;
+    if (Math.abs(player.x - door.x) >= door.w / 2 + radius || Math.abs(player.z - door.z) >= door.d / 2 + radius) continue;
+    if (door.w > door.d) {
+      const direction = player.z >= door.z ? 1 : -1;
+      player.z = door.z + direction * (door.d / 2 + radius + 0.08);
+    } else {
+      const direction = player.x >= door.x ? 1 : -1;
+      player.x = door.x + direction * (door.w / 2 + radius + 0.08);
+    }
+  }
+};
 const uid = () => crypto.randomUUID();
 const cleanName = (value) => String(value || "Player").replace(/[<>]/g, "").trim().slice(0, 16) || "Player";
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -492,6 +518,11 @@ export class GameRoom extends DurableObject {
       return;
     }
 
+    if (player.alive && this.sabotage?.kind === "doors" && segmentHitsDoor(player.x, player.z, x, z)) {
+      this.send(player.id, { type: "playerMoved", id: player.id, x: player.x, z: player.z, rotation: player.rotation, serverTime: Date.now() });
+      return;
+    }
+
     player.x = clamp(x, -33.2, 35.2);
     player.z = clamp(z, -22.2, 23.2);
     const rotation = Number(message.rotation);
@@ -823,6 +854,11 @@ export class GameRoom extends DurableObject {
     const kind = ["lights", "reactor", "comms", "doors"].includes(message.kind) ? message.kind : "lights";
     const duration = kind === "reactor" ? 30 : kind === "doors" ? 12 : 25;
     this.sabotage = { kind, endsAt: Date.now() + duration * 1000 };
+    if (kind === "doors") {
+      for (const target of this.players.values()) {
+        if (target.alive) pushPlayerOutsideDoors(target);
+      }
+    }
     await this.ctx.storage.setAlarm(this.sabotage.endsAt);
     await this.persist();
     this.broadcast({ type: "sabotage", sabotage: this.sabotage });
