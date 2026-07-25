@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
-const MAP_VERSION = "aurora-spectator-last-survivor-v26";
+const MAP_VERSION = "aurora-selected-skin-v28";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -426,6 +426,8 @@ export class GameRoom extends DurableObject {
     }
 
     const index = this.players.size;
+    const requestedColor = String(message.color || "").toLowerCase();
+    const selectedColor = COLORS.includes(requestedColor) ? requestedColor : COLORS[index % COLORS.length];
     const [x, z] = SPAWNS[index % SPAWNS.length];
     const lateJoinTasks = joiningActiveGame
       ? shuffled(TASKS).slice(0, this.settings.tasks)
@@ -433,7 +435,7 @@ export class GameRoom extends DurableObject {
     this.players.set(id, {
       id,
       name: cleanName(message.name),
-      color: COLORS[index % COLORS.length],
+      color: selectedColor,
       x,
       z,
       rotation: 0,
