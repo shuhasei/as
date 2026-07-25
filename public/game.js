@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-task-quality-stable-v33';
+const MAP_VERSION='aurora-fullscreen-terminal-v36';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -14,7 +14,7 @@ const PERF={
   enableShadows:HIGH_POWER_DEVICE,
   shadowMapSize:1024,
   shadowFps:10,
-  securityFps:LOW_POWER_DEVICE?8:12,
+  securityFps:LOW_POWER_DEVICE?6:10,
   miniMapFps:LOW_POWER_DEVICE?6:10,
   nearestFps:12,
   hudFps:4,
@@ -754,19 +754,22 @@ function animate(now=performance.now()){
     }
     if(now-lastNearestUpdate>=1000/PERF.nearestFps){lastNearestUpdate=now;updateNearest()}
     if(renderMode==='3d'&&renderer&&scene&&camera){
-      updateLockerVisuals(dt);
-      updateCargoCarryVisual();
-      if(now-lastLightUpdate>=1000/PERF.lightFps){const lightDt=Math.min((now-lastLightUpdate)/1000,.15)||dt;lastLightUpdate=now;updateFacilityLighting(lightDt)}
-      updateCamera(dt);
-      updateEnclosureCameraLayer();
-      if(PERF.enableShadows&&now-lastShadowUpdate>=1000/PERF.shadowFps){lastShadowUpdate=now;renderer.shadowMap.needsUpdate=true}
-      // 監視画面を開いている間は、背後の3D画面を再描画せず監視映像へGPUを集中させる。
-      if(!securityOpen)renderer.render(scene,camera);
+      if(!securityOpen){
+        updateLockerVisuals(dt);
+        updateCargoCarryVisual();
+        if(now-lastLightUpdate>=1000/PERF.lightFps){const lightDt=Math.min((now-lastLightUpdate)/1000,.15)||dt;lastLightUpdate=now;updateFacilityLighting(lightDt)}
+        updateCamera(dt);
+        updateEnclosureCameraLayer();
+        if(PERF.enableShadows&&now-lastShadowUpdate>=1000/PERF.shadowFps){lastShadowUpdate=now;renderer.shadowMap.needsUpdate=true}
+        renderer.render(scene,camera);
+      }else if(now-lastLightUpdate>=220){
+        const lightDt=Math.min((now-lastLightUpdate)/1000,.12)||dt;lastLightUpdate=now;updateFacilityLighting(lightDt);
+      }
     }else if(renderMode==='2d'&&!securityOpen){
       draw2DMap();
     }
     if(securityOpen)renderSecurityFeed();
-    if(miniMapEnabled&&now-lastMiniMapRender>=1000/PERF.miniMapFps){
+    if(!securityOpen&&miniMapEnabled&&now-lastMiniMapRender>=1000/PERF.miniMapFps){
       lastMiniMapRender=now;
       try{drawMiniMap()}catch(error){
         miniMapEnabled=false;
@@ -775,7 +778,7 @@ function animate(now=performance.now()){
         showNotice('ミニマップを停止してゲームを続行します。');
       }
     }
-    if(now-lastHudUpdate>=1000/PERF.hudFps){lastHudUpdate=now;updateCooldown();updateSabotage()}
+    if(!securityOpen&&now-lastHudUpdate>=1000/PERF.hudFps){lastHudUpdate=now;updateCooldown();updateSabotage()}
     reduceRenderLoadIfNeeded(now);
     animationErrorShown=false;
   }catch(error){
@@ -1008,10 +1011,10 @@ function updateSecurityTaskUi(){
   if(panel)panel.classList.toggle('hidden',!securityTaskActive);
   if(!securityTaskActive)return;
   const viewed=securityTaskViewed.size,required=3;
-  if(progress)progress.textContent=`ライブ映像を確認：${viewed} / ${required}か所`;
-  if(complete){complete.disabled=viewed<required;complete.textContent=viewed<required?'3か所確認してください':'確認完了'}
+  if(progress)progress.textContent=`進捗：${viewed} / ${required}か所を確認`;
+  if(complete){complete.disabled=viewed<required;complete.textContent=viewed<required?`あと${required-viewed}か所確認してください`:'確認完了'}
   const buttons=$('securityCameraButtons');
-  if(buttons)buttons.querySelectorAll('[data-security-camera]').forEach((button,index)=>button.classList.toggle('task-checked',securityTaskViewed.has(index)));
+  if(buttons)buttons.querySelectorAll('[data-security-camera]').forEach((button,index)=>{const checked=securityTaskViewed.has(index);button.classList.toggle('task-checked',checked);button.setAttribute('aria-pressed',checked?'true':'false');});
 }
 function scheduleSecurityTaskView(){
   if(securityTaskViewTimer){clearTimeout(securityTaskViewTimer);securityTaskViewTimer=0}
@@ -1039,10 +1042,10 @@ function completeSecurityCameraTask(){
 function updateSecurityCameraUi(){
   const preset=SECURITY_CAMERAS[securityCameraIndex]||SECURITY_CAMERAS[0];
   const title=$('securityCameraName'),buttons=$('securityCameraButtons');
-  if(title)title.textContent=`CAM ${String(securityCameraIndex+1).padStart(2,'0')}　${preset.name}`;
+  if(title)title.textContent=`CAM ${String(securityCameraIndex+1).padStart(2,'0')}｜${preset.name}`;
   if(buttons)buttons.querySelectorAll('[data-security-camera]').forEach((button,index)=>button.classList.toggle('active',index===securityCameraIndex));
   const count=(state?.players||[]).filter(player=>player.alive&&!player.hidden&&Math.hypot(player.x-preset.target[0],player.z-preset.target[2])<=preset.radius).length;
-  const status=$('securityCameraStatus');if(status)status.textContent=`● LIVE　検知 ${count}人`;
+  const status=$('securityCameraStatus');if(status)status.textContent=`● LIVE　映像内 ${count}人`;
   updateSecurityTaskUi();
 }
 function setSecurityCamera(index){
@@ -1117,8 +1120,8 @@ function resizeSecurityViewer(){
   const cssWidth=Math.max(280,Math.floor(canvas.clientWidth||640));
   const cssHeight=Math.max(158,Math.floor(canvas.clientHeight||cssWidth*9/16));
   const coarse=matchMedia('(pointer:coarse)').matches;
-  const maxWidth=coarse?420:680;
-  const scale=Math.min(1,maxWidth/cssWidth);
+  const maxWidth=coarse?360:(securityTaskActive?520:600);
+  const scale=Math.min(1,maxWidth/cssWidth)*(securityTaskActive?0.96:1);
   const width=Math.max(280,Math.round(cssWidth*scale));
   const height=Math.max(158,Math.round(cssHeight*scale));
   if(width!==securityRenderWidth||height!==securityRenderHeight){
@@ -1171,7 +1174,7 @@ function drawSecurityLiveScene(){
   return true;
 }
 function renderSecurityFeed(){
-  const now=performance.now();if(now-securityLastRender<1000/PERF.securityFps)return;securityLastRender=now;
+  const now=performance.now();const effectiveSecurityFps=securityTaskActive?(LOW_POWER_DEVICE?5:7):PERF.securityFps;if(now-securityLastRender<1000/effectiveSecurityFps)return;securityLastRender=now;
   updateSecurityCameraUi();
   if(renderMode==='3d'&&!securityViewerFailed){
     try{
@@ -1193,7 +1196,15 @@ function openSecurity(options={}){
   clearKeys();securityOpen=true;
   const buttons=$('securityCameraButtons');
   if(buttons&&!buttons.childElementCount){
-    SECURITY_CAMERAS.forEach((preset,index)=>{const button=document.createElement('button');button.type='button';button.dataset.securityCamera=String(index);button.textContent=`${index+1}. ${preset.name}`;button.onclick=()=>setSecurityCamera(index);buttons.append(button)});
+    SECURITY_CAMERAS.forEach((preset,index)=>{
+      const button=document.createElement('button');
+      button.type='button';
+      button.dataset.securityCamera=String(index);
+      button.className='security-camera-button';
+      button.innerHTML=`<span class="camera-badge">CAM ${String(index+1).padStart(2,'0')}</span><span class="camera-area">${preset.name}</span>`;
+      button.onclick=()=>setSecurityCamera(index);
+      buttons.append(button);
+    });
   }
   updateSecurityTaskUi();openDialog('securityDialog');
   requestAnimationFrame(()=>{ensureSecurityViewer();resizeSecurityViewer();setSecurityCamera(securityCameraIndex);renderSecurityFeed();scheduleSecurityTaskView()});
@@ -1870,23 +1881,30 @@ $('profileSummary').textContent=profileText();
     #speakerButton.hidden{display:none!important}
     @media(max-width:640px){.voice-header{align-items:flex-start;gap:8px}.meeting-voice-actions{width:100%;justify-content:stretch}.meeting-voice-actions button{flex:1}}
 
-    #securityDialog .dialog-card{width:min(980px,94vw);max-width:none;padding:18px}
-    .security-monitor{display:grid;gap:12px}
-    .security-screen{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;border:2px solid rgba(76,224,255,.65);border-radius:14px;background:#020711;box-shadow:inset 0 0 35px rgba(21,186,255,.18),0 0 24px rgba(25,185,255,.12)}
+    #securityDialog .dialog-card{width:min(1320px,98vw);max-width:none;max-height:min(96dvh,1000px);padding:16px 18px 16px;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;scrollbar-gutter:stable}
+    .security-dialog-card h2{margin-bottom:6px}
+    .security-help{margin:0 0 10px;color:#d7f6ff;opacity:.98;font-size:14px;line-height:1.65;padding:10px 12px;border-radius:12px;background:rgba(10,35,53,.72);border:1px solid rgba(95,224,255,.22)}
+    .security-help strong{color:#8ef1ff}
+    .security-monitor{display:grid;gap:12px;min-width:0;grid-auto-rows:max-content}
+    .security-screen{position:relative;width:100%;aspect-ratio:16/8.6;max-height:58dvh;overflow:hidden;border:2px solid rgba(76,224,255,.65);border-radius:16px;background:#020711;box-shadow:inset 0 0 28px rgba(21,186,255,.18),0 0 18px rgba(25,185,255,.1);min-width:0}
     #securityFeed{display:block;width:100%;height:100%;background:#020711}
-    .security-feed-header{position:absolute;left:10px;right:10px;top:9px;z-index:2;display:flex;justify-content:space-between;gap:10px;pointer-events:none;font-size:13px;font-weight:800;text-shadow:0 2px 4px #000}
-    #securityCameraStatus{color:#56ffb2}
+    .security-feed-header{position:absolute;left:12px;right:12px;top:10px;z-index:2;display:flex;justify-content:space-between;gap:10px;align-items:center;pointer-events:none;font-size:14px;font-weight:800;text-shadow:0 2px 4px #000;flex-wrap:wrap}
+    #securityCameraName{padding:6px 10px;border-radius:999px;background:rgba(3,14,28,.58);border:1px solid rgba(126,228,255,.24)}
+    #securityCameraStatus{color:#56ffb2;padding:6px 10px;border-radius:999px;background:rgba(3,14,28,.58);border:1px solid rgba(126,228,255,.24)}
     .security-scanlines{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0,rgba(255,255,255,.025) 1px,transparent 1px,transparent 4px);mix-blend-mode:screen}
-    .security-camera-controls{display:flex;gap:10px;align-items:center;justify-content:center}
-    .security-camera-controls button{min-width:112px}
-    .security-camera-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-    .security-camera-buttons button{padding:9px 10px;font-size:13px;min-height:44px}
-    .security-camera-buttons button.active{outline:2px solid #50ddff;background:rgba(27,175,223,.3)}
-    .security-note{margin:0;text-align:center;opacity:.72;font-size:12px}
-    .security-task-panel{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid rgba(90,230,255,.42);border-radius:12px;background:rgba(13,43,64,.72)}
-    .security-task-panel.hidden{display:none!important}.security-task-panel strong{color:#83efff}.security-task-panel button{min-height:42px}
+    .security-camera-controls{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;position:sticky;top:0;z-index:2;padding:2px 0;background:linear-gradient(180deg,rgba(5,18,34,.98),rgba(5,18,34,.82))}
+    .security-camera-controls button{min-width:144px;min-height:44px}
+    .security-camera-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;width:100%;min-width:0;align-items:stretch}
+    .security-camera-buttons button{min-width:0;padding:11px 12px;font-size:14px;min-height:62px;text-align:left;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:4px;line-height:1.3;border-radius:14px;overflow:hidden}
+    .security-camera-buttons .camera-badge{display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;letter-spacing:.08em;padding:3px 8px;border-radius:999px;background:rgba(147,232,255,.12);border:1px solid rgba(126,228,255,.24);color:#9eeeff}
+    .security-camera-buttons .camera-area{font-size:15px;font-weight:700;color:#eefaff}
+    .security-camera-buttons button.active{outline:2px solid #50ddff;background:rgba(27,175,223,.28);box-shadow:0 0 0 1px rgba(80,221,255,.35) inset} .security-camera-buttons button.active .camera-area{color:#ffffff}
+    .security-note{margin:0;text-align:center;opacity:.86;font-size:13px;line-height:1.5;padding-bottom:2px}
+    .security-task-panel{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:12px 14px;border:1px solid rgba(90,230,255,.42);border-radius:14px;background:rgba(13,43,64,.94);min-width:0;position:sticky;bottom:0;z-index:2;box-shadow:0 -8px 18px rgba(0,0,0,.18)}
+    .security-task-panel.hidden{display:none!important}.security-task-panel strong{color:#83efff;font-size:15px}.security-task-panel span{font-size:14px;line-height:1.4}.security-task-panel button{min-height:46px;white-space:nowrap;min-width:176px}
     .security-camera-buttons button.task-checked{border-color:#61ffb2;background:rgba(38,142,100,.28)}
-    .security-camera-buttons button.task-checked::after{content:' ✓';color:#78ffc1}
+    .security-camera-buttons button.task-checked::after{content:'✓ 確認済み';align-self:flex-end;margin-top:2px;font-size:12px;font-weight:700;color:#78ffc1}
+
 
     #topBar{
       z-index:40;
@@ -1995,10 +2013,10 @@ $('profileSummary').textContent=profileText();
 
 
     /* Hands-on task mini games */
-    #taskDialog .dialog-card{width:min(760px,94vw);max-width:none}
-    #taskGame.task-realistic{display:grid;gap:12px;min-height:320px;user-select:none;-webkit-user-select:none}
+    #taskDialog .dialog-card{width:min(1320px,98vw);max-width:none;min-height:min(92dvh,940px);max-height:min(96dvh,980px);padding:16px 18px 18px;display:flex;flex-direction:column;overflow:auto;box-sizing:border-box}
+    #taskGame.task-realistic{display:grid;gap:14px;min-height:max(420px,calc(92dvh - 170px));align-content:start;user-select:none;-webkit-user-select:none}
     .task-guide{margin:0;color:#d8ebff;line-height:1.55}
-    .task-board{position:relative;width:100%;height:300px;overflow:hidden;border:1px solid rgba(83,218,255,.45);border-radius:16px;background:radial-gradient(circle at 50% 45%,rgba(38,79,112,.38),rgba(3,11,22,.96));touch-action:none}
+    .task-board{position:relative;width:100%;height:min(56dvh,520px);overflow:hidden;border:1px solid rgba(83,218,255,.45);border-radius:16px;background:radial-gradient(circle at 50% 45%,rgba(38,79,112,.38),rgba(3,11,22,.96));touch-action:none}
     .task-status{text-align:center;margin:0;font-weight:800;color:#8eeeff}
     .task-hold{min-height:52px;font-weight:800;touch-action:none}
     .task-meter{height:14px;border:1px solid rgba(104,224,255,.45);border-radius:999px;overflow:hidden;background:#07111e}
@@ -2045,10 +2063,13 @@ $('profileSummary').textContent=profileText();
     .spectator-actions button{min-height:42px}
     .spectator-panel small{opacity:.78;line-height:1.4}
     .result-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:16px}
+    #sabotageDialog .dialog-card{width:min(920px,96vw);max-width:none;max-height:min(88dvh,720px);padding:16px 18px;overflow:auto}
+    #sabotageDialog .sabotage-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    #sabotageDialog .sabotage-grid button{min-height:84px;font-size:20px;font-weight:800}
 
     @media(max-width:640px){
-      #taskDialog .dialog-card{width:96vw;padding:11px;max-height:94dvh;overflow:auto}
-      #taskGame.task-realistic{min-height:270px;gap:8px}.task-board{height:260px}.task-guide{font-size:13px}.cargo-crate{width:58px;height:50px;font-size:15px}.wire-board{height:275px}.wire-socket{width:48px;height:48px;margin-top:-24px}.scan-console{grid-template-columns:1fr;gap:8px}.scan-hand{height:145px;font-size:78px}.scan-readout{font-size:22px}.engine-console{grid-template-columns:105px 1fr;gap:10px;padding:6px}.engine-track{height:235px;width:60px}.engine-knob{width:82px;margin-left:-41px}.engine-gauge b{font-size:35px}.security-sequence{grid-template-columns:repeat(2,1fr)}.security-sequence button{min-height:70px}.shield-sector{width:66px;height:52px;margin:-26px -33px;transform:rotate(var(--angle)) translateY(-112px) rotate(var(--counter))}.reactor-panel{grid-template-columns:1fr}.reactor-core{width:150px;margin:auto}.nav-radar,.weapon-range,.filter-chamber{height:260px}
+      #taskDialog .dialog-card{width:98vw;padding:10px;min-height:92dvh;max-height:96dvh;overflow:auto}
+      #taskGame.task-realistic{min-height:calc(92dvh - 160px);gap:8px}.task-board{height:min(44dvh,360px)}.task-guide{font-size:13px}.cargo-crate{width:58px;height:50px;font-size:15px}.wire-board{height:275px}.wire-socket{width:48px;height:48px;margin-top:-24px}.scan-console{grid-template-columns:1fr;gap:8px}.scan-hand{height:145px;font-size:78px}.scan-readout{font-size:22px}.engine-console{grid-template-columns:105px 1fr;gap:10px;padding:6px}.engine-track{height:235px;width:60px}.engine-knob{width:82px;margin-left:-41px}.engine-gauge b{font-size:35px}.security-sequence{grid-template-columns:repeat(2,1fr)}.security-sequence button{min-height:70px}.shield-sector{width:66px;height:52px;margin:-26px -33px;transform:rotate(var(--angle)) translateY(-112px) rotate(var(--counter))}.reactor-panel{grid-template-columns:1fr}.reactor-core{width:150px;margin:auto}.nav-radar,.weapon-range,.filter-chamber{height:260px}
     }
 
     @media (max-width:1200px){
@@ -2077,11 +2098,20 @@ $('profileSummary').textContent=profileText();
     }
 
     @media (max-width:640px){
-      #securityDialog .dialog-card{width:96vw;padding:10px;max-height:92dvh;overflow:auto}
-      .security-camera-buttons{grid-template-columns:repeat(2,minmax(0,1fr))}
-      .security-camera-buttons button{font-size:11px;padding:7px 6px}
-      .security-feed-header{font-size:10px;top:6px;left:7px;right:7px}
-      .security-camera-controls button{min-width:94px;padding:8px}
+      #securityDialog .dialog-card{width:98vw;padding:10px 10px 12px;max-height:96dvh;overflow:hidden}
+      .security-help{font-size:12px;margin-bottom:10px}
+      .security-screen{aspect-ratio:16/10;max-height:38dvh}
+      .security-camera-buttons{grid-template-columns:1fr}
+      .security-camera-buttons button{font-size:13px;padding:10px 12px;min-height:58px}
+      .security-camera-buttons .camera-badge{font-size:10px}
+      .security-camera-buttons .camera-area{font-size:14px}
+      .security-feed-header{font-size:11px;top:7px;left:7px;right:7px}
+      .security-camera-controls button{min-width:120px;padding:8px 10px}
+      .security-task-panel{grid-template-columns:1fr;justify-items:center;text-align:center;position:sticky;bottom:0}
+      .security-task-panel button{width:100%}
+      #sabotageDialog .dialog-card{width:96vw;max-height:92dvh;padding:12px}
+      #sabotageDialog .sabotage-grid{grid-template-columns:1fr}
+      #sabotageDialog .sabotage-grid button{min-height:62px;font-size:17px}
       #topBar{top:8px;left:8px;right:8px;max-width:none;gap:6px;flex-wrap:wrap}
       #playerPanel{top:118px;left:8px;width:min(44vw,170px);max-height:210px}
       #taskPanel{top:118px;right:8px;width:min(44vw,170px);max-height:210px}
