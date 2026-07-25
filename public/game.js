@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-group-talk-layout-v40';
+const MAP_VERSION='aurora-group-talk-hats-v41';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -135,7 +135,7 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0;const groupVoicePlaybackAt=new Map();
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0;const groupVoicePlaybackAt=new Map();
 let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
@@ -215,7 +215,7 @@ function connect(room,name){
   const ws=new WebSocket(wsUrl);socket=ws;
   ws.onopen=()=>{if(socket!==ws)return;ws.send(JSON.stringify({type:'join',name,clientVersion:MAP_VERSION,color:$('colorSelect')?.value,hat:$('hatSelect')?.value}))};
   ws.onmessage=e=>{if(socket!==ws)return;try{handle(JSON.parse(e.data))}catch(error){console.error('Invalid server message',error,e.data);if(joinPending)failJoin('サーバーから不正な応答が返りました。')}};
-  ws.onclose=event=>{if(socket!==ws)return;socket=null;stopMeetingVoice();stopGroupVoice();hangUpCall(false);clearIncomingCall(false);const detail=event.reason?`：${event.reason}`:'';if(joinPending)failJoin(`ルームへ接続できませんでした（code ${event.code}${detail}）。`,false);else showNotice(`接続が切れました（code: ${event.code}${detail}）。再読み込みしてください。`)};
+  ws.onclose=event=>{if(socket!==ws)return;socket=null;stopMeetingVoice();stopGroupVoice(false);hangUpCall(false);clearIncomingCall(false);const detail=event.reason?`：${event.reason}`:'';if(joinPending)failJoin(`ルームへ接続できませんでした（code ${event.code}${detail}）。`,false);else showNotice(`接続が切れました（code: ${event.code}${detail}）。再読み込みしてください。`)};
   ws.onerror=error=>{console.error('WebSocket error',error);if(joinPending)setMenuMessage('サーバーへ接続できません。公開先とWorker設定を確認してください。',true)};
 }
 function handle(m){
@@ -602,7 +602,55 @@ function buildWorld(){
   const addLocker=(locker)=>{const group=new THREE.Group();const shellMat=new THREE.MeshStandardMaterial({color:0x28445a,metalness:.78,roughness:.3});const darkMat=new THREE.MeshStandardMaterial({color:0x07131f,metalness:.35,roughness:.55});const shell=new THREE.Mesh(new THREE.BoxGeometry(1.15,2.55,.9),shellMat);shell.position.y=1.275;shell.castShadow=PERF.enableShadows;group.add(shell);const recess=new THREE.Mesh(new THREE.BoxGeometry(.86,2.15,.08),darkMat);recess.position.set(0,1.25,.47);group.add(recess);const doorPivot=new THREE.Group();doorPivot.position.set(-.46,0,.52);const door=new THREE.Mesh(new THREE.BoxGeometry(.9,2.18,.08),new THREE.MeshStandardMaterial({color:0x3b6680,metalness:.82,roughness:.25}));door.position.set(.45,1.25,0);door.castShadow=true;doorPivot.add(door);const handle=new THREE.Mesh(new THREE.BoxGeometry(.06,.3,.07),new THREE.MeshBasicMaterial({color:0x9cecff}));handle.position.set(.78,1.2,.07);doorPivot.add(handle);group.add(doorPivot);const lamp=new THREE.Mesh(new THREE.SphereGeometry(.08,12,8),new THREE.MeshBasicMaterial({color:0x63f4ff}));lamp.position.set(0,2.38,.53);group.add(lamp);group.position.set(locker.x,0,locker.z);group.rotation.y=locker.rot;group.userData={doorPivot,lamp,open:0,lockerId:locker.id};scene.add(group);lockerVisuals.set(locker.id,group)};LOCKERS.forEach(addLocker);
   const starGeo=new THREE.BufferGeometry(),pts=[];for(let i=0;i<1500;i++)pts.push((Math.random()-.5)*150,Math.random()*52+5,(Math.random()-.5)*150);starGeo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xffffff,size:.09})));
 }
-function createCrewmate(c){const selectedColor=COLORS[c]?c:'white',group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[selectedColor],roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=PERF.enableShadows;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=PERF.enableShadows;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=PERF.enableShadows;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);const cargoBox=createCargoParcel(.82);cargoBox.position.set(0,1.02,.94);cargoBox.visible=false;group.add(cargoBox);group.userData.cargoBox=cargoBox;group.userData.target=new THREE.Vector3();group.userData.rotation=0;group.userData.skinMaterial=mat;group.userData.skinColor=selectedColor;return group}
+const HAT_TYPES=new Set(['none','cap','crown','antenna','beanie','hardhat','wizard','flower','halo']);
+function disposeAccessory(object){
+  if(!object)return;
+  object.traverse(child=>{child.geometry?.dispose?.();if(child.material){const list=Array.isArray(child.material)?child.material:[child.material];for(const material of list)material.dispose?.()}});
+}
+function createHatAccessory(rawType){
+  const type=HAT_TYPES.has(String(rawType||'none'))?String(rawType||'none'):'none';
+  const group=new THREE.Group();group.name='characterAccessory';group.position.y=2.02;
+  const standard=(color,extra={})=>new THREE.MeshStandardMaterial({color,roughness:.35,metalness:.08,...extra});
+  const basic=color=>new THREE.MeshBasicMaterial({color});
+  const add=(mesh,x=0,y=0,z=0)=>{mesh.position.set(x,y,z);mesh.castShadow=PERF.enableShadows;group.add(mesh);return mesh};
+  if(type==='cap'){
+    const dome=add(new THREE.Mesh(new THREE.SphereGeometry(.45,20,12,0,Math.PI*2,0,Math.PI/2),standard(0x2e6ed8)),0,0,0);dome.scale.z=.86;
+    add(new THREE.Mesh(new THREE.BoxGeometry(.58,.08,.38),standard(0x234f9d)),0,-.02,.28);
+  }else if(type==='crown'){
+    add(new THREE.Mesh(new THREE.CylinderGeometry(.38,.42,.18,20),standard(0xf2c94c,{metalness:.45})),0,.02,0);
+    for(let i=0;i<5;i++){const a=i/5*Math.PI*2;add(new THREE.Mesh(new THREE.ConeGeometry(.12,.42,12),standard(0xffdc63,{metalness:.42})),Math.sin(a)*.3,.29,Math.cos(a)*.3)}
+    add(new THREE.Mesh(new THREE.SphereGeometry(.07,12,8),basic(0xff4f72)),0,.53,0);
+  }else if(type==='antenna'){
+    add(new THREE.Mesh(new THREE.CylinderGeometry(.035,.045,.62,10),standard(0x9bb7c9,{metalness:.5})),0,.27,0);
+    add(new THREE.Mesh(new THREE.SphereGeometry(.13,16,10),new THREE.MeshBasicMaterial({color:0x62efff})),0,.62,0);
+  }else if(type==='beanie'){
+    const cap=add(new THREE.Mesh(new THREE.SphereGeometry(.46,20,12,0,Math.PI*2,0,Math.PI/2),standard(0x8d4bd6)),0,0,0);cap.scale.z=.9;
+    add(new THREE.Mesh(new THREE.TorusGeometry(.4,.08,8,24),standard(0x6e36ad)),0,-.03,0).rotation.x=Math.PI/2;
+    add(new THREE.Mesh(new THREE.SphereGeometry(.13,14,10),standard(0xd7b5ff)),0,.47,0);
+  }else if(type==='hardhat'){
+    const shell=add(new THREE.Mesh(new THREE.SphereGeometry(.48,20,12,0,Math.PI*2,0,Math.PI/2),standard(0xf5b52e,{metalness:.12})),0,.02,0);shell.scale.z=.88;
+    add(new THREE.Mesh(new THREE.BoxGeometry(.9,.09,.56),standard(0xd99313)),0,-.02,.05);
+    add(new THREE.Mesh(new THREE.BoxGeometry(.08,.18,.78),standard(0xffcf55)),0,.18,0);
+  }else if(type==='wizard'){
+    add(new THREE.Mesh(new THREE.CylinderGeometry(.55,.55,.06,24),standard(0x40307f)),0,-.03,0);
+    const cone=add(new THREE.Mesh(new THREE.ConeGeometry(.42,.95,24),standard(0x51409c)),0,.43,0);cone.rotation.z=-.12;
+    for(const [x,y,z] of [[.12,.42,.36],[-.18,.62,.14],[.2,.72,-.08]])add(new THREE.Mesh(new THREE.SphereGeometry(.035,8,6),basic(0xffe47c)),x,y,z);
+  }else if(type==='flower'){
+    const center=add(new THREE.Mesh(new THREE.SphereGeometry(.11,12,8),standard(0xffc93f)),.28,.12,.03);
+    for(let i=0;i<6;i++){const a=i/6*Math.PI*2;const petal=add(new THREE.Mesh(new THREE.SphereGeometry(.12,12,8),standard(0xff72b6)),.28+Math.cos(a)*.16,.12+Math.sin(a)*.16,.03);petal.scale.set(1,.62,.45)}
+  }else if(type==='halo'){
+    const halo=add(new THREE.Mesh(new THREE.TorusGeometry(.42,.035,10,32),new THREE.MeshBasicMaterial({color:0xfff2a6})),0,.52,0);halo.rotation.x=Math.PI/2;
+  }
+  group.visible=type!=='none';group.userData.hatType=type;return group;
+}
+function applyHatAccessory(model,rawType){
+  if(!model||renderMode!=='3d')return;
+  const type=HAT_TYPES.has(String(rawType||'none'))?String(rawType||'none'):'none';
+  if(model.userData.hatType===type)return;
+  const old=model.userData.hatGroup;if(old){model.remove(old);disposeAccessory(old)}
+  const accessory=createHatAccessory(type);model.add(accessory);model.userData.hatGroup=accessory;model.userData.hatType=type;
+}
+function createCrewmate(c,hat='none'){const selectedColor=COLORS[c]?c:'white',group=new THREE.Group(),mat=new THREE.MeshPhysicalMaterial({color:COLORS[selectedColor],roughness:.18,metalness:.04,clearcoat:1,clearcoatRoughness:.1}),body=new THREE.Mesh(new THREE.CapsuleGeometry(.62,.88,10,22),mat);body.position.y=1.05;body.scale.z=.82;body.castShadow=PERF.enableShadows;group.add(body);[-.3,.3].forEach(x=>{const l=new THREE.Mesh(new THREE.CapsuleGeometry(.22,.35,8,16),mat);l.position.set(x,.28,0);l.castShadow=PERF.enableShadows;group.add(l)});const pack=new THREE.Mesh(new THREE.BoxGeometry(.8,.9,.34),mat);pack.position.set(0,1.02,-.62);pack.castShadow=PERF.enableShadows;group.add(pack);const rim=new THREE.Mesh(new THREE.SphereGeometry(.52,32,18),new THREE.MeshStandardMaterial({color:0x10151d,metalness:.7,roughness:.16}));rim.scale.set(1.22,.72,.34);rim.position.set(0,1.28,.55);group.add(rim);const visor=new THREE.Mesh(new THREE.SphereGeometry(.46,32,18),new THREE.MeshPhysicalMaterial({color:0xa8eaff,roughness:.05,metalness:.1,clearcoat:1,transmission:.2,transparent:true,opacity:.96}));visor.scale.set(1.2,.68,.3);visor.position.set(0,1.3,.62);group.add(visor);const cargoBox=createCargoParcel(.82);cargoBox.position.set(0,1.02,.94);cargoBox.visible=false;group.add(cargoBox);group.userData.cargoBox=cargoBox;group.userData.target=new THREE.Vector3();group.userData.rotation=0;group.userData.skinMaterial=mat;group.userData.skinColor=selectedColor;applyHatAccessory(group,hat);return group}
 function applySelectedSkin(model,color){if(!model||renderMode!=='3d')return;const selectedColor=COLORS[color]?color:'white';if(model.userData.skinColor===selectedColor)return;const material=model.userData.skinMaterial;if(material?.color){material.color.setHex(COLORS[selectedColor]);material.needsUpdate=true}model.userData.skinColor=selectedColor}
 function createCorpseLabel(){
   const canvas=document.createElement('canvas');canvas.width=256;canvas.height=88;
@@ -615,9 +663,9 @@ function createCorpseLabel(){
   sprite.scale.set(1.45,.5,1);sprite.position.set(0,1.55,0);sprite.renderOrder=20;
   return sprite;
 }
-function createCorpse(color){
+function createCorpse(color,hat='none'){
   const group=new THREE.Group();
-  const fallen=createCrewmate(color);fallen.position.set(0,.64,0);fallen.rotation.z=-Math.PI/2;fallen.rotation.x=.08;fallen.scale.set(.82,.82,.82);
+  const fallen=createCrewmate(color,hat);fallen.position.set(0,.64,0);fallen.rotation.z=-Math.PI/2;fallen.rotation.x=.08;fallen.scale.set(.82,.82,.82);
   if(fallen.userData.cargoBox)fallen.userData.cargoBox.visible=false;
   fallen.traverse(object=>{if(object.material){object.material.transparent=false;object.material.opacity=1;object.material.depthWrite=true}});
   group.add(fallen);
@@ -637,9 +685,9 @@ function syncCorpseModels(){
     if(!corpseIsVisible(player))continue;
     active.add(player.id);
     let corpse=corpseModels.get(player.id);
-    if(!corpse){corpse=createCorpse(player.color);corpseModels.set(player.id,corpse);scene.add(corpse)}
+    if(!corpse){corpse=createCorpse(player.color,player.hat);corpseModels.set(player.id,corpse);scene.add(corpse)}
     const selectedColor=COLORS[player.color]?player.color:'white';
-    if(corpse.userData.skinColor!==selectedColor){applySelectedSkin(corpse.userData.fallenModel,selectedColor);corpse.userData.skinColor=selectedColor}
+    if(corpse.userData.skinColor!==selectedColor){applySelectedSkin(corpse.userData.fallenModel,selectedColor);corpse.userData.skinColor=selectedColor}applyHatAccessory(corpse.userData.fallenModel,player.hat)
     corpse.position.set(Number(player.bodyX),0,Number(player.bodyZ));
     corpse.rotation.y=Number(player.bodyRotation||0);
     corpse.visible=true;
@@ -667,13 +715,14 @@ function syncModels(){
     let m=models.get(p.id);
     const created=!m;
     if(created){
-      m=renderMode==='2d'?makeFallbackModel(p):createCrewmate(p.color);
+      m=renderMode==='2d'?makeFallbackModel(p):createCrewmate(p.color,p.hat);
       models.set(p.id,m);
       if(renderMode==='3d')scene.add(m);
     }
     const hiddenChanged=m.userData.hidden!==Boolean(p.hidden);
     m.userData.hidden=Boolean(p.hidden);
     applySelectedSkin(m,p.color);
+    applyHatAccessory(m,p.hat);
     m.userData.target.set(p.x,0,p.z);
     m.userData.rotation=p.rotation;
     if(created||p.id===myId&&(!localModel||hiddenChanged)){
@@ -784,7 +833,7 @@ function updateCooldown(){
   if(ui.killCooldown)ui.killCooldown.textContent=remaining>0?`${Math.ceil(remaining/1000)}秒`:'';
   if(ui.kill&&isWerewolf)ui.kill.disabled=!ready;
 }
-function updateUI(){if(!state)return;const p=me();if(p&&COLORS[p.color]){const colorSelect=$('colorSelect');if(colorSelect&&colorSelect.value!==p.color)colorSelect.value=p.color;localStorage.setItem('hiddenCrewSelectedColor',p.color)}ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.filter(x=>!x.practiceTarget).length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'} ${x.practiceTarget?'practice-target':''}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${x.practiceTarget?'🎯 ':''}${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId&&!x.practiceTarget?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive||!x.connected?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing'||!p?.alive);ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p||!p.alive);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing'||(!p?.alive&&!!spectatorTargetId));if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();updateDoorLockdownVisuals();updateSpectatorUI();queueHudLayout();}
+function updateUI(){if(!state)return;const p=me();if(p&&COLORS[p.color]){const colorSelect=$('colorSelect');if(colorSelect&&colorSelect.value!==p.color)colorSelect.value=p.color;localStorage.setItem('hiddenCrewSelectedColor',p.color)}if(p&&HAT_TYPES.has(p.hat||'none')){const hatSelect=$('hatSelect');if(hatSelect&&hatSelect.value!==(p.hat||'none'))hatSelect.value=p.hat||'none';localStorage.setItem('hiddenCrewSelectedHat',p.hat||'none')}ui.room.textContent=state.room;ui.status.textContent={lobby:'ロビー',playing:'プレイ中',meeting:'会議中',finished:'終了'}[state.phase]||state.phase;ui.role.textContent=`役職：${p?.role==='impostor'?'人狼':p?.role==='crew'?'クルー':'---'}`;ui.playerCount.textContent=`${state.players.filter(x=>!x.practiceTarget).length}/12`;ui.players.innerHTML=state.players.map(x=>`<div class="player-row ${x.alive?'':'dead'} ${x.practiceTarget?'practice-target':''}"><span class="dot" style="color:#${(COLORS[x.color]||0).toString(16).padStart(6,'0')};background:currentColor"></span><span class="player-name">${x.practiceTarget?'🎯 ':''}${escapeHtml(x.name)}${x.host?' ★':''}</span>${x.id!==myId&&!x.practiceTarget?`<button class="call-member small" data-call-id="${escapeHtml(x.id)}" ${!x.alive||!x.connected?'disabled':''}>📞</button>`:''}</div>`).join('');const host=state.hostId===myId;ui.start.classList.toggle('hidden',!host||state.phase!=='lobby');ui.settings.classList.toggle('hidden',!host||state.phase!=='lobby');ui.actionBar.classList.toggle('hidden',state.phase!=='playing'||!p?.alive);ui.taskPanel.classList.toggle('hidden',state.phase!=='playing'||!p||!p.alive);ui.kill.classList.toggle('hidden',state.phase!=='playing'||p?.role!=='impostor');ui.kill.disabled=p?.role!=='impostor'||!p?.alive||!canKill()||!nearest.player;ui.kill.title=p?.role==='impostor'?'近くのクルーを攻撃（Q / Space）':'攻撃は人狼だけが使えます';ui.sabotage.classList.toggle('hidden',p?.role!=='impostor'||!p?.alive);ui.joystick.classList.toggle('hidden',state.phase!=='playing'||(!p?.alive&&!!spectatorTargetId));if(p){const done=p.tasksDone||0,total=p.taskTotal||0;ui.taskCounter.textContent=`${done}/${total}`;ui.taskProgress.style.width=`${total?done/total*100:0}%`;ui.tasks.innerHTML=p.role!=='impostor'&&!p.spectator?(p.tasks||[]).map(t=>`<div class="task-row ${(p.completedTasks||[]).includes(t)?'done':''}"><span>${taskDisplayName(t)}</span><b>${(p.completedTasks||[]).includes(t)?'✓':'○'}</b></div>`).join(''):'<p>偽タスクを装いましょう。</p>'}updateSabotage();updateDoorLockdownVisuals();updateSpectatorUI();queueHudLayout();}
 function updateSabotage(){const s=state?.sabotage;if(ui.sabotageBanner)ui.sabotageBanner.classList.toggle('hidden',!s);if(!s)return;if(ui.sabotageTitle)ui.sabotageTitle.textContent={lights:'照明停止',reactor:'リアクター暴走',comms:'通信妨害',doors:'ドア封鎖'}[s.kind]||'妨害発生';if(ui.sabotageTimer)ui.sabotageTimer.textContent=`${Math.max(0,Math.ceil((s.endsAt-Date.now())/1000))}秒`}
 let animationFrameId=0;
 let miniMapEnabled=true;
@@ -1321,7 +1370,7 @@ function openSecurity(options={}){
   updateSecurityTaskUi();openDialog('securityDialog');
   requestAnimationFrame(()=>{ensureSecurityViewer();resizeSecurityViewer();setSecurityCamera(securityCameraIndex);renderSecurityFeed();scheduleSecurityTaskView()});
 }
-$('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{if(!nearest.security){showNotice('SECURITYの監視端末に近づいてください');return}openSecurity()};$('securityPrevButton').onclick=()=>setSecurityCamera(securityCameraIndex-1);$('securityNextButton').onclick=()=>setSecurityCamera(securityCameraIndex+1);$('securityTaskComplete').onclick=completeSecurityCameraTask;$('securityDialog').addEventListener('close',()=>{securityOpen=false;clearKeys();resetSecurityTaskMode()});$('tutorialButton').onclick=()=>openDialog('tutorialDialog');const savedSkin=localStorage.getItem('hiddenCrewSelectedColor');if(savedSkin&&COLORS[savedSkin])$('colorSelect').value=savedSkin;$('colorSelect').onchange=()=>{localStorage.setItem('hiddenCrewSelectedColor',$('colorSelect').value);if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};$('hatSelect').onchange=()=>{if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
+$('abilityButton').onclick=abilityAction;$('hideButton').onclick=()=>{const p=me();if(p?.hidden)send('hide',{lockerId:p.hiddenAt});else if(nearest.locker)send('hide',{lockerId:nearest.locker.id});else showNotice('ロッカーの近くまで移動してください')};$('securityButton').onclick=()=>{if(!nearest.security){showNotice('SECURITYの監視端末に近づいてください');return}openSecurity()};$('securityPrevButton').onclick=()=>setSecurityCamera(securityCameraIndex-1);$('securityNextButton').onclick=()=>setSecurityCamera(securityCameraIndex+1);$('securityTaskComplete').onclick=completeSecurityCameraTask;$('securityDialog').addEventListener('close',()=>{securityOpen=false;clearKeys();resetSecurityTaskMode()});$('tutorialButton').onclick=()=>openDialog('tutorialDialog');const savedSkin=localStorage.getItem('hiddenCrewSelectedColor');if(savedSkin&&COLORS[savedSkin])$('colorSelect').value=savedSkin;const savedHat=localStorage.getItem('hiddenCrewSelectedHat');if(savedHat&&HAT_TYPES.has(savedHat))$('hatSelect').value=savedHat;$('colorSelect').onchange=()=>{localStorage.setItem('hiddenCrewSelectedColor',$('colorSelect').value);if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};$('hatSelect').onchange=()=>{localStorage.setItem('hiddenCrewSelectedHat',$('hatSelect').value);if(state?.phase==='lobby')send('customize',{color:$('colorSelect').value,hat:$('hatSelect').value})};
 let activeTaskCleanup=()=>{},activeTaskFinished=false,activeTaskId=null,activeTaskCompletionId=null,activeTaskCountsProgress=false;
 function resetTaskRuntime(){
   const cleanup=activeTaskCleanup;activeTaskCleanup=()=>{};
@@ -1629,30 +1678,37 @@ function getVoiceAudioContext(){
   return voiceAudioContext;
 }
 function groupVoiceAvailable(){return !!state&&state.phase!=='meeting'&&socket?.readyState===WebSocket.OPEN}
-function groupVoiceActive(){return groupVoiceAvailable()&&!activeCallPeer}
+function groupVoiceActive(){return groupVoiceAvailable()&&!activeCallPeer&&groupVoiceJoined}
 function setGroupVoiceStatus(text,active=false){
   const status=$('groupVoiceStatus');if(!status)return;status.textContent=text||'グループ音声：未接続';status.classList.toggle('active',active);
 }
 function updateGroupVoiceUi(){
-  const speaker=$('groupSpeakerButton'),mic=$('groupMicButton');if(!speaker||!mic)return;
+  const speaker=$('groupSpeakerButton'),mic=$('groupMicButton'),leave=$('groupLeaveButton');if(!speaker||!mic||!leave)return;
   const context=voiceAudioContext,connected=socket?.readyState===WebSocket.OPEN;
-  if(!connected||!state){speaker.disabled=true;mic.disabled=true;speaker.textContent='🔊 音声を聞く';mic.textContent='🎙 参加する';setGroupVoiceStatus('グループ音声：未接続');return}
+  leave.classList.toggle('hidden',!groupVoiceJoined);leave.disabled=!groupVoiceJoined;
+  if(!connected||!state){speaker.disabled=true;mic.disabled=true;speaker.textContent='🔊 聞くだけで参加';mic.textContent='🎙 マイクで参加';setGroupVoiceStatus('グループトーク：未接続');return}
   if(state.phase==='meeting'){
-    speaker.disabled=true;mic.disabled=true;speaker.textContent='🔊 会議音声へ';mic.textContent='🎙 会議中';setGroupVoiceStatus('会議中は会議専用の音声を使用します');return;
+    speaker.disabled=true;mic.disabled=true;leave.disabled=!groupVoiceJoined;speaker.textContent='🔊 会議音声へ';mic.textContent='🎙 会議中';setGroupVoiceStatus(groupVoiceJoined?'会議中のため一時停止中':'会議中は会議専用音声を使用します');return;
   }
   if(activeCallPeer){
-    speaker.disabled=true;mic.disabled=true;speaker.textContent='🔊 一時停止';mic.textContent='🎙 個人通話中';setGroupVoiceStatus('個人通話中はグループトークを一時停止しています');return;
+    speaker.disabled=true;mic.disabled=true;leave.disabled=!groupVoiceJoined;speaker.textContent='🔊 一時停止';mic.textContent='🎙 個人通話中';setGroupVoiceStatus(groupVoiceJoined?'個人通話中のため一時停止中':'個人通話中は参加できません');return;
   }
-  speaker.disabled=false;mic.disabled=groupVoiceStarting;
   const audioReady=groupVoiceListening&&context?.state==='running';
-  speaker.textContent=audioReady?'🔊 音声ON':'🔊 音声を聞く';
+  speaker.disabled=groupVoiceStarting||groupVoiceJoined;
+  mic.disabled=groupVoiceStarting;
+  speaker.textContent=groupVoiceJoined?'🔊 参加中':'🔊 聞くだけで参加';
   if(groupVoiceStarting)mic.textContent='🎙 準備中…';
-  else if(!groupVoiceStream)mic.textContent='🎙 参加する';
+  else if(!groupVoiceJoined)mic.textContent='🎙 マイクで参加';
+  else if(!groupVoiceStream)mic.textContent='🎙 マイクを追加';
   else mic.textContent=groupVoiceMuted?'🔇 マイクOFF':'🎙 マイクON';
   mic.classList.toggle('muted',groupVoiceMuted);
-  if(groupVoiceStream)setGroupVoiceStatus(groupVoiceMuted?'グループ音声を聞いています（マイクOFF）':'グループトークに参加中（マイクON）',true);
-  else if(audioReady)setGroupVoiceStatus('グループ音声を聞いています',true);
-  else setGroupVoiceStatus('グループ音声：未接続');
+  if(groupVoiceJoined&&groupVoiceStream)setGroupVoiceStatus(groupVoiceMuted?'参加中（聞くだけ・マイクOFF）':'グループトークに参加中（マイクON）',true);
+  else if(groupVoiceJoined&&audioReady)setGroupVoiceStatus('グループトークに参加中（聞くだけ）',true);
+  else setGroupVoiceStatus('グループトーク：未参加');
+}
+function setGroupMembership(joined){
+  const next=Boolean(joined);if(groupVoiceJoined===next)return;groupVoiceJoined=next;
+  if(socket?.readyState===WebSocket.OPEN)send('groupVoiceControl',{action:next?'join':'leave'});
 }
 async function enableGroupAudio(showMessage=true){
   const context=getVoiceAudioContext();
@@ -1671,7 +1727,7 @@ async function startGroupVoice(){
   try{
     await enableGroupAudio(false);
     groupVoiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});
-    groupVoiceMuted=false;groupVoiceListening=true;
+    groupVoiceMuted=false;groupVoiceListening=true;setGroupMembership(true);
     const context=getVoiceAudioContext();if(!context)throw new Error('AudioContext unavailable');if(context.state==='suspended')await context.resume();
     groupVoiceSource=context.createMediaStreamSource(groupVoiceStream);
     groupVoiceProcessor=context.createScriptProcessor(4096,1,1);
@@ -1691,12 +1747,14 @@ async function startGroupVoice(){
     console.error('Group microphone error',error);stopGroupVoice();showNotice('マイクを使用できません。ブラウザのサイト設定で許可してください。');return false;
   }finally{groupVoiceStarting=false;updateGroupVoiceUi()}
 }
-function stopGroupVoice(){
+function stopGroupVoice(notify=true){
   if(groupVoiceProcessor){groupVoiceProcessor.onaudioprocess=null;try{groupVoiceProcessor.disconnect()}catch{}groupVoiceProcessor=null}
   if(groupVoiceSource){try{groupVoiceSource.disconnect()}catch{}groupVoiceSource=null}
   if(groupVoiceSilentGain){try{groupVoiceSilentGain.disconnect()}catch{}groupVoiceSilentGain=null}
   for(const track of groupVoiceStream?.getTracks()||[])track.stop();
-  groupVoiceStream=null;groupVoiceStarting=false;groupVoiceMuted=false;groupVoiceListening=false;groupVoiceSequence=0;groupVoiceLastSentAt=0;groupVoicePlaybackAt.clear();updateGroupVoiceUi();
+  groupVoiceStream=null;groupVoiceStarting=false;groupVoiceMuted=false;groupVoiceListening=false;groupVoiceSequence=0;groupVoiceLastSentAt=0;groupVoicePlaybackAt.clear();
+  if(notify)setGroupMembership(false);else groupVoiceJoined=false;
+  updateGroupVoiceUi();
 }
 async function handleGroupVoiceAudio(message){
   if(!groupVoiceActive()||!groupVoiceListening||!message.fromId||message.fromId===myId||typeof message.data!=='string'||message.data.length>16000)return;
@@ -1711,11 +1769,12 @@ async function handleGroupVoiceAudio(message){
     const name=message.from||state?.players?.find(player=>player.id===message.fromId)?.name||'参加者';setGroupVoiceStatus(`🗣 ${name}が話しています`,true);
   }catch(error){console.warn('Group voice playback failed',error)}
 }
-$('groupSpeakerButton').onclick=async()=>{await enableGroupAudio(true)};
+$('groupSpeakerButton').onclick=async()=>{if(groupVoiceJoined)return;const ready=await enableGroupAudio(true);if(!ready)return;setGroupMembership(true);updateGroupVoiceUi();showNotice('グループトークへ聞くだけで参加しました。')};
 $('groupMicButton').onclick=async()=>{
   if(!groupVoiceStream){await startGroupVoice();return}
   groupVoiceMuted=!groupVoiceMuted;for(const track of groupVoiceStream.getAudioTracks())track.enabled=!groupVoiceMuted;updateGroupVoiceUi();
 };
+$('groupLeaveButton').onclick=()=>{if(!groupVoiceJoined)return;stopGroupVoice(true);showNotice('グループトークから退出しました。')};
 
 function meetingVoiceActive(){return state?.phase==='meeting'&&document.getElementById('meetingDialog')?.open}
 function updateMeetingVoiceUi(){
@@ -2243,8 +2302,8 @@ $('profileSummary').textContent=profileText();
     .group-voice-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:8px 0 10px;border-bottom:1px solid rgba(120,220,255,.18)}
     .group-voice-status{min-width:0;font-size:12px;line-height:1.35;color:#c9e9f3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .group-voice-status.active{color:#72ffc0}
-    .group-voice-actions{display:flex;gap:6px;flex-wrap:nowrap}
-    .group-voice-actions button{min-height:38px;padding:7px 9px;white-space:nowrap}
+    .group-voice-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .group-voice-actions button{min-height:38px;padding:7px 9px;white-space:nowrap}.group-voice-actions .hidden{display:none!important}
     #globalChatPanel.collapsed{
       width:330px !important;
       min-height:112px;
