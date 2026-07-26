@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-group-voice-reliable-v53";
+const MAP_VERSION = "aurora-auto-meeting-ultralight-v54";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -892,7 +892,7 @@ export class GameRoom extends DurableObject {
     const data = typeof message.data === "string" ? message.data : "";
     if (!data || data.length > 16000) return;
     const now = Date.now();
-    if (player.lastMeetingVoiceAt && now - player.lastMeetingVoiceAt < 18) return;
+    if (player.lastMeetingVoiceAt && now - player.lastMeetingVoiceAt < 55) return;
     player.lastMeetingVoiceAt = now;
     const rate = clamp(Number(message.rate) || 16000, 8000, 24000);
     const seq = Math.max(0, Math.floor(Number(message.seq) || 0));
