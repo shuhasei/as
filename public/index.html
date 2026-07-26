@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>ゲーム</title>
-  <link rel="stylesheet" href="/style.css?v=20260726-group-voice-reliable-v53">
+  <link rel="stylesheet" href="/style.css?v=20260727-auto-meeting-ultralight-v54">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js"}}</script>
 </head>
 <body>
@@ -113,10 +113,10 @@
 
   <dialog id="taskDialog"><div class="dialog-card"><button class="close" data-close="taskDialog">×</button><h2 id="taskTitle">TASK</h2><div id="taskGame"></div></div></dialog>
   <dialog id="sabotageDialog"><div class="dialog-card"><button class="close" data-close="sabotageDialog">×</button><h2>妨害を選択</h2><div class="sabotage-grid"><button data-sabotage="lights">照明停止</button><button data-sabotage="comms">通信妨害</button><button data-sabotage="doors">ドア封鎖</button><button data-sabotage="reactor" class="danger">リアクター暴走</button></div></div></dialog>
-  <dialog id="meetingDialog"><div class="dialog-card meeting-card"><h2 id="meetingReason">緊急会議</h2><div class="meeting-columns"><section><h3>投票</h3><div id="voteList"></div><button id="skipVoteButton">スキップ</button><p id="meetingTimer"></p></section><section><div class="voice-header"><h3>会議音声・チャット</h3><div class="meeting-voice-actions"><button id="speakerButton" type="button" class="secondary">🔊 音声を聞く</button><button id="micButton" type="button">🎙 マイク開始</button></div></div><p id="voiceStatus" class="voice-status">「音声を聞く」を押すと、生存している全員の声が聞こえます。</p><div id="remoteAudio" aria-live="polite"></div><div id="meetingChatLog" class="chat-log"></div><form id="meetingChatForm" class="chat-form"><input id="meetingChatInput" maxlength="120" placeholder="会議チャット"><button>送信</button></form></section></div></div></dialog>
+  <dialog id="meetingDialog"><div class="dialog-card meeting-card"><h2 id="meetingReason">緊急会議</h2><div class="meeting-columns"><section><h3>投票</h3><div id="voteList"></div><button id="skipVoteButton">スキップ</button><p id="meetingTimer"></p></section><section><div class="voice-header"><h3>会議音声・チャット</h3><div class="meeting-voice-actions"><button id="speakerButton" type="button" class="secondary">🔊 音声を聞く</button><button id="micButton" type="button">🎙 マイク開始</button></div></div><p id="voiceStatus" class="voice-status">会議開始時に、生存している全員の音声へ自動接続します。</p><div id="remoteAudio" aria-live="polite"></div><div id="meetingChatLog" class="chat-log"></div><form id="meetingChatForm" class="chat-form"><input id="meetingChatInput" maxlength="120" placeholder="会議チャット"><button>送信</button></form></section></div></div></dialog>
   <dialog id="incomingCallDialog"><div class="dialog-card call-dialog"><h2>着信</h2><p id="incomingCallerName">メンバーから着信です</p><div class="call-answer-row"><button id="acceptCallButton" class="primary" type="button">📞 応答</button><button id="declineCallButton" class="danger" type="button">拒否</button></div></div></dialog>
   <dialog id="resultDialog"><div class="dialog-card result-card"><h2 id="resultTitle">GAME OVER</h2><p id="resultText"></p><div id="resultPlayers"></div><div class="result-actions"><button id="resultCloseButton" class="secondary" type="button">ゲーム画面へ戻る</button><button id="returnLobbyButton" class="primary" type="button">ロビーへ戻る</button></div></div></dialog>
 </div>
-<script type="module" src="/game.js?v=20260726-group-voice-reliable-v53"></script>
+<script type="module" src="/game.js?v=20260727-auto-meeting-ultralight-v54"></script>
 </body>
 </html>
