@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-group-voice-reliable-v53';
+const MAP_VERSION='aurora-auto-meeting-ultralight-v54';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -9,17 +9,17 @@ const LOW_POWER_DEVICE=COARSE_POINTER||(DEVICE_MEMORY>0&&DEVICE_MEMORY<=4)||(CPU
 const HIGH_POWER_DEVICE=!LOW_POWER_DEVICE&&(DEVICE_MEMORY===0||DEVICE_MEMORY>=8)&&(CPU_CORES===0||CPU_CORES>=6);
 const PERF={
   lowPower:LOW_POWER_DEVICE,
-  maxPixelRatio:LOW_POWER_DEVICE?1:1.35,
-  targetFps:LOW_POWER_DEVICE?30:60,
-  enableShadows:HIGH_POWER_DEVICE,
-  shadowMapSize:1024,
-  shadowFps:10,
-  securityFps:LOW_POWER_DEVICE?8:(HIGH_POWER_DEVICE?18:14),
-  miniMapFps:LOW_POWER_DEVICE?6:10,
-  nearestFps:12,
-  hudFps:4,
-  lightFps:LOW_POWER_DEVICE?8:15,
-  moveInterval:LOW_POWER_DEVICE?70:50
+  maxPixelRatio:1,
+  targetFps:LOW_POWER_DEVICE?30:45,
+  enableShadows:false,
+  shadowMapSize:512,
+  shadowFps:4,
+  securityFps:LOW_POWER_DEVICE?6:10,
+  miniMapFps:LOW_POWER_DEVICE?4:6,
+  nearestFps:8,
+  hudFps:2,
+  lightFps:LOW_POWER_DEVICE?5:8,
+  moveInterval:LOW_POWER_DEVICE?80:60
 };
 const TASKS={
   reactor:['リアクター安定化',-28,18],
@@ -143,8 +143,8 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
-let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0,meetingVoiceBorrowedFromGroup=false,meetingVoiceLastSentAt=0,meetingVoiceSpeechUntil=0,meetingAutoVoicePending=false;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
+let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastCorpseUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
   const group=new THREE.Group();group.scale.setScalar(scale);
@@ -440,7 +440,7 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   const canvas=$('gameCanvas');
   if(!canvas)throw new Error('gameCanvas が見つかりません');
   canvas.style.display='block';
-  renderer=new THREE.WebGLRenderer({canvas,antialias:!PERF.lowPower,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
+  renderer=new THREE.WebGLRenderer({canvas,antialias:false,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
   preferredRendererPixelRatio=Math.min(devicePixelRatio||1,PERF.maxPixelRatio);
   currentRendererPixelRatio=preferredRendererPixelRatio;
   renderer.setPixelRatio(currentRendererPixelRatio);
@@ -556,7 +556,7 @@ function updateFacilityLighting(dt=.016){
   const lightsOut=state?.sabotage?.kind==='lights';const now=performance.now()/1000;
   const securityPreset=securityOpen?SECURITY_CAMERAS[securityCameraIndex]:null;
   const subject=securityPreset?{x:securityPreset.target[0],z:securityPreset.target[2]}:(cameraViewSubject?.().model?.position||localModel?.position||camera?.position||{x:0,z:0});
-  const lightRadius=PERF.lowPower?16:22,lightRadiusSq=lightRadius*lightRadius;
+  const lightRadius=PERF.lowPower?14:18,lightRadiusSq=lightRadius*lightRadius;
   const ambientTarget=lightsOut?.24:2.15;facilityAmbientLight.intensity+=((ambientTarget)-facilityAmbientLight.intensity)*(1-Math.exp(-5*dt));
   if(facilityKeyLight){const target=lightsOut?.12:1.2;facilityKeyLight.intensity+=(target-facilityKeyLight.intensity)*(1-Math.exp(-4*dt))}
   for(const entry of facilityLights){
@@ -868,44 +868,8 @@ function qualitySamplingBlocked(now){
   return document.hidden||securityOpen||now<qualitySamplingResumeAt||!!document.querySelector('dialog[open]');
 }
 function reduceRenderLoadIfNeeded(now){
-  // タスクやダイアログのアニメーションは通常プレイの性能判定に含めない。
-  if(qualitySamplingBlocked(now)){
-    performanceFrameCount=0;
-    performanceWindowStart=0;
-    return;
-  }
-  performanceFrameCount++;
-  if(!performanceWindowStart)performanceWindowStart=now;
-  const elapsed=now-performanceWindowStart;
-  if(elapsed<4000)return;
-  const fps=performanceFrameCount*1000/elapsed;
-  performanceFrameCount=0;
-  performanceWindowStart=now;
-  if(fps<PERF.targetFps*.68){
-    lowFpsWindows++;
-    highFpsWindows=0;
-  }else if(fps>PERF.targetFps*.9){
-    highFpsWindows++;
-    lowFpsWindows=0;
-  }else{
-    lowFpsWindows=0;
-    highFpsWindows=0;
-  }
-  // 一時的な引っ掛かりでは画質を下げず、通常プレイで低FPSが3回続いた時だけ調整する。
-  if(renderer&&lowFpsWindows>=3&&currentRendererPixelRatio>.8){
-    lowFpsWindows=0;
-    currentRendererPixelRatio=Math.max(.8,Math.round((currentRendererPixelRatio-.1)*100)/100);
-    renderer.setPixelRatio(currentRendererPixelRatio);
-    resize();
-    console.info(`[ゲーム] 通常プレイの負荷に合わせて描画倍率を調整しました (${currentRendererPixelRatio}x)`);
-  }
-  // 動作が安定したら少しずつ本来の画質へ戻す。
-  if(renderer&&highFpsWindows>=3&&currentRendererPixelRatio<preferredRendererPixelRatio){
-    highFpsWindows=0;
-    currentRendererPixelRatio=Math.min(preferredRendererPixelRatio,Math.round((currentRendererPixelRatio+.1)*100)/100);
-    renderer.setPixelRatio(currentRendererPixelRatio);
-    resize();
-  }
+  // v54: 解像度を上下させる処理を停止し、画質の揺れと再配置負荷を防ぎます。
+  performanceFrameCount=0;performanceWindowStart=0;lowFpsWindows=0;highFpsWindows=0;
 }
 function animate(now=performance.now()){
   animationFrameId=requestAnimationFrame(animate);
@@ -915,6 +879,11 @@ function animate(now=performance.now()){
     if(animationLastTime&&now-animationLastTime<frameInterval*.86)return;
     const dt=Math.min(animationLastTime?(now-animationLastTime)/1000:1/PERF.targetFps,.05);
     animationLastTime=now;
+    const blockingDialog=document.querySelector('dialog[open]:not(#securityDialog)');
+    if(blockingDialog){
+      if(now-lastHudUpdate>=1000){lastHudUpdate=now;updateCooldown();updateSabotage()}
+      animationErrorShown=false;return;
+    }
     if(state?.phase==='playing'&&localModel&&!securityOpen)moveLocal(dt);
     for(const m of models.values()){
       if(m!==localModel&&m?.position&&m?.userData?.target){
@@ -929,7 +898,7 @@ function animate(now=performance.now()){
       if(!securityOpen){
         updateLockerVisuals(dt);
         updateCargoCarryVisual();
-        if(corpseModels.size)updateCorpseVisuals(now);
+        if(corpseModels.size&&now-lastCorpseUpdate>=125){lastCorpseUpdate=now;updateCorpseVisuals(now)}
         if(now-lastLightUpdate>=1000/PERF.lightFps){const lightDt=Math.min((now-lastLightUpdate)/1000,.15)||dt;lastLightUpdate=now;updateFacilityLighting(lightDt)}
         updateCamera(dt);
         updateEnclosureCameraLayer();
@@ -1357,7 +1326,7 @@ function drawSecurityLiveScene(){
   return true;
 }
 function renderSecurityFeed(){
-  const now=performance.now();const effectiveSecurityFps=securityTaskActive?(LOW_POWER_DEVICE?7:(HIGH_POWER_DEVICE?16:12)):PERF.securityFps;if(now-securityLastRender<1000/effectiveSecurityFps)return;securityLastRender=now;
+  const now=performance.now();const effectiveSecurityFps=securityTaskActive?(LOW_POWER_DEVICE?5:8):PERF.securityFps;if(now-securityLastRender<1000/effectiveSecurityFps)return;securityLastRender=now;
   updateSecurityCameraUi();
   if(renderMode==='3d'&&!securityViewerFailed){
     try{
@@ -1571,8 +1540,11 @@ function openMeeting(reason){
   if(activeCallPeer)hangUpCall(true);
   pauseGroupVoiceCapture();stopMeetingVoice();updateGroupVoiceUi();$('meetingReason').textContent=reason;
   renderVotes();openDialog('meetingDialog');updateMeetingParticipationUi();
-  if(canParticipateInMeeting()){setVoiceStatus('「音声を聞く」を押すと、会議中の全員の声が聞こえます。');updateMeetingVoiceUi();enableMeetingAudio(false)}
-  else{setVoiceStatus('観戦中です。死亡したプレイヤーは会議へ参加できません。');updateMeetingVoiceUi()}
+  if(canParticipateInMeeting()){
+    meetingAutoVoicePending=true;
+    setVoiceStatus('会議音声へ自動接続しています…');updateMeetingVoiceUi();
+    setTimeout(()=>autoStartMeetingVoice(),80);
+  }else{setVoiceStatus('観戦中です。死亡したプレイヤーは会議へ参加できません。');updateMeetingVoiceUi()}
 }
 function renderVotes(){
   if(!state)return;
@@ -1836,6 +1808,15 @@ document.addEventListener('pointerdown',resumeJoinedGroupAudio,{passive:true});
 document.addEventListener('keydown',resumeJoinedGroupAudio,{passive:true});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)resumeJoinedGroupAudio()});
 
+async function autoStartMeetingVoice(){
+  if(!meetingVoiceActive()||!canParticipateInMeeting())return false;
+  const audioReady=await enableMeetingAudio(false);
+  const micReady=await startMeetingVoice(true);
+  meetingAutoVoicePending=!(audioReady&&micReady);
+  if(audioReady&&micReady){setVoiceStatus('会議音声へ自動接続しました。マイクはONです。',true);return true}
+  if(meetingVoiceActive())setVoiceStatus('自動接続できませんでした。「音声を聞く」または「マイク開始」を押してください。');
+  return false;
+}
 function meetingVoiceActive(){return state?.phase==='meeting'&&document.getElementById('meetingDialog')?.open}
 function updateMeetingVoiceUi(){
   const speaker=$('speakerButton'),button=$('micButton'),player=me(),context=getVoiceAudioContext();
@@ -1848,7 +1829,7 @@ function updateMeetingVoiceUi(){
   speaker.textContent=audioReady?'🔊 音声ON':'🔊 音声を聞く';
   if(!canParticipateInMeeting()){speaker.disabled=true;speaker.textContent='👻 観戦中';button.disabled=true;button.textContent='👻 発言できません';button.classList.remove('muted');return}
   button.disabled=meetingVoiceStarting;
-  if(meetingVoiceStarting){button.textContent='🎙 準備中…';button.classList.remove('muted');return}
+  if(meetingVoiceStarting){button.textContent='🎙 自動接続中…';button.classList.remove('muted');return}
   if(!meetingVoiceStream){button.textContent='🎙 マイク開始';button.classList.remove('muted');return}
   button.textContent=meetingVoiceMuted?'🔇 マイクOFF':'🎙 マイクON';
   button.classList.toggle('muted',meetingVoiceMuted);
@@ -1862,40 +1843,53 @@ async function enableMeetingAudio(showMessage=true){
   else if(showMessage){setVoiceStatus('ブラウザの音声制限により再生できません。もう一度「音声を聞く」を押してください。');showNotice('会議音声を有効にできませんでした。')}
   updateMeetingVoiceUi();return ready;
 }
-async function startMeetingVoice(){
+async function startMeetingVoice(auto=false){
   if(!meetingVoiceActive()||!canParticipateInMeeting())return false;
   if(meetingVoiceStream)return true;
   if(meetingVoiceStarting)return false;
-  if(!navigator.mediaDevices?.getUserMedia){setVoiceStatus('会議マイクにはHTTPSで開ける対応ブラウザが必要です。');showNotice('この環境ではマイクを使用できません。');return false}
-  meetingVoiceStarting=true;updateMeetingVoiceUi();setVoiceStatus('会議マイクの許可を待っています…');
+  if(!navigator.mediaDevices?.getUserMedia&&!groupVoiceStream){setVoiceStatus('会議マイクにはHTTPSで開ける対応ブラウザが必要です。');if(!auto)showNotice('この環境ではマイクを使用できません。');return false}
+  meetingVoiceStarting=true;updateMeetingVoiceUi();setVoiceStatus(auto?'会議音声へ自動接続しています…':'会議マイクの許可を待っています…');
   try{
     await enableMeetingAudio(false);
-    meetingVoiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});
+    meetingVoiceBorrowedFromGroup=Boolean(groupVoiceStream?.getAudioTracks?.().length);
+    meetingVoiceStream=meetingVoiceBorrowedFromGroup?groupVoiceStream:await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});
     meetingVoiceMuted=false;
+    for(const track of meetingVoiceStream.getAudioTracks())track.enabled=true;
     const context=getVoiceAudioContext();
     if(!context)throw new Error('AudioContext unavailable');
     if(context.state==='suspended')await context.resume();
     meetingVoiceSource=context.createMediaStreamSource(meetingVoiceStream);
-    meetingVoiceProcessor=context.createScriptProcessor(2048,1,1);
+    meetingVoiceProcessor=context.createScriptProcessor(4096,1,1);
     meetingVoiceSilentGain=context.createGain();meetingVoiceSilentGain.gain.value=0;
     meetingVoiceSource.connect(meetingVoiceProcessor);meetingVoiceProcessor.connect(meetingVoiceSilentGain).connect(context.destination);
     meetingVoiceProcessor.onaudioprocess=event=>{
       if(!meetingVoiceActive()||!canParticipateInMeeting()||meetingVoiceMuted||socket?.readyState!==WebSocket.OPEN)return;
       const track=meetingVoiceStream?.getAudioTracks()?.[0];if(!track?.enabled)return;
-      const pcm=downsampleVoice(event.inputBuffer.getChannelData(0),event.inputBuffer.sampleRate||context.sampleRate);if(!pcm.length)return;
+      const input=event.inputBuffer.getChannelData(0);let energy=0;
+      for(let i=0;i<input.length;i+=4)energy+=input[i]*input[i];
+      const rms=Math.sqrt(energy/Math.max(1,Math.ceil(input.length/4))),now=performance.now();
+      if(rms>=.0035)meetingVoiceSpeechUntil=now+340;
+      if(now>meetingVoiceSpeechUntil||now-meetingVoiceLastSentAt<68)return;
+      meetingVoiceLastSentAt=now;
+      const pcm=downsampleVoice(input,event.inputBuffer.sampleRate||context.sampleRate);if(!pcm.length)return;
       send('meetingVoiceAudio',{rate:RELAY_SAMPLE_RATE,seq:++meetingVoiceSequence,data:pcmToBase64(pcm)});
     };
-    setVoiceStatus('会議音声に接続しました。生存している全員に声が届きます。',true);return true;
+    meetingAutoVoicePending=false;
+    setVoiceStatus('会議音声へ自動接続しました。生存している全員に声が届きます。',true);return true;
   }catch(error){
-    console.error('Meeting microphone error',error);stopMeetingVoice();setVoiceStatus('マイクを使用できません。アドレスバー横のサイト設定でマイクを許可してください。');showNotice('会議マイクの使用が許可されませんでした。');return false;
+    console.error('Meeting microphone error',error);
+    stopMeetingVoice();
+    setVoiceStatus('自動接続できませんでした。ブラウザのサイト設定でマイクを許可してください。');
+    if(!auto)showNotice('会議マイクの使用が許可されませんでした。');
+    return false;
   }finally{meetingVoiceStarting=false;updateMeetingVoiceUi()}
 }
 function stopMeetingVoice(){
   if(meetingVoiceProcessor){meetingVoiceProcessor.onaudioprocess=null;try{meetingVoiceProcessor.disconnect()}catch{}meetingVoiceProcessor=null}
   if(meetingVoiceSource){try{meetingVoiceSource.disconnect()}catch{}meetingVoiceSource=null}
   if(meetingVoiceSilentGain){try{meetingVoiceSilentGain.disconnect()}catch{}meetingVoiceSilentGain=null}
-  for(const track of meetingVoiceStream?.getTracks()||[])track.stop();
-  meetingVoiceStream=null;meetingVoiceStarting=false;meetingVoiceMuted=false;meetingVoiceSequence=0;meetingVoicePlaybackAt.clear();
+  if(!meetingVoiceBorrowedFromGroup){for(const track of meetingVoiceStream?.getTracks()||[])track.stop()}
+  meetingVoiceStream=null;meetingVoiceStarting=false;meetingVoiceMuted=false;meetingVoiceBorrowedFromGroup=false;meetingVoiceSequence=0;meetingVoiceLastSentAt=0;meetingVoiceSpeechUntil=0;meetingAutoVoicePending=false;meetingVoicePlaybackAt.clear();
   updateMeetingVoiceUi();
 }
 async function handleMeetingVoiceAudio(message){
@@ -2063,7 +2057,7 @@ function stopVoiceChat(){
 }
 function updateMicButton(){const button=$('micButton');if(!button)return;if(meetingVoiceActive()){updateMeetingVoiceUi();return}if(!activeCallPeer){button.textContent='🎙 通話相手なし';button.disabled=true;button.classList.remove('muted');return}button.disabled=false;if(!localVoiceStream){button.textContent='🎙 マイク開始';button.classList.remove('muted');return}button.textContent=micMuted?'🔇 マイクOFF':'🎙 マイクON';button.classList.toggle('muted',micMuted)}
 $('speakerButton').onclick=()=>{if(!canParticipateInMeeting()){showNotice('観戦中は会議音声へ参加できません。');return}enableMeetingAudio(true)};
-$('micButton').onclick=async()=>{if(meetingVoiceActive()){if(!canParticipateInMeeting()){showNotice('観戦中は会議音声へ参加できません。');return}await enableMeetingAudio(false);if(!meetingVoiceStream){await startMeetingVoice();return}meetingVoiceMuted=!meetingVoiceMuted;for(const track of meetingVoiceStream.getAudioTracks())track.enabled=!meetingVoiceMuted;updateMeetingVoiceUi();setVoiceStatus(meetingVoiceMuted?'会議音声を聞いています。マイクはOFFです。':'会議音声に接続しました。マイクはONです。',true);return}await unlockRemoteAudio();if(!activeCallPeer){showNotice('先にメンバー一覧の📞から通話相手を選んでください。');updateCallUi();return}if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const track of localVoiceStream.getAudioTracks())track.enabled=!micMuted;updateCallUi();setVoiceStatus(micMuted?'マイクをミュートしています。':voiceRelayActive?'音声中継モードで接続しました。':'音声通話に接続しました。',!micMuted)};
+$('micButton').onclick=async()=>{if(meetingVoiceActive()){if(!canParticipateInMeeting()){showNotice('観戦中は会議音声へ参加できません。');return}await enableMeetingAudio(false);if(!meetingVoiceStream){await startMeetingVoice(false);return}meetingVoiceMuted=!meetingVoiceMuted;for(const track of meetingVoiceStream.getAudioTracks())track.enabled=!meetingVoiceMuted;updateMeetingVoiceUi();setVoiceStatus(meetingVoiceMuted?'会議音声を聞いています。マイクはOFFです。':'会議音声に接続しました。マイクはONです。',true);return}await unlockRemoteAudio();if(!activeCallPeer){showNotice('先にメンバー一覧の📞から通話相手を選んでください。');updateCallUi();return}if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const track of localVoiceStream.getAudioTracks())track.enabled=!micMuted;updateCallUi();setVoiceStatus(micMuted?'マイクをミュートしています。':voiceRelayActive?'音声中継モードで接続しました。':'音声通話に接続しました。',!micMuted)};
 async function placeCall(peerId){
   if(!peerId||peerId===myId)return;if(activeCallPeer){showNotice('先に現在の通話を終了してください。');return}
   const target=state?.players?.find(player=>player.id===peerId);if(!target?.connected){showNotice('相手は現在接続していません。');return}
