@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-auto-meeting-ultralight-v54';
+const MAP_VERSION='aurora-auto-meeting-quality-v55';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -9,17 +9,17 @@ const LOW_POWER_DEVICE=COARSE_POINTER||(DEVICE_MEMORY>0&&DEVICE_MEMORY<=4)||(CPU
 const HIGH_POWER_DEVICE=!LOW_POWER_DEVICE&&(DEVICE_MEMORY===0||DEVICE_MEMORY>=8)&&(CPU_CORES===0||CPU_CORES>=6);
 const PERF={
   lowPower:LOW_POWER_DEVICE,
-  maxPixelRatio:1,
-  targetFps:LOW_POWER_DEVICE?30:45,
-  enableShadows:false,
-  shadowMapSize:512,
-  shadowFps:4,
-  securityFps:LOW_POWER_DEVICE?6:10,
-  miniMapFps:LOW_POWER_DEVICE?4:6,
-  nearestFps:8,
-  hudFps:2,
-  lightFps:LOW_POWER_DEVICE?5:8,
-  moveInterval:LOW_POWER_DEVICE?80:60
+  maxPixelRatio:LOW_POWER_DEVICE?1:1.35,
+  targetFps:LOW_POWER_DEVICE?30:60,
+  enableShadows:true,
+  shadowMapSize:LOW_POWER_DEVICE?512:1024,
+  shadowFps:LOW_POWER_DEVICE?5:10,
+  securityFps:LOW_POWER_DEVICE?8:(HIGH_POWER_DEVICE?18:14),
+  miniMapFps:LOW_POWER_DEVICE?6:10,
+  nearestFps:12,
+  hudFps:4,
+  lightFps:LOW_POWER_DEVICE?8:15,
+  moveInterval:LOW_POWER_DEVICE?70:50
 };
 const TASKS={
   reactor:['リアクター安定化',-28,18],
@@ -440,7 +440,7 @@ function isTypingTarget(target){return target instanceof HTMLInputElement||targe
   const canvas=$('gameCanvas');
   if(!canvas)throw new Error('gameCanvas が見つかりません');
   canvas.style.display='block';
-  renderer=new THREE.WebGLRenderer({canvas,antialias:false,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
+  renderer=new THREE.WebGLRenderer({canvas,antialias:!PERF.lowPower,powerPreference:'high-performance',failIfMajorPerformanceCaveat:false});
   preferredRendererPixelRatio=Math.min(devicePixelRatio||1,PERF.maxPixelRatio);
   currentRendererPixelRatio=preferredRendererPixelRatio;
   renderer.setPixelRatio(currentRendererPixelRatio);
@@ -556,7 +556,7 @@ function updateFacilityLighting(dt=.016){
   const lightsOut=state?.sabotage?.kind==='lights';const now=performance.now()/1000;
   const securityPreset=securityOpen?SECURITY_CAMERAS[securityCameraIndex]:null;
   const subject=securityPreset?{x:securityPreset.target[0],z:securityPreset.target[2]}:(cameraViewSubject?.().model?.position||localModel?.position||camera?.position||{x:0,z:0});
-  const lightRadius=PERF.lowPower?14:18,lightRadiusSq=lightRadius*lightRadius;
+  const lightRadius=PERF.lowPower?16:22,lightRadiusSq=lightRadius*lightRadius;
   const ambientTarget=lightsOut?.24:2.15;facilityAmbientLight.intensity+=((ambientTarget)-facilityAmbientLight.intensity)*(1-Math.exp(-5*dt));
   if(facilityKeyLight){const target=lightsOut?.12:1.2;facilityKeyLight.intensity+=(target-facilityKeyLight.intensity)*(1-Math.exp(-4*dt))}
   for(const entry of facilityLights){
@@ -868,7 +868,7 @@ function qualitySamplingBlocked(now){
   return document.hidden||securityOpen||now<qualitySamplingResumeAt||!!document.querySelector('dialog[open]');
 }
 function reduceRenderLoadIfNeeded(now){
-  // v54: 解像度を上下させる処理を停止し、画質の揺れと再配置負荷を防ぎます。
+  // v55: 前回の描画品質を維持し、会議・タスク中の不要な描画停止で負荷を抑えます。
   performanceFrameCount=0;performanceWindowStart=0;lowFpsWindows=0;highFpsWindows=0;
 }
 function animate(now=performance.now()){
