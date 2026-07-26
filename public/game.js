@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-dead-meeting-spectator-v51';
+const MAP_VERSION='aurora-group-voice-reliable-v53';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -143,7 +143,7 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0;const groupVoicePlaybackAt=new Map();
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
 let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
@@ -243,9 +243,14 @@ function handle(m){
     if(wasAlive===true&&currentSelf&&!currentSelf.alive){
       spectatorTargetId=null;clearKeys();localVelocity.set(0,0);
       for(const dialogId of ['taskDialog','securityDialog','sabotageDialog','incomingCallDialog'])closeDialog(dialogId);
+      if(activeCallPeer)hangUpCall(true);
+      if(groupVoiceJoined)stopGroupVoice(true);
       showNotice('倒されました。観戦モードへ切り替えました。');
     }
     if(currentSelf?.alive){spectatorTargetId=null;lastKnownAlive=true}else if(currentSelf){lastKnownAlive=false}
+    const meetingDialog=$('meetingDialog');
+    if(state.phase==='meeting'&&meetingDialog&&!meetingDialog.open)openMeeting('会議進行中');
+    if(state.phase!=='meeting')resumeGroupVoiceCapture();
     updateSpectatorUI();
     if(activeCallPeer){const callTarget=state.players?.find(p=>p.id===activeCallPeer);if(!callTarget?.connected||!callTarget?.alive){showNotice('通話相手が退出したため通話を終了しました。');hangUpCall(false)}else updateCallUi()}
     if(state.phase==='meeting'&&document.getElementById('meetingDialog')?.open){updateMeetingParticipationUi();updateMeetingVoiceUi();}
@@ -263,11 +268,12 @@ function handle(m){
     ui.start.disabled=false;ui.start.textContent='ゲーム開始';if(joinPending)failJoin(m.message);else showNotice(m.message);
   }else if(m.type==='gameStarted'){ui.start.disabled=false;ui.start.textContent='ゲーム開始';showNotice(m.practiceMode?'1人練習：あなたは人狼です':'ゲームを開始しました')}
   else if(m.type==='meetingStarted'){openMeeting(m.reason);updateGroupVoiceUi()}
-  else if(m.type==='meetingEnded'){stopMeetingVoice();closeDialog('meetingDialog');updateGroupVoiceUi();showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}
+  else if(m.type==='meetingEnded'){stopMeetingVoice();closeDialog('meetingDialog');resumeGroupVoiceCapture();updateGroupVoiceUi();showNotice(m.ejected?`${m.ejected.name}が追放されました。役職は公開されません。`:'誰も追放されませんでした')}
   else if(m.type==='voiceSignal')handleVoiceSignal(m);
   else if(m.type==='voiceAudio')handleVoiceAudio(m);
   else if(m.type==='meetingVoiceAudio')handleMeetingVoiceAudio(m);
   else if(m.type==='groupVoiceAudio')handleGroupVoiceAudio(m);
+  else if(m.type==='groupVoiceStatus')handleGroupVoiceStatus(m);
   else if(m.type==='callControl')handleCallControl(m);
   else if(m.type==='chat')appendChat(m);
   else if(m.type==='sabotage')showNotice('妨害が発生しました');
@@ -1148,8 +1154,15 @@ function updateNearest(){
   const p=me();
   let best=99;
   for(const[id,[,x,z]]of Object.entries(TASKS)){const d=Math.hypot(localModel.position.x-x,localModel.position.z-z);if(d<2&&d<best){best=d;nearest.task=id}}
-  best=99;
-  for(const other of state.players){if(other.id===myId)continue;const hasBody=corpseIsVisible(other),targetX=hasBody?Number(other.bodyX):Number(other.x),targetZ=hasBody?Number(other.bodyZ):Number(other.z),d=Math.hypot(localModel.position.x-targetX,localModel.position.z-targetZ);if(!other.practiceTarget&&hasBody&&d<2.8&&d<best){best=d;nearest.body=other.id}else if(other.attackable===true&&d<2.8&&d<best){best=d;nearest.player=other.id}}
+  let bestBody=99,bestPlayer=99;
+  for(const other of state.players){
+    if(other.id===myId)continue;
+    const hasBody=corpseIsVisible(other),targetX=hasBody?Number(other.bodyX):Number(other.x),targetZ=hasBody?Number(other.bodyZ):Number(other.z),d=Math.hypot(localModel.position.x-targetX,localModel.position.z-targetZ);
+    if(!other.practiceTarget&&hasBody&&d<2.8&&d<bestBody){bestBody=d;nearest.body=other.id}
+    const guardTarget=p?.role==='guard'&&other.alive&&!other.spectator&&!other.practiceTarget&&!other.hidden;
+    const attackTarget=other.attackable===true;
+    if((guardTarget||attackTarget)&&d<2.8&&d<bestPlayer){bestPlayer=d;nearest.player=other.id}
+  }
   if(p?.hidden&&p.hiddenAt){nearest.locker=LOCKERS.find(l=>l.id===p.hiddenAt)||null}else if(!p?.hidden){nearest.locker=LOCKERS.map(l=>({...l,d:Math.hypot(localModel.position.x-l.exitX,localModel.position.z-l.exitZ)})).filter(l=>l.d<=2.0).sort((a,b)=>a.d-b.d)[0]||null}
   nearest.security=distanceToSecurityAccess(localModel.position.x,localModel.position.z)<=SECURITY_ACCESS_RADIUS;
   nearest.emergency=Math.hypot(localModel.position.x-EMERGENCY_BUTTON.x,localModel.position.z-EMERGENCY_BUTTON.z)<=2.8;
@@ -1160,18 +1173,19 @@ function updateNearest(){
   const hide=$('hideButton'),security=$('securityButton');
   if(hide){hide.disabled=!p?.alive||p?.spectator||(!p?.hidden&&!nearest.locker);hide.textContent=p?.hidden?'ロッカーから出る':'ロッカーに隠れる';hide.classList.toggle('interaction-ready',!!nearest.locker)}
   if(security){security.disabled=!nearest.security||!!p?.hidden;security.classList.toggle('interaction-ready',nearest.security)}
-  if(ui.meeting){ui.meeting.disabled=!nearest.emergency||!!p?.hidden;ui.meeting.classList.toggle('interaction-ready',nearest.emergency)}
+  if(ui.meeting){const canCallMeeting=nearest.emergency&&!p?.hidden&&!state?.sabotage;ui.meeting.disabled=!canCallMeeting;ui.meeting.classList.toggle('interaction-ready',canCallMeeting)}
   const hint=$('interactionHint');if(hint){let text='';if(p?.hidden)text='ロッカー内：ボタンを押すと外へ出ます';else if(nearest.body)text=p?.role==='doctor'?'倒れている人です：「救助」を押すと助けられます':p?.role==='detective'?'遺体です：「調査」を押すと確認できます':'遺体です：「通報」を押してください';else if(nearest.locker)text='ロッカーに近づきました：隠れることができます';else if(nearest.security)text='監視端末に近づきました：カメラを確認できます';else if(nearest.emergency)text='緊急ボタンに近づきました：会議を開けます';else if(nearest.cargoDelivery)text='管理室の搬入口です：運んだ荷物を置けます';else if(nearest.task)text='端末に近づきました：使用できます';hint.textContent=text;hint.classList.toggle('show',!!text)}
+  updateAdvancedUI();
 }
 function updateLockerVisuals(dt){const p=me();for(const locker of LOCKERS){const visual=lockerVisuals.get(locker.id);if(!visual)continue;const occupied=(state?.players||[]).some(x=>x.hidden&&x.hiddenAt===locker.id);const nearby=nearest.locker?.id===locker.id;const target=occupied?1:(nearby?.22:0);visual.userData.open+=(target-visual.userData.open)*(1-Math.exp(-10*dt));visual.userData.doorPivot.rotation.y=-visual.userData.open*1.45;visual.userData.lamp.material.color.setHex(occupied?0xffb347:nearby?0x77ff9c:0x63f4ff)}}
-function useAction(){const p=me();if(!p||!p.alive||p.spectator)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(nearest.cargoDelivery&&cargoCarryActive){openTask('cargoDelivery');return}if(!nearest.task)return;if(nearest.task==='cargo'&&cargoCarryActive){showNotice('荷物を管理室の搬入口まで運んでください');return}if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){send('fixSabotage',{station:nearest.task});return}openTask(nearest.task)}
-function reportAction(){if(nearest.body)send('report',{bodyId:nearest.body});else showNotice('近くに通報できる対象がありません')}function attackAction(){const p=me();if(!p||state?.phase!=='playing')return;if(p.role!=='impostor'){showNotice('攻撃は人狼だけが使えます');return}if(!canKill()){showNotice('攻撃のクールダウン中です');return}if(!nearest.player){showNotice(state?.practiceMode?'近くの訓練用ターゲットへ近づいてください':'攻撃できるクルーに近づいてください');return}send('kill',{targetId:nearest.player})}function meetingAction(){if(!nearest.emergency){showNotice('中央の緊急ボタンに近づいてください');return}send('meeting')}
+function useAction(){const p=me();if(!p||!p.alive||p.spectator)return;if(nearest.body&&(p.role==='doctor'||p.role==='detective')){abilityAction();return}if(nearest.cargoDelivery&&cargoCarryActive){openTask('cargoDelivery');return}if(!nearest.task)return;if(nearest.task==='cargo'&&cargoCarryActive){showNotice('荷物を管理室の搬入口まで運んでください');return}if(state.sabotage&&(['reactor','lights','comms'].includes(state.sabotage.kind))){const required={reactor:'reactor',lights:'wires',comms:'comms'}[state.sabotage.kind];if(nearest.task!==required){showNotice(`妨害の修理端末「${taskDisplayName(required)}」へ移動してください`);return}send('fixSabotage',{station:nearest.task});return}openTask(nearest.task)}
+function reportAction(){if(nearest.body)send('report',{bodyId:nearest.body});else showNotice('近くに通報できる対象がありません')}function attackAction(){const p=me();if(!p||state?.phase!=='playing')return;if(p.role!=='impostor'){showNotice('攻撃は人狼だけが使えます');return}if(!canKill()){showNotice('攻撃のクールダウン中です');return}if(!nearest.player){showNotice(state?.practiceMode?'近くの訓練用ターゲットへ近づいてください':'攻撃できるクルーに近づいてください');return}send('kill',{targetId:nearest.player})}function meetingAction(){if(state?.sabotage){showNotice('妨害が発生している間は緊急会議を開けません');return}if(!nearest.emergency){showNotice('中央の緊急ボタンに近づいてください');return}send('meeting')}
 ui.use.onclick=useAction;ui.report.onclick=reportAction;ui.kill.onclick=attackAction;ui.meeting.onclick=meetingAction;ui.sabotage.onclick=()=>openDialog('sabotageDialog');ui.start.onclick=()=>{if(socket?.readyState!==WebSocket.OPEN){showNotice('サーバーへ接続できていません。再読み込みしてください。');return}if(state?.hostId!==myId){showNotice('ゲームを開始できるのはホストだけです。');return}ui.start.disabled=true;ui.start.textContent='開始中…';send('start');setTimeout(()=>{if(state?.phase==='lobby'){ui.start.disabled=false;ui.start.textContent='ゲーム開始'}},5000)};$('copyRoomButton').onclick=()=>navigator.clipboard.writeText(state?.room||'').then(()=>showNotice('ルームコードをコピーしました'));$('cameraButton').onclick=()=>{if(renderMode!=='3d'||!camera){showNotice('軽量マップでは見下ろし視点で固定されます。');return}const subject=cameraViewSubject();cameraMode=(cameraMode+1)%3;if(cameraMode===2&&subject.model&&!subject.following){const currentYaw=Number(subject.model.rotation.y);firstPersonYaw=clearFirstPersonDirection(Number.isFinite(currentYaw)?currentYaw:Math.PI);firstPersonTargetYaw=firstPersonYaw;firstPersonInputBaseYaw=firstPersonYaw;firstPersonInputSignature='';camera.position.set(subject.model.position.x,subject.model.position.y+1.72,subject.model.position.z)}else snapCameraToCurrentMode(subject.model);const labels=['見下ろし視点','近い視点','一人称視点'];showNotice(subject.following?`${subject.player.name}：${labels[cameraMode]}`:labels[cameraMode]);$('cameraButton').textContent=subject.following?`観戦：${labels[(cameraMode+1)%3]}へ切替`:`${labels[(cameraMode+1)%3]}へ切替`;updateSpectatorUI()};
 ui.settings.onclick=()=>{const s=state.settings||{};$('settingImpostors').value=s.impostors;$('settingTasks').value=s.tasks;$('settingSpeed').value=s.speed;$('settingKillCooldown').value=s.killCooldown;$('settingMeeting').value=s.meetingTime;$('settingReveal').value=s.revealRoles?'yes':'no';openDialog('settingsDialog')};$('saveSettingsButton').onclick=()=>{send('settings',{settings:{impostors:+$('settingImpostors').value,tasks:+$('settingTasks').value,speed:+$('settingSpeed').value,killCooldown:+$('settingKillCooldown').value,meetingTime:+$('settingMeeting').value,revealRoles:$('settingReveal').value==='yes'}});closeDialog('settingsDialog')};document.querySelectorAll('[data-sabotage]').forEach(b=>b.onclick=()=>{send('sabotage',{kind:b.dataset.sabotage});closeDialog('sabotageDialog')});document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog(b.dataset.close));
 
 const ROLE_LABELS={crew:'クルー',impostor:'人狼',doctor:'医者',detective:'探偵',guard:'警備員',spectator:'観戦者'};
 function abilityAction(){const p=me();if(!p||p.abilityUsed){showNotice('能力は使用済みです');return}if(p.role==='doctor'&&nearest.body)send('revive',{targetId:nearest.body});else if(p.role==='detective'&&nearest.body)send('inspect',{targetId:nearest.body});else if(p.role==='guard'&&nearest.player)send('protect',{targetId:nearest.player});else showNotice('能力を使える対象に近づいてください')}
-function updateAdvancedUI(){const p=me(),b=$('abilityButton');if(!p||!b)return;const labels={doctor:'救助',detective:'調査',guard:'守る'};b.classList.toggle('hidden',!labels[p.role]||state.phase!=='playing');b.textContent=p.abilityUsed?`${labels[p.role]||'能力'}（使用済み）`:labels[p.role]||'能力';b.disabled=!!p.abilityUsed;b.classList.toggle('ability-ready',!p.abilityUsed&&!!labels[p.role]);ui.role.textContent=`役職：${ROLE_LABELS[p.role]||p.role}${p.spectator?'（途中参加）':!p.alive?'（観戦中）':''}`;$('hideButton').disabled=!p.alive||p.spectator||(!p.hidden&&!nearest.locker);$('profileSummary').textContent=profileText()}
+function updateAdvancedUI(){const p=me(),b=$('abilityButton');if(!p||!b)return;const labels={doctor:'救助',detective:'調査',guard:'守る'};const hasTarget=(p.role==='doctor'||p.role==='detective')?!!nearest.body:p.role==='guard'?!!nearest.player:false;const available=!!labels[p.role]&&state.phase==='playing'&&p.alive&&!p.spectator&&!p.abilityUsed&&hasTarget;b.classList.toggle('hidden',!labels[p.role]||state.phase!=='playing'||!p.alive);b.textContent=p.abilityUsed?`${labels[p.role]||'能力'}（使用済み）`:labels[p.role]||'能力';b.disabled=!available;b.classList.toggle('ability-ready',available);ui.role.textContent=`役職：${ROLE_LABELS[p.role]||p.role}${p.spectator?'（途中参加）':!p.alive?'（観戦中）':''}`;$('hideButton').disabled=!p.alive||p.spectator||(!p.hidden&&!nearest.locker)}
 function profileText(){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');const title=s.wins>=10?'宇宙の英雄':s.wins>=3?'熟練クルー':s.games>=1?'新人隊員':'初参加';return `称号：${title}　対戦 ${s.games}　勝利 ${s.wins}　今日の目標：タスクを3回完了`}
 function saveResult(w){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.games++;const p=me();if((w==='impostor'&&p?.role==='impostor')||(w==='crew'&&p?.role!=='impostor'))s.wins++;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));$('profileSummary').textContent=profileText()}
 function updateSecurityTaskUi(){
@@ -1542,8 +1556,9 @@ function openTask(id){
 }
 function finishTask(id){const counts=activeTaskCountsProgress&&activeTaskCompletionId===id;if(counts){const s=JSON.parse(localStorage.getItem('hiddenCrewStats')||'{"games":0,"wins":0,"tasks":0}');s.tasks=(s.tasks||0)+1;localStorage.setItem('hiddenCrewStats',JSON.stringify(s));send('taskComplete',{task:id})}closeDialog('taskDialog');showNotice(counts?'タスク完了！':'模擬操作完了（進捗には加算されません）')}
 $('taskDialog').addEventListener('close',()=>{resetTaskRuntime();resetPerformanceSampling({restoreQuality:true,delay:6000})});
+function canParticipateInMeeting(){const p=me();return !!p?.alive&&p.meetingEligible!==false}
 function updateMeetingParticipationUi(){
-  const alive=!!me()?.alive;
+  const alive=canParticipateInMeeting();
   const form=$('meetingChatForm'),input=$('meetingChatInput'),submit=form?.querySelector('button');
   if(input){input.disabled=!alive;input.placeholder=alive?'会議チャット':'死亡しているため会議へ参加できません';if(!alive)input.value=''}
   if(submit)submit.disabled=!alive;
@@ -1554,20 +1569,20 @@ function updateMeetingParticipationUi(){
 }
 function openMeeting(reason){
   if(activeCallPeer)hangUpCall(true);
-  stopMeetingVoice();updateGroupVoiceUi();$('meetingReason').textContent=reason;
+  pauseGroupVoiceCapture();stopMeetingVoice();updateGroupVoiceUi();$('meetingReason').textContent=reason;
   renderVotes();openDialog('meetingDialog');updateMeetingParticipationUi();
-  if(me()?.alive){setVoiceStatus('「音声を聞く」を押すと、会議中の全員の声が聞こえます。');updateMeetingVoiceUi();enableMeetingAudio(false)}
+  if(canParticipateInMeeting()){setVoiceStatus('「音声を聞く」を押すと、会議中の全員の声が聞こえます。');updateMeetingVoiceUi();enableMeetingAudio(false)}
   else{setVoiceStatus('観戦中です。死亡したプレイヤーは会議へ参加できません。');updateMeetingVoiceUi()}
 }
 function renderVotes(){
   if(!state)return;
   const root=$('voteList');root.innerHTML='';
-  if(!me()?.alive){root.innerHTML='<p class="meeting-spectator-note">👻 観戦中：死亡したプレイヤーは投票できません。</p>';const skip=$('skipVoteButton');if(skip)skip.disabled=true;return}
-  state.players.filter(p=>p.alive).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});
+  if(!canParticipateInMeeting()){root.innerHTML='<p class="meeting-spectator-note">👻 観戦中：死亡者や会議途中の参加者は投票できません。</p>';const skip=$('skipVoteButton');if(skip)skip.disabled=true;return}
+  state.players.filter(p=>p.alive&&p.meetingEligible!==false&&!p.practiceTarget).forEach(p=>{const b=document.createElement('button');b.textContent=p.name;b.onclick=()=>{send('vote',{targetId:p.id});disableVotes()};root.append(b)});
   const skip=$('skipVoteButton');if(skip){skip.disabled=false;skip.onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
 }
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
-function bindChatForm(formId,inputId){const form=$(formId),input=$(inputId);if(!form||!input)return;form.onsubmit=e=>{e.preventDefault();if(formId==='meetingChatForm'&&state?.phase==='meeting'&&!me()?.alive){showNotice('死亡しているため会議チャットには参加できません。');return}const text=input.value.trim();if(!text)return;if(socket?.readyState!==WebSocket.OPEN){showNotice('チャットサーバーへ接続されていません');return}send('chat',{text});input.value='';input.focus()}}
+function bindChatForm(formId,inputId){const form=$(formId),input=$(inputId);if(!form||!input)return;form.onsubmit=e=>{e.preventDefault();if(formId==='meetingChatForm'&&state?.phase==='meeting'&&!canParticipateInMeeting()){showNotice('死亡しているため会議チャットには参加できません。');return}const text=input.value.trim();if(!text)return;if(socket?.readyState!==WebSocket.OPEN){showNotice('チャットサーバーへ接続されていません');return}send('chat',{text});input.value='';input.focus()}}
 bindChatForm('globalChatForm','globalChatInput');bindChatForm('meetingChatForm','meetingChatInput');
 function appendChat(m){const phase={lobby:'ロビー',playing:'ゲーム',meeting:'会議',finished:'終了'}[m.phase]||'';for(const id of ['globalChatLog','meetingChatLog']){const log=$(id);if(!log)continue;const d=document.createElement('div');d.className='chat-line';const ghost=m.alive===false?'👻 ':'';d.innerHTML=`<span class="chat-name">${ghost}${escapeHtml(m.from)}</span><span class="chat-phase">${escapeHtml(phase)}</span><br>${escapeHtml(m.text)}`;log.append(d);log.scrollTop=log.scrollHeight}}
 const chatPanel=$('globalChatPanel'),chatToggle=$('chatToggleButton');
@@ -1693,7 +1708,9 @@ function getVoiceAudioContext(){
   if(!voiceAudioContext||voiceAudioContext.state==='closed'){try{voiceAudioContext=new AudioContextClass({latencyHint:'interactive'})}catch{voiceAudioContext=new AudioContextClass()}}
   return voiceAudioContext;
 }
-function groupVoiceAvailable(){return !!state&&state.phase!=='meeting'&&socket?.readyState===WebSocket.OPEN}
+function groupVoiceAvailable(){const p=me();return !!state&&state.phase!=='meeting'&&p?.alive&&!p?.spectator&&socket?.readyState===WebSocket.OPEN}
+function pauseGroupVoiceCapture(){for(const track of groupVoiceStream?.getAudioTracks?.()||[])track.enabled=false}
+function resumeGroupVoiceCapture(){if(state?.phase==='meeting'||!me()?.alive)return;for(const track of groupVoiceStream?.getAudioTracks?.()||[])track.enabled=!groupVoiceMuted}
 function groupVoiceActive(){return groupVoiceAvailable()&&!activeCallPeer&&groupVoiceJoined}
 function setGroupVoiceStatus(text,active=false){
   const status=$('groupVoiceStatus');if(!status)return;status.textContent=text||'グループ音声：未接続';status.classList.toggle('active',active);
@@ -1701,26 +1718,30 @@ function setGroupVoiceStatus(text,active=false){
 function updateGroupVoiceUi(){
   const speaker=$('groupSpeakerButton'),mic=$('groupMicButton'),leave=$('groupLeaveButton');if(!speaker||!mic||!leave)return;
   const context=voiceAudioContext,connected=socket?.readyState===WebSocket.OPEN;
+  const audioReady=context?.state==='running';
+  groupVoiceListening=Boolean(groupVoiceJoined&&audioReady);
+  const countText=groupVoiceParticipantCount>0?`（${groupVoiceParticipantCount}人）`:'';
   leave.classList.toggle('hidden',!groupVoiceJoined);leave.disabled=!groupVoiceJoined;
   if(!connected||!state){speaker.disabled=true;mic.disabled=true;speaker.textContent='🔊 聞くだけで参加';mic.textContent='🎙 マイクで参加';setGroupVoiceStatus('グループトーク：未接続');return}
+  if(!me()?.alive||me()?.spectator){speaker.disabled=true;mic.disabled=true;leave.disabled=!groupVoiceJoined;speaker.textContent='👻 観戦中';mic.textContent='🎙 参加できません';setGroupVoiceStatus('死亡後は生存者のグループトークへ参加できません');return}
   if(state.phase==='meeting'){
     speaker.disabled=true;mic.disabled=true;leave.disabled=!groupVoiceJoined;speaker.textContent='🔊 会議音声へ';mic.textContent='🎙 会議中';setGroupVoiceStatus(groupVoiceJoined?'会議中のため一時停止中':'会議中は会議専用音声を使用します');return;
   }
   if(activeCallPeer){
     speaker.disabled=true;mic.disabled=true;leave.disabled=!groupVoiceJoined;speaker.textContent='🔊 一時停止';mic.textContent='🎙 個人通話中';setGroupVoiceStatus(groupVoiceJoined?'個人通話中のため一時停止中':'個人通話中は参加できません');return;
   }
-  const audioReady=groupVoiceListening&&context?.state==='running';
-  speaker.disabled=groupVoiceStarting||groupVoiceJoined;
+  speaker.disabled=groupVoiceStarting||(groupVoiceJoined&&audioReady);
   mic.disabled=groupVoiceStarting;
-  speaker.textContent=groupVoiceJoined?'🔊 参加中':'🔊 聞くだけで参加';
+  speaker.textContent=groupVoiceJoined?(audioReady?'🔊 音声再生中':'🔊 音声を再開'):'🔊 聞くだけで参加';
   if(groupVoiceStarting)mic.textContent='🎙 準備中…';
   else if(!groupVoiceJoined)mic.textContent='🎙 マイクで参加';
   else if(!groupVoiceStream)mic.textContent='🎙 マイクを追加';
   else mic.textContent=groupVoiceMuted?'🔇 マイクOFF':'🎙 マイクON';
   mic.classList.toggle('muted',groupVoiceMuted);
-  if(groupVoiceJoined&&groupVoiceStream)setGroupVoiceStatus(groupVoiceMuted?'参加中（聞くだけ・マイクOFF）':'グループトークに参加中（マイクON）',true);
-  else if(groupVoiceJoined&&audioReady)setGroupVoiceStatus('グループトークに参加中（聞くだけ）',true);
-  else setGroupVoiceStatus('グループトーク：未参加');
+  if(groupVoiceJoined&&!audioReady)setGroupVoiceStatus(`音声再生が停止中${countText}。「音声を再開」を押してください`);
+  else if(groupVoiceJoined&&groupVoiceStream)setGroupVoiceStatus(groupVoiceMuted?`参加中${countText}（聞くだけ・マイクOFF）`:`グループトークに参加中${countText}（マイクON）`,true);
+  else if(groupVoiceJoined&&audioReady)setGroupVoiceStatus(`グループトークに参加中${countText}（聞くだけ）`,true);
+  else setGroupVoiceStatus(groupVoiceParticipantCount?`グループトーク：未参加（参加中 ${groupVoiceParticipantCount}人）`:'グループトーク：未参加');
 }
 function setGroupMembership(joined){
   const next=Boolean(joined);if(groupVoiceJoined===next)return;groupVoiceJoined=next;
@@ -1730,9 +1751,9 @@ async function enableGroupAudio(showMessage=true){
   const context=getVoiceAudioContext();
   if(!context){if(showMessage)showNotice('このブラウザではグループ音声を再生できません。');updateGroupVoiceUi();return false}
   try{if(context.state==='suspended')await context.resume()}catch(error){console.warn('Group audio resume failed',error)}
-  groupVoiceListening=context.state==='running';
-  if(!groupVoiceListening&&showMessage)showNotice('もう一度「音声を聞く」を押してください。');
-  updateGroupVoiceUi();return groupVoiceListening;
+  const ready=context.state==='running';groupVoiceListening=groupVoiceJoined&&ready;
+  if(!ready&&showMessage)showNotice('もう一度「音声を聞く」を押してください。');
+  updateGroupVoiceUi();return ready;
 }
 async function startGroupVoice(){
   if(!groupVoiceAvailable()){showNotice(state?.phase==='meeting'?'会議中は会議専用音声を使ってください。':'グループトークへ接続できません。');return false}
@@ -1743,8 +1764,8 @@ async function startGroupVoice(){
   try{
     await enableGroupAudio(false);
     groupVoiceStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});
-    groupVoiceMuted=false;groupVoiceListening=true;setGroupMembership(true);
     const context=getVoiceAudioContext();if(!context)throw new Error('AudioContext unavailable');if(context.state==='suspended')await context.resume();
+    groupVoiceMuted=false;setGroupMembership(true);groupVoiceListening=context.state==='running';
     groupVoiceSource=context.createMediaStreamSource(groupVoiceStream);
     groupVoiceProcessor=context.createScriptProcessor(4096,1,1);
     groupVoiceSilentGain=context.createGain();groupVoiceSilentGain.gain.value=0;
@@ -1753,8 +1774,10 @@ async function startGroupVoice(){
       if(!groupVoiceActive()||groupVoiceMuted||socket?.readyState!==WebSocket.OPEN)return;
       const track=groupVoiceStream?.getAudioTracks()?.[0];if(!track?.enabled)return;
       const input=event.inputBuffer.getChannelData(0);let energy=0;for(let i=0;i<input.length;i+=4)energy+=input[i]*input[i];
-      const rms=Math.sqrt(energy/Math.max(1,Math.ceil(input.length/4)));if(rms<.009)return;
-      const now=performance.now();if(now-groupVoiceLastSentAt<65)return;groupVoiceLastSentAt=now;
+      const rms=Math.sqrt(energy/Math.max(1,Math.ceil(input.length/4)));const now=performance.now();
+      if(rms>=.0038)groupVoiceSpeechUntil=now+360;
+      if(now>groupVoiceSpeechUntil)return;
+      if(now-groupVoiceLastSentAt<58)return;groupVoiceLastSentAt=now;
       const pcm=downsampleVoice(input,event.inputBuffer.sampleRate||context.sampleRate);if(!pcm.length)return;
       send('groupVoiceAudio',{rate:RELAY_SAMPLE_RATE,seq:++groupVoiceSequence,data:pcmToBase64(pcm)});
     };
@@ -1768,29 +1791,50 @@ function stopGroupVoice(notify=true){
   if(groupVoiceSource){try{groupVoiceSource.disconnect()}catch{}groupVoiceSource=null}
   if(groupVoiceSilentGain){try{groupVoiceSilentGain.disconnect()}catch{}groupVoiceSilentGain=null}
   for(const track of groupVoiceStream?.getTracks()||[])track.stop();
-  groupVoiceStream=null;groupVoiceStarting=false;groupVoiceMuted=false;groupVoiceListening=false;groupVoiceSequence=0;groupVoiceLastSentAt=0;groupVoicePlaybackAt.clear();
+  groupVoiceStream=null;groupVoiceStarting=false;groupVoiceMuted=false;groupVoiceListening=false;groupVoiceSequence=0;groupVoiceLastSentAt=0;groupVoiceSpeechUntil=0;groupVoicePlaybackAt.clear();for(const source of groupVoiceActiveSources){try{source.stop();source.disconnect()}catch{}}groupVoiceActiveSources.clear();
   if(notify)setGroupMembership(false);else groupVoiceJoined=false;
   updateGroupVoiceUi();
 }
 async function handleGroupVoiceAudio(message){
-  if(!groupVoiceActive()||!groupVoiceListening||!message.fromId||message.fromId===myId||typeof message.data!=='string'||message.data.length>16000)return;
-  const context=getVoiceAudioContext();if(!context||context.state!=='running'){setGroupVoiceStatus('音声を聞くには「🔊 音声を聞く」を押してください');updateGroupVoiceUi();return}
+  if(!groupVoiceActive()||!message.fromId||message.fromId===myId||typeof message.data!=='string'||message.data.length>16000)return;
+  const context=getVoiceAudioContext();
+  if(!context||context.state!=='running'){
+    groupVoiceListening=false;setGroupVoiceStatus('音声再生が停止しています。「🔊 音声を再開」を押してください');updateGroupVoiceUi();return;
+  }
+  groupVoiceListening=true;
   try{
     const pcm=base64ToPcm(message.data);if(!pcm.length)return;
     const rate=Math.max(8000,Math.min(24000,Number(message.rate)||RELAY_SAMPLE_RATE));
     const buffer=context.createBuffer(1,pcm.length,rate),channel=buffer.getChannelData(0);for(let i=0;i<pcm.length;i++)channel[i]=pcm[i]/32768;
-    const source=context.createBufferSource(),gain=context.createGain();gain.gain.value=.88;source.buffer=buffer;source.connect(gain).connect(context.destination);
-    const now=context.currentTime;let playAt=groupVoicePlaybackAt.get(message.fromId)||0;if(!playAt||playAt<now-.08||playAt>now+.45)playAt=now+.045;
-    source.start(playAt);groupVoicePlaybackAt.set(message.fromId,playAt+buffer.duration);source.onended=()=>{try{source.disconnect();gain.disconnect()}catch{}};
+    const source=context.createBufferSource(),gain=context.createGain(),compressor=context.createDynamicsCompressor();
+    gain.gain.value=1.18;compressor.threshold.value=-24;compressor.knee.value=18;compressor.ratio.value=4;compressor.attack.value=.004;compressor.release.value=.18;
+    source.buffer=buffer;source.connect(gain).connect(compressor).connect(context.destination);groupVoiceActiveSources.add(source);
+    const now=context.currentTime;let playAt=groupVoicePlaybackAt.get(message.fromId)||0;if(!playAt||playAt<now-.12||playAt>now+.82)playAt=now+.06;
+    source.start(playAt);groupVoicePlaybackAt.set(message.fromId,playAt+buffer.duration);source.onended=()=>{groupVoiceActiveSources.delete(source);try{source.disconnect();gain.disconnect();compressor.disconnect()}catch{}};
     const name=message.from||state?.players?.find(player=>player.id===message.fromId)?.name||'参加者';setGroupVoiceStatus(`🗣 ${name}が話しています`,true);
   }catch(error){console.warn('Group voice playback failed',error)}
 }
-$('groupSpeakerButton').onclick=async()=>{if(groupVoiceJoined)return;const ready=await enableGroupAudio(true);if(!ready)return;setGroupMembership(true);updateGroupVoiceUi();showNotice('グループトークへ聞くだけで参加しました。')};
+$('groupSpeakerButton').onclick=async()=>{const wasJoined=groupVoiceJoined;const ready=await enableGroupAudio(true);if(!ready)return;if(!wasJoined)setGroupMembership(true);groupVoiceListening=true;updateGroupVoiceUi();showNotice(wasJoined?'グループトークの音声再生を再開しました。':'グループトークへ聞くだけで参加しました。')};
 $('groupMicButton').onclick=async()=>{
   if(!groupVoiceStream){await startGroupVoice();return}
   groupVoiceMuted=!groupVoiceMuted;for(const track of groupVoiceStream.getAudioTracks())track.enabled=!groupVoiceMuted;updateGroupVoiceUi();
 };
 $('groupLeaveButton').onclick=()=>{if(!groupVoiceJoined)return;stopGroupVoice(true);showNotice('グループトークから退出しました。')};
+function handleGroupVoiceStatus(message){
+  if(typeof message.joined==='boolean')groupVoiceJoined=message.joined;
+  groupVoiceParticipantCount=Math.max(0,Math.floor(Number(message.participantCount)||0));
+  if(!groupVoiceJoined){groupVoiceListening=false;if(groupVoiceStream)stopGroupVoice(false)}
+  updateGroupVoiceUi();
+}
+async function resumeJoinedGroupAudio(){
+  if(!groupVoiceJoined||state?.phase==='meeting'||activeCallPeer)return;
+  const context=getVoiceAudioContext();if(!context||context.state==='running')return;
+  try{await context.resume()}catch{}
+  groupVoiceListening=context.state==='running';updateGroupVoiceUi();
+}
+document.addEventListener('pointerdown',resumeJoinedGroupAudio,{passive:true});
+document.addEventListener('keydown',resumeJoinedGroupAudio,{passive:true});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)resumeJoinedGroupAudio()});
 
 function meetingVoiceActive(){return state?.phase==='meeting'&&document.getElementById('meetingDialog')?.open}
 function updateMeetingVoiceUi(){
@@ -1802,7 +1846,7 @@ function updateMeetingVoiceUi(){
   const audioReady=context?.state==='running';
   speaker.disabled=!context;
   speaker.textContent=audioReady?'🔊 音声ON':'🔊 音声を聞く';
-  if(!player?.alive){speaker.disabled=true;speaker.textContent='👻 観戦中';button.disabled=true;button.textContent='👻 発言できません';button.classList.remove('muted');return}
+  if(!canParticipateInMeeting()){speaker.disabled=true;speaker.textContent='👻 観戦中';button.disabled=true;button.textContent='👻 発言できません';button.classList.remove('muted');return}
   button.disabled=meetingVoiceStarting;
   if(meetingVoiceStarting){button.textContent='🎙 準備中…';button.classList.remove('muted');return}
   if(!meetingVoiceStream){button.textContent='🎙 マイク開始';button.classList.remove('muted');return}
@@ -1819,7 +1863,7 @@ async function enableMeetingAudio(showMessage=true){
   updateMeetingVoiceUi();return ready;
 }
 async function startMeetingVoice(){
-  if(!meetingVoiceActive()||!me()?.alive)return false;
+  if(!meetingVoiceActive()||!canParticipateInMeeting())return false;
   if(meetingVoiceStream)return true;
   if(meetingVoiceStarting)return false;
   if(!navigator.mediaDevices?.getUserMedia){setVoiceStatus('会議マイクにはHTTPSで開ける対応ブラウザが必要です。');showNotice('この環境ではマイクを使用できません。');return false}
@@ -1836,7 +1880,7 @@ async function startMeetingVoice(){
     meetingVoiceSilentGain=context.createGain();meetingVoiceSilentGain.gain.value=0;
     meetingVoiceSource.connect(meetingVoiceProcessor);meetingVoiceProcessor.connect(meetingVoiceSilentGain).connect(context.destination);
     meetingVoiceProcessor.onaudioprocess=event=>{
-      if(!meetingVoiceActive()||meetingVoiceMuted||socket?.readyState!==WebSocket.OPEN)return;
+      if(!meetingVoiceActive()||!canParticipateInMeeting()||meetingVoiceMuted||socket?.readyState!==WebSocket.OPEN)return;
       const track=meetingVoiceStream?.getAudioTracks()?.[0];if(!track?.enabled)return;
       const pcm=downsampleVoice(event.inputBuffer.getChannelData(0),event.inputBuffer.sampleRate||context.sampleRate);if(!pcm.length)return;
       send('meetingVoiceAudio',{rate:RELAY_SAMPLE_RATE,seq:++meetingVoiceSequence,data:pcmToBase64(pcm)});
@@ -1855,7 +1899,7 @@ function stopMeetingVoice(){
   updateMeetingVoiceUi();
 }
 async function handleMeetingVoiceAudio(message){
-  if(!me()?.alive||!meetingVoiceActive()||!message.fromId||message.fromId===myId||typeof message.data!=='string'||message.data.length>16000)return;
+  if(!canParticipateInMeeting()||!meetingVoiceActive()||!message.fromId||message.fromId===myId||typeof message.data!=='string'||message.data.length>16000)return;
   const context=getVoiceAudioContext();if(!context)return;
   if(context.state!=='running'){setVoiceStatus('会議音声を聞くには「音声を聞く」を押してください。');updateMeetingVoiceUi();return}
   try{
@@ -2018,17 +2062,17 @@ function stopVoiceChat(){
   clearVoiceFallbackTimer();stopVoiceRelay(false);for(const id of [...voicePeers.keys()])closeVoicePeer(id);for(const track of localVoiceStream?.getTracks()||[])track.stop();localVoiceStream=null;voiceStarting=false;micMuted=false;setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi();
 }
 function updateMicButton(){const button=$('micButton');if(!button)return;if(meetingVoiceActive()){updateMeetingVoiceUi();return}if(!activeCallPeer){button.textContent='🎙 通話相手なし';button.disabled=true;button.classList.remove('muted');return}button.disabled=false;if(!localVoiceStream){button.textContent='🎙 マイク開始';button.classList.remove('muted');return}button.textContent=micMuted?'🔇 マイクOFF':'🎙 マイクON';button.classList.toggle('muted',micMuted)}
-$('speakerButton').onclick=()=>{if(!me()?.alive){showNotice('死亡しているため会議音声には参加できません。');return}enableMeetingAudio(true)};
-$('micButton').onclick=async()=>{if(meetingVoiceActive()){await enableMeetingAudio(false);if(!meetingVoiceStream){await startMeetingVoice();return}meetingVoiceMuted=!meetingVoiceMuted;for(const track of meetingVoiceStream.getAudioTracks())track.enabled=!meetingVoiceMuted;updateMeetingVoiceUi();setVoiceStatus(meetingVoiceMuted?'会議音声を聞いています。マイクはOFFです。':'会議音声に接続しました。マイクはONです。',true);return}await unlockRemoteAudio();if(!activeCallPeer){showNotice('先にメンバー一覧の📞から通話相手を選んでください。');updateCallUi();return}if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const track of localVoiceStream.getAudioTracks())track.enabled=!micMuted;updateCallUi();setVoiceStatus(micMuted?'マイクをミュートしています。':voiceRelayActive?'音声中継モードで接続しました。':'音声通話に接続しました。',!micMuted)};
+$('speakerButton').onclick=()=>{if(!canParticipateInMeeting()){showNotice('観戦中は会議音声へ参加できません。');return}enableMeetingAudio(true)};
+$('micButton').onclick=async()=>{if(meetingVoiceActive()){if(!canParticipateInMeeting()){showNotice('観戦中は会議音声へ参加できません。');return}await enableMeetingAudio(false);if(!meetingVoiceStream){await startMeetingVoice();return}meetingVoiceMuted=!meetingVoiceMuted;for(const track of meetingVoiceStream.getAudioTracks())track.enabled=!meetingVoiceMuted;updateMeetingVoiceUi();setVoiceStatus(meetingVoiceMuted?'会議音声を聞いています。マイクはOFFです。':'会議音声に接続しました。マイクはONです。',true);return}await unlockRemoteAudio();if(!activeCallPeer){showNotice('先にメンバー一覧の📞から通話相手を選んでください。');updateCallUi();return}if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const track of localVoiceStream.getAudioTracks())track.enabled=!micMuted;updateCallUi();setVoiceStatus(micMuted?'マイクをミュートしています。':voiceRelayActive?'音声中継モードで接続しました。':'音声通話に接続しました。',!micMuted)};
 async function placeCall(peerId){
   if(!peerId||peerId===myId)return;if(activeCallPeer){showNotice('先に現在の通話を終了してください。');return}
   const target=state?.players?.find(player=>player.id===peerId);if(!target?.connected){showNotice('相手は現在接続していません。');return}
-  activeCallPeer=peerId;currentVoiceStatus=`${target?.name||'相手'}への通話を準備しています…`;updateCallUi();await unlockRemoteAudio();
-  const started=await startVoiceChat();if(!started||!localVoiceStream){activeCallPeer=null;updateCallUi();return}
+  pauseGroupVoiceCapture();activeCallPeer=peerId;currentVoiceStatus=`${target?.name||'相手'}への通話を準備しています…`;updateCallUi();await unlockRemoteAudio();
+  const started=await startVoiceChat();if(!started||!localVoiceStream){activeCallPeer=null;resumeGroupVoiceCapture();updateCallUi();return}
   setVoiceStatus(`${target?.name||'相手'}を呼び出しています…`,true);send('callControl',{targetId:peerId,action:'ring'});armCallTimeout(peerId,20000,'応答がないため呼び出しを終了しました。');
 }
 async function acceptIncomingCall(){
-  if(!incomingCallPeer)return;const peer=incomingCallPeer;if(incomingCallTimeoutId){clearTimeout(incomingCallTimeoutId);incomingCallTimeoutId=0}activeCallPeer=peer;incomingCallPeer=null;closeDialog('incomingCallDialog');currentVoiceStatus='個人通話を準備しています…';updateCallUi();await unlockRemoteAudio();
+  if(!incomingCallPeer)return;const peer=incomingCallPeer;if(incomingCallTimeoutId){clearTimeout(incomingCallTimeoutId);incomingCallTimeoutId=0}pauseGroupVoiceCapture();activeCallPeer=peer;incomingCallPeer=null;closeDialog('incomingCallDialog');currentVoiceStatus='個人通話を準備しています…';updateCallUi();await unlockRemoteAudio();
   const started=await startVoiceChat();if(!started||!localVoiceStream){hangUpCall(false);return}
   send('callControl',{targetId:activeCallPeer,action:'accept'});
   // TURNサーバーがない環境でも確実に話せるよう、相手だけに届く音声中継を先に開始する。
@@ -2057,7 +2101,7 @@ async function handleCallControl(m){
   else if(action==='hangup'&&incomingCallPeer===from){showNotice('着信がキャンセルされました。');clearIncomingCall(false)}
   else if(action==='hangup'&&activeCallPeer===from){showNotice('通話が終了しました。');hangUpCall(false)}
 }
-function hangUpCall(notify=true){const peer=activeCallPeer;clearCallTimeout();clearVoiceFallbackTimer();if(notify&&peer)send('callControl',{targetId:peer,action:'hangup'});activeCallPeer=null;stopVoiceChat();setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi()}
+function hangUpCall(notify=true){const peer=activeCallPeer;clearCallTimeout();clearVoiceFallbackTimer();if(notify&&peer)send('callControl',{targetId:peer,action:'hangup'});activeCallPeer=null;stopVoiceChat();resumeGroupVoiceCapture();setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi()}
 ui.players.addEventListener('click',event=>{const button=event.target.closest('.call-member');if(button)placeCall(button.dataset.callId)});
 $('acceptCallButton').onclick=acceptIncomingCall;$('declineCallButton').onclick=declineIncomingCall;$('hangupCallButton').onclick=()=>hangUpCall(true);
 updateCallUi();
