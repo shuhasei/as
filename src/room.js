@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-dead-meeting-spectator-v51";
+const MAP_VERSION = "aurora-group-voice-reliable-v53";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -21,6 +21,22 @@ const SPAWNS = [
   [-2.5, 4.5], [2.5, 4.5],
 ];
 const TASKS = ["reactor", "engine", "scanner", "security", "wires", "cargo", "comms", "shield", "align", "weapons", "oxygen", "fuel"];
+const TASK_POSITIONS = Object.freeze({
+  reactor: { x: -28, z: 18 },
+  engine: { x: -28, z: 6 },
+  scanner: { x: -26, z: -17 },
+  security: { x: -14, z: -2 },
+  wires: { x: -10, z: -17 },
+  cargo: CARGO_PICKUP,
+  comms: { x: 7, z: -17 },
+  shield: { x: 20, z: -15 },
+  align: { x: 30, z: 0 },
+  weapons: { x: 23, z: 15 },
+  oxygen: { x: 2, z: 18 },
+  fuel: { x: 16, z: 4 },
+});
+const SECURITY_ACCESS_POINTS = Object.freeze([{ x: -18, z: -2 }, TASK_POSITIONS.security]);
+const SABOTAGE_STATIONS = Object.freeze({ reactor: "reactor", lights: "wires", comms: "comms" });
 const DEFAULT_SETTINGS = {
   impostors: 1,
   tasks: 6,
@@ -132,6 +148,7 @@ export class GameRoom extends DurableObject {
       completedTasks: new Set(p.completedTasks || []),
       carryingCargo: Boolean(p.carryingCargo),
       groupVoiceJoined: Boolean(p.groupVoiceJoined),
+      meetingEligible: p.meetingEligible !== false,
     }]));
     this.votes = new Map(saved.votes || []);
 
@@ -281,6 +298,7 @@ export class GameRoom extends DurableObject {
         reported: p.reported || false,
         ghost: !p.alive,
         spectator: Boolean(p.spectator),
+        meetingEligible: p.meetingEligible !== false,
         hidden: Boolean(p.hidden),
         hiddenAt: p.hidden ? p.hiddenAt || null : null,
         carryingCargo: Boolean(p.carryingCargo),
@@ -310,6 +328,7 @@ export class GameRoom extends DurableObject {
         reported: false,
         ghost: false,
         spectator: false,
+        meetingEligible: true,
         hidden: false,
         hiddenAt: null,
         carryingCargo: false,
@@ -382,6 +401,10 @@ export class GameRoom extends DurableObject {
         await this.report(player, message);
         break;
       case "meeting":
+        if (this.sabotage) {
+          this.send(player.id, { type: "error", message: "妨害が発生している間は緊急会議を開けません。" });
+          break;
+        }
         if (Math.hypot(player.x - EMERGENCY_BUTTON.x, player.z - EMERGENCY_BUTTON.z) > 3.0) {
           this.send(player.id, { type: "error", message: "中央の緊急ボタンに近づいてください。" });
           break;
@@ -431,7 +454,7 @@ export class GameRoom extends DurableObject {
         await this.protect(player, message);
         break;
       case "inspect":
-        this.inspect(player, message);
+        await this.inspect(player, message);
         break;
       case "hide":
         await this.toggleHide(player, message);
@@ -460,7 +483,7 @@ export class GameRoom extends DurableObject {
     // 終了画面中だけは、次のロビーへ戻るまで待機扱いにします。
     const joiningActiveGame = this.phase === "playing" || this.phase === "meeting";
     const joiningAfterFinish = this.phase === "finished";
-    const maxPlayers = joiningActiveGame || joiningAfterFinish ? 12 : 10;
+    const maxPlayers = 12;
     if (this.players.size >= maxPlayers) {
       this.send(id, { type: "error", message: "ルームは満員です。" });
       return;
@@ -489,6 +512,7 @@ export class GameRoom extends DurableObject {
       lastKillAt: 0,
       reported: joiningAfterFinish,
       spectator: joiningAfterFinish,
+      meetingEligible: this.phase !== "meeting" && !joiningAfterFinish,
       hidden: false,
       hiddenAt: null,
       carryingCargo: false,
@@ -592,6 +616,7 @@ export class GameRoom extends DurableObject {
         lastKillAt: 0,
         reported: false,
         spectator: false,
+        meetingEligible: true,
         hidden: false,
         hiddenAt: null,
         carryingCargo: false,
@@ -639,6 +664,14 @@ export class GameRoom extends DurableObject {
     if (this.phase !== "playing" || !player.alive || player.role === "impostor" || player.spectator) return;
     const task = String(message.task || "");
     if (!player.tasks.includes(task) || player.completedTasks.has(task)) return;
+    if (task !== "cargo") {
+      const point = TASK_POSITIONS[task];
+      const nearSecurity = task === "security" && SECURITY_ACCESS_POINTS.some((access) => Math.hypot(player.x - access.x, player.z - access.z) <= 3.6);
+      if (!point || (!nearSecurity && Math.hypot(player.x - point.x, player.z - point.z) > 3.6)) {
+        this.send(player.id, { type: "error", message: "タスク端末の近くで操作してください。" });
+        return;
+      }
+    }
     if (task === "cargo") {
       if (!player.carryingCargo) {
         this.send(player.id, { type: "error", message: "先に保管庫で荷物を積み込んでください。" });
@@ -737,23 +770,30 @@ export class GameRoom extends DurableObject {
       player.emergencyUsed = true;
     }
 
+    const sabotageWasActive = Boolean(this.sabotage);
+    this.sabotage = null;
     this.phase = "meeting";
     this.votes.clear();
+    for (const item of this.players.values()) item.meetingEligible = item.alive;
     this.meetingEndsAt = Date.now() + this.settings.meetingTime * 1000;
     await this.ctx.storage.setAlarm(this.meetingEndsAt);
     await this.persist();
+    if (sabotageWasActive) this.broadcast({ type: "sabotageFixed" });
     this.broadcast({ type: "meetingStarted", reason });
     this.syncAll();
   }
 
   async vote(player, message) {
-    if (this.phase !== "meeting" || !player.alive || this.votes.has(player.id)) return;
+    if (this.phase !== "meeting" || !player.alive || player.meetingEligible === false || this.votes.has(player.id)) return;
     const targetId = String(message.targetId || "skip");
-    if (targetId !== "skip" && !this.players.get(targetId)?.alive) return;
+    if (targetId !== "skip") {
+      const target = this.players.get(targetId);
+      if (!target?.alive || target.meetingEligible === false) return;
+    }
 
     this.votes.set(player.id, targetId);
     await this.persist();
-    const aliveCount = [...this.players.values()].filter((item) => item.alive).length;
+    const aliveCount = [...this.players.values()].filter((item) => item.alive && item.meetingEligible !== false).length;
     this.broadcast({ type: "voteCount", count: this.votes.size, total: aliveCount });
     if (this.votes.size >= aliveCount) await this.finishMeeting();
   }
@@ -794,6 +834,7 @@ export class GameRoom extends DurableObject {
     this.meetingEndsAt = 0;
     this.votes.clear();
     for (const item of this.players.values()) {
+      item.meetingEligible = true;
       if (!item.alive) item.reported = true;
     }
     await this.ctx.storage.deleteAlarm();
@@ -806,18 +847,18 @@ export class GameRoom extends DurableObject {
   chat(player, message) {
     const text = String(message.text || "").replace(/[<>]/g, "").trim().slice(0, 120);
     if (!text || !this.sessions.has(player.id)) return;
-    // 死亡者は会議を観戦するだけで、会議チャットへ参加できません。
-    if (this.phase === "meeting" && !player.alive) return;
+    if (this.phase === "meeting" && (!player.alive || player.meetingEligible === false)) return;
     const now = Date.now();
     if (player.lastChatAt && now - player.lastChatAt < 450) return;
     player.lastChatAt = now;
-    this.broadcast({
-      type: "chat",
-      from: player.name,
-      text,
-      alive: player.alive,
-      phase: this.phase,
-    });
+    const payload = { type: "chat", from: player.name, text, alive: player.alive, phase: this.phase };
+    if (this.phase === "playing" && !player.alive) {
+      for (const target of this.players.values()) {
+        if (!target.alive && this.sessions.has(target.id)) this.send(target.id, payload);
+      }
+      return;
+    }
+    this.broadcast(payload);
   }
 
   voiceSignal(player, message) {
@@ -847,7 +888,7 @@ export class GameRoom extends DurableObject {
   }
 
   meetingVoiceAudio(player, message) {
-    if (this.phase !== "meeting" || !player.alive || !this.sessions.has(player.id)) return;
+    if (this.phase !== "meeting" || !player.alive || player.meetingEligible === false || !this.sessions.has(player.id)) return;
     const data = typeof message.data === "string" ? message.data : "";
     if (!data || data.length > 16000) return;
     const now = Date.now();
@@ -856,7 +897,7 @@ export class GameRoom extends DurableObject {
     const rate = clamp(Number(message.rate) || 16000, 8000, 24000);
     const seq = Math.max(0, Math.floor(Number(message.seq) || 0));
     for (const target of this.players.values()) {
-      if (target.id === player.id || !target.alive || !this.sessions.has(target.id)) continue;
+      if (target.id === player.id || !target.alive || target.meetingEligible === false || !this.sessions.has(target.id)) continue;
       this.send(target.id, {
         type: "meetingVoiceAudio",
         fromId: player.id,
@@ -871,23 +912,35 @@ export class GameRoom extends DurableObject {
   async groupVoiceControl(player, message) {
     if (!this.sessions.has(player.id)) return;
     const action = String(message.action || "");
-    if (action === "join") player.groupVoiceJoined = true;
-    else if (action === "leave") player.groupVoiceJoined = false;
+    if (action === "join") {
+      if (!player.alive || player.spectator || this.phase === "meeting") {
+        player.groupVoiceJoined = false;
+      } else player.groupVoiceJoined = true;
+    } else if (action === "leave") player.groupVoiceJoined = false;
     else return;
     await this.persist();
+    const participantCount = [...this.players.values()].filter((item) => item.alive && !item.spectator && item.groupVoiceJoined && this.sessions.has(item.id)).length;
+    for (const target of this.players.values()) {
+      if (!this.sessions.has(target.id)) continue;
+      this.send(target.id, {
+        type: "groupVoiceStatus",
+        joined: Boolean(target.groupVoiceJoined),
+        participantCount,
+      });
+    }
   }
 
   groupVoiceAudio(player, message) {
-    if (this.phase === "meeting" || !this.sessions.has(player.id) || !player.groupVoiceJoined) return;
+    if (this.phase === "meeting" || !player.alive || player.spectator || !this.sessions.has(player.id) || !player.groupVoiceJoined) return;
     const data = typeof message.data === "string" ? message.data : "";
     if (!data || data.length > 16000) return;
     const now = Date.now();
-    if (player.lastGroupVoiceAt && now - player.lastGroupVoiceAt < 55) return;
+    if (player.lastGroupVoiceAt && now - player.lastGroupVoiceAt < 48) return;
     player.lastGroupVoiceAt = now;
     const rate = clamp(Number(message.rate) || 16000, 8000, 24000);
     const seq = Math.max(0, Math.floor(Number(message.seq) || 0));
     for (const target of this.players.values()) {
-      if (target.id === player.id || !this.sessions.has(target.id) || !target.groupVoiceJoined) continue;
+      if (target.id === player.id || !target.alive || target.spectator || !this.sessions.has(target.id) || !target.groupVoiceJoined) continue;
       this.send(target.id, {
         type: "groupVoiceAudio",
         fromId: player.id,
@@ -929,7 +982,16 @@ export class GameRoom extends DurableObject {
 
   async fixSabotage(player, message) {
     if (this.phase !== "playing" || !player.alive || !this.sabotage) return;
-    if (this.sabotage.kind === "reactor" && message.station !== "reactor") return;
+    const requiredStation = SABOTAGE_STATIONS[this.sabotage.kind];
+    if (!requiredStation || String(message.station || "") !== requiredStation) {
+      this.send(player.id, { type: "error", message: "この端末では妨害を修理できません。" });
+      return;
+    }
+    const point = TASK_POSITIONS[requiredStation];
+    if (!point || Math.hypot(player.x - point.x, player.z - point.z) > 3.6) {
+      this.send(player.id, { type: "error", message: "修理端末の近くで操作してください。" });
+      return;
+    }
     this.sabotage = null;
     await this.ctx.storage.deleteAlarm();
     await this.persist();
@@ -974,7 +1036,7 @@ export class GameRoom extends DurableObject {
   async protect(player, message) {
     if (this.phase !== "playing" || !player.alive || player.role !== "guard" || player.abilityUsed) return;
     const target = this.players.get(String(message.targetId || ""));
-    if (!target || !target.alive || target.spectator || dist(player, target) > 2.8) return;
+    if (!target || target.id === player.id || !target.alive || target.spectator || dist(player, target) > 2.8) return;
     target.shielded = true;
     player.abilityUsed = true;
     await this.persist();
@@ -983,14 +1045,14 @@ export class GameRoom extends DurableObject {
     this.syncAll();
   }
 
-  inspect(player, message) {
+  async inspect(player, message) {
     if (this.phase !== "playing" || !player.alive || player.role !== "detective" || player.abilityUsed) return;
     const target = this.players.get(String(message.targetId || ""));
-    if (!target || target.alive || target.spectator || dist(player, target) > 3.2) return;
+    if (!target || target.alive || target.spectator || dist(player, bodyPoint(target)) > 3.2) return;
     player.abilityUsed = true;
-    const clue = target.role === "impostor" ? "侵入者の痕跡があります。" : "クルー側の痕跡です。";
+    const clue = target.role === "impostor" ? "人狼の痕跡があります。" : "クルー側の痕跡です。";
     this.send(player.id, { type: "abilityResult", message: clue });
-    this.persist();
+    await this.persist();
     this.syncAll();
   }
 
@@ -1040,8 +1102,8 @@ export class GameRoom extends DurableObject {
   async checkWin({ tasksOnly = false } = {}) {
     if (this.phase === "finished") return;
     const allPlayers = [...this.players.values()];
-    const crewAll = allPlayers.filter((item) => item.role !== "impostor" && !item.spectator);
-    const tasksComplete = crewAll.length > 0 && crewAll.every((item) => item.tasksDone >= item.tasks.length);
+    const activeCrew = allPlayers.filter((item) => item.alive && item.role !== "impostor" && !item.spectator);
+    const tasksComplete = activeCrew.length > 0 && activeCrew.every((item) => item.tasks.length > 0 && item.tasksDone >= item.tasks.length);
 
     // タスク完了メッセージでは、タスク勝利だけを判定します。
     // 人数差による侵入者勝利は、攻撃・追放・退出などで人数が変わった時だけ判定します。
@@ -1094,6 +1156,7 @@ export class GameRoom extends DurableObject {
         lastKillAt: 0,
         reported: false,
         spectator: false,
+        meetingEligible: true,
         hidden: false,
         hiddenAt: null,
         carryingCargo: false,
@@ -1126,7 +1189,7 @@ export class GameRoom extends DurableObject {
     this.syncAll();
     if (this.phase === "playing") await this.checkWin();
     if (this.phase === "meeting") {
-      const aliveCount = [...this.players.values()].filter((item) => item.alive).length;
+      const aliveCount = [...this.players.values()].filter((item) => item.alive && item.meetingEligible !== false).length;
       if (this.votes.size >= aliveCount) await this.finishMeeting();
     }
   }
