@@ -1098,7 +1098,14 @@ export class GameRoom extends DurableObject {
     const senderName = sender?.name || "みんな";
     const remembered = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
     const reliableMemory = remembered?.alive && remembered.meetingEligible !== false && Math.random() < 0.48 ? remembered : null;
-    const guessedSuspect = this.chooseBotSuspect(bot, new Set([sender?.id].filter(Boolean)), 0.18);
+    // 人狼CPUはクルーを自然に疑いの候補へ挙げ、自分から注意をそらす。
+    // 強く断定すると逆に不自然なので、疑い方はあくまで控えめにする。
+    const guessedSuspect = this.chooseBotSuspect(bot, new Set([sender?.id].filter(Boolean)), bot.role === "impostor" ? 0.78 : 0.18);
+    const coverTaskId = Array.isArray(bot.tasks)
+      ? bot.tasks.find((task) => !(bot.completedTasks instanceof Set ? bot.completedTasks.has(task) : false))
+      : null;
+    const coverTask = coverTaskId ? TASK_LABELS[coverTaskId] : null;
+    const coverStory = coverTask ? `${coverTask}をやりに向かってた` : `${zone}のあたりを移動してた`;
     const observation = mentioned && mentioned.id !== bot.id ? this.recentBotObservation(bot, mentioned.id) : null;
     const seenEntries = Object.entries(bot.aiSeen && typeof bot.aiSeen === "object" ? bot.aiSeen : {})
       .map(([id, item]) => ({ player: this.players.get(id), item }))
@@ -1113,6 +1120,13 @@ export class GameRoom extends DurableObject {
     };
 
     if (accused || (selfMentioned && asksRole)) {
+      if (bot.role === "impostor") {
+        return pick([
+          `いや、私じゃないよ。会議前は${coverStory}。むしろ、まだ場所を話してない人のほうが気になる。`,
+          `違うって。私は${coverStory}よ。疑うなら、ほかの人の動きもちゃんと聞いてからにして。`,
+          `私を疑うのは分かるけど、人狼じゃない。${coverStory}し、今は決めつけないでほしいな。`,
+        ]);
+      }
       return pick([
         `いや、私は違うよ。会議前は${zone}にいた。私だけで決めずに、ほかの人の話も聞いてみて。`,
         `私じゃない。最後にいたのは${zone}あたりだよ。いきなり決めつけるのは待ってほしいな。`,
@@ -1120,6 +1134,7 @@ export class GameRoom extends DurableObject {
     }
 
     if (selfMentioned && asksWhere) {
+      if (bot.role === "impostor") return `会議前は${coverStory}よ。途中ですれ違った人もいると思うけど、名前までは覚えてないな。`;
       return `会議前は${zone}あたり。ずっとそこにいたわけじゃないけど、最後にいたのはその辺だよ。`;
     }
 
@@ -1131,6 +1146,12 @@ export class GameRoom extends DurableObject {
     }
 
     if (asksTask && (!mentioned || selfMentioned)) {
+      if (bot.role === "impostor") {
+        return pick([
+          `${coverTask ? coverTask : "タスク"}をやりに行ってたよ。会議が入ったから、まだ途中だけど。`,
+          `私は${coverStory}。終わる前に会議になったから、続きはまだだね。`,
+        ]);
+      }
       return pick([
         `タスクを回ってたよ。会議の直前は${zone}あたりにいた。`,
         `ずっとタスクしながら移動してた。最後は${zone}の近くだったかな。`,
@@ -1168,7 +1189,14 @@ export class GameRoom extends DurableObject {
 
     if (asksWho) {
       const suspect = reliableMemory || guessedSuspect;
-      if (suspect && Math.random() < 0.58) {
+      if (suspect && Math.random() < (bot.role === "impostor" ? 0.86 : 0.58)) {
+        if (bot.role === "impostor") {
+          return pick([
+            `${suspect.name}が少し気になるかな。動きが読みにくかったし、一度どこにいたか聞いてみたい。`,
+            `今なら${suspect.name}かな。でも決めつけはしないよ。まず本人の話を聞きたい。`,
+            `${suspect.name}の動き、ちょっと気にならなかった？　まだ投票を決めるほどじゃないけど。`,
+          ]);
+        }
         return `今は${suspect.name}がちょっと気になる。でもほぼ勘だから、これだけで追放はできないかな。`;
       }
       return `正直、今の話だけじゃ誰か決められない。今回はスキップでもいいんじゃないかな。`;
@@ -1315,11 +1343,11 @@ export class GameRoom extends DurableObject {
   }
 
   requestFirebaseBotReply(bot, sender, question, localReply) {
-    if (this.pendingClientAiRequests.size >= 1) return false;
+    if (this.pendingClientAiRequests.size >= 3) return false;
     const host = this.players.get(this.hostId);
     if (!host || host.isBot || !host.alive || host.meetingEligible === false || !this.sessions.has(host.id)) return false;
     const requestId = `firebase-ai-${uid()}`;
-    const expiresAt = Date.now() + 11200;
+    const expiresAt = Date.now() + 30000;
     this.pendingClientAiRequests.set(requestId, {
       requestId,
       botId: bot.id,
@@ -1424,7 +1452,14 @@ export class GameRoom extends DurableObject {
       if (reporter?.id === bot.id) text = `${reason}。私は${aiZoneLabel(bot)}付近で見つけました。`;
       else if (bot.aiSuspectId && this.players.get(bot.aiSuspectId)?.alive) text = `私は${this.players.get(bot.aiSuspectId).name}の動きが気になっています。`;
       else text = `私は会議前まで${aiZoneLabel(bot)}にいました。`;
-      bot.aiPendingReplies = [{ at: now + 1000 + index * 1300 + Math.random() * 450, text, replyTo: null }];
+      const host = this.players.get(this.hostId);
+      const openingQuestion = `${reason}で会議が始まった。最初に、知っていることや自分がいた場所を自然に話して。`;
+      const requested = host && !host.isBot
+        ? this.requestFirebaseBotReply(bot, host, openingQuestion, text)
+        : false;
+      if (!requested) {
+        bot.aiPendingReplies = [{ at: now + 1000 + index * 1300 + Math.random() * 450, text, replyTo: null, aiSource: "local" }];
+      }
       bot.aiVoteAt = now + 7000 + index * 900 + Math.random() * 3500;
     });
   }
