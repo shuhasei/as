@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-firebase-gemini-ai-v62";
+const MAP_VERSION = "aurora-natural-gemini-dialogue-v64";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -360,6 +360,7 @@ export class GameRoom extends DurableObject {
     this.lastExternalAiAt = 0;
     this.pendingClientAiRequests = new Map();
     this.meetingChatHistory = [];
+    this.lastMeetingBotSpeakerId = null;
 
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment();
@@ -414,6 +415,7 @@ export class GameRoom extends DurableObject {
     }]));
     this.votes = new Map(saved.votes || []);
     this.meetingChatHistory = [];
+    this.lastMeetingBotSpeakerId = null;
 
     this.hostId = this.pickHumanHost(this.hostId);
   }
@@ -461,6 +463,7 @@ export class GameRoom extends DurableObject {
     this.settings = { ...DEFAULT_SETTINGS };
     this.pendingClientAiRequests.clear();
     this.meetingChatHistory = [];
+    this.lastMeetingBotSpeakerId = null;
     await this.ctx.storage.deleteAlarm();
     await this.persist();
   }
@@ -987,6 +990,7 @@ export class GameRoom extends DurableObject {
     const cleaned = String(text || "").replace(/[<>]/g, "").trim().slice(0, 125);
     if (!cleaned || this.phase !== "meeting" || !bot?.alive || bot.meetingEligible === false) return;
     bot.aiRecentReplies = [...(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []), cleaned].slice(-4);
+    this.lastMeetingBotSpeakerId = bot.id;
     this.recordMeetingChatLine(bot.name, cleaned, true);
     this.broadcast({
       type: "chat",
@@ -1004,7 +1008,8 @@ export class GameRoom extends DurableObject {
 
   classifyMeetingQuestion(text, mentioned, bot) {
     const compact = String(text || "").toLowerCase().replace(/[\s　]/g, "");
-    const selfMentioned = mentioned?.id === bot?.id;
+    const directPronoun = !mentioned && /(お前|おまえ|あなた|あんた|君|きみ|そっち)/.test(compact);
+    const selfMentioned = mentioned?.id === bot?.id || directPronoun;
     if (selfMentioned && /(人狼|犯人|怪し|やった|倒した|殺|キル|嘘|うそ)/.test(compact)) return "弁明";
     if (/(なぜ|なんで|どうして|理由|根拠)/.test(compact)) return "疑う理由";
     if (/(どこ|場所|いた|居た|現在地|アリバイ)/.test(compact)) return "場所";
@@ -1077,7 +1082,8 @@ export class GameRoom extends DurableObject {
     const source = String(text || "").trim();
     const compact = source.toLowerCase().replace(/[\s　]/g, "");
     const mentioned = this.mentionedPlayerInText(source);
-    const selfMentioned = mentioned?.id === bot.id;
+    const directPronoun = !mentioned && /(お前|おまえ|あなた|あんた|君|きみ|そっち)/.test(compact);
+    const selfMentioned = mentioned?.id === bot.id || directPronoun;
     const accused = selfMentioned && /(怪し|人狼|犯人|やった|倒した|殺|キル|うそ|嘘|投票)/.test(compact);
     const asksWhere = /(どこ|場所|いた|居た|現在地|アリバイ)/.test(compact);
     const asksWho = /(誰|だれ|怪し|人狼|犯人|投票先)/.test(compact);
@@ -1253,6 +1259,7 @@ export class GameRoom extends DurableObject {
       suspicionReason: suspect?.alive ? `${suspect.name}を近くで見た記憶があるが、犯行は見ていない` : "怪しいと断定できる材料はない",
       recentConversation,
       previousAnswers: (Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []).slice(-3),
+      draftReply: "",
       alivePlayers: [...this.players.values()].filter((item) => item.alive && item.meetingEligible !== false && !item.practiceTarget).map((item) => item.name),
     };
   }
@@ -1327,7 +1334,8 @@ export class GameRoom extends DurableObject {
       botId: bot.id,
       botName: bot.name,
       question: String(question || "").slice(0, 120),
-      facts: this.botMeetingFacts(bot, sender, question),
+      draftReply: String(localReply || "").slice(0, 140),
+      facts: { ...this.botMeetingFacts(bot, sender, question), draftReply: String(localReply || "").slice(0, 140) },
       expiresAt,
     });
     return true;
@@ -1368,8 +1376,18 @@ export class GameRoom extends DurableObject {
     const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
     if (!bots.length) return;
     const mentioned = this.mentionedPlayerInText(text);
+    const compact = String(text || "").toLowerCase().replace(/[\s　]/g, "");
+    const directPronoun = /(お前|おまえ|あなた|あんた|君|きみ|そっち)/.test(compact);
     let selected = null;
     if (mentioned?.isBot) selected = mentioned;
+    if (!selected && directPronoun && this.lastMeetingBotSpeakerId) {
+      const previousSpeaker = this.players.get(this.lastMeetingBotSpeakerId);
+      if (previousSpeaker?.isBot && previousSpeaker.alive && previousSpeaker.meetingEligible !== false) selected = previousSpeaker;
+    }
+    if (!selected && /^(なんで|なぜ|どうして)[？?。！!]*$/.test(compact) && this.lastMeetingBotSpeakerId) {
+      const previousSpeaker = this.players.get(this.lastMeetingBotSpeakerId);
+      if (previousSpeaker?.isBot && previousSpeaker.alive && previousSpeaker.meetingEligible !== false) selected = previousSpeaker;
+    }
     if (!selected) {
       selected = bots
         .slice()
@@ -1859,6 +1877,7 @@ export class GameRoom extends DurableObject {
     this.votes.clear();
     this.pendingClientAiRequests.clear();
     this.meetingChatHistory = [];
+    this.lastMeetingBotSpeakerId = null;
     for (const item of this.players.values()) {
       item.meetingEligible = item.alive;
       if (item.isBot) {
@@ -1951,12 +1970,21 @@ export class GameRoom extends DurableObject {
 
   chat(player, message) {
     const text = String(message.text || "").replace(/[<>]/g, "").trim().slice(0, 120);
-    if (!text || !this.sessions.has(player.id)) return;
-    if (this.phase === "meeting" && (!player.alive || player.meetingEligible === false)) return;
+    const clientMessageId = String(message.clientMessageId || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+    const rejectChat = (reason) => this.send(player.id, { type: "chatError", clientMessageId, message: reason });
+    if (!this.sessions.has(player.id)) return;
+    if (!text) { rejectChat("メッセージを入力してください。"); return; }
+    if (this.phase === "meeting" && (!player.alive || player.meetingEligible === false)) {
+      rejectChat("死亡者や会議途中の参加者は会議チャットへ送信できません。");
+      return;
+    }
     const now = Date.now();
-    if (player.lastChatAt && now - player.lastChatAt < 450) return;
+    if (player.lastChatAt && now - player.lastChatAt < 350) {
+      rejectChat("送信間隔が短すぎます。少し待ってから送信してください。");
+      return;
+    }
     player.lastChatAt = now;
-    const payload = { type: "chat", from: player.name, fromId: player.id, text, alive: player.alive, phase: this.phase, bot: Boolean(player.isBot) };
+    const payload = { type: "chat", from: player.name, fromId: player.id, text, alive: player.alive, phase: this.phase, bot: Boolean(player.isBot), clientMessageId };
     if (this.phase === "meeting") this.recordMeetingChatLine(player.name, text, Boolean(player.isBot));
     if (this.phase === "meeting" && !player.isBot) {
       const task = this.queueBotMeetingReplies(player, text).catch((error) => console.warn("CPU meeting reply failed", error));
@@ -1966,9 +1994,11 @@ export class GameRoom extends DurableObject {
       for (const target of this.players.values()) {
         if (!target.alive && this.sessions.has(target.id)) this.send(target.id, payload);
       }
+      this.send(player.id, { type: "chatAck", clientMessageId });
       return;
     }
     this.broadcast(payload);
+    this.send(player.id, { type: "chatAck", clientMessageId });
   }
 
   voiceSignal(player, message) {
