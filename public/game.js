@@ -76,11 +76,15 @@ function promiseDelay(ms){
 async function initializeFirebaseMeetingAi(){
   try{
     const firebaseApp=initializeApp(FIREBASE_CONFIG);
-    const appCheck=initializeAppCheck(firebaseApp,{
-      provider:new ReCaptchaV3Provider(FIREBASE_RECAPTCHA_SITE_KEY),
-      isTokenAutoRefreshEnabled:true
-    });
-    firebaseAppCheck=appCheck;
+    try{
+      firebaseAppCheck=initializeAppCheck(firebaseApp,{
+        provider:new ReCaptchaV3Provider(FIREBASE_RECAPTCHA_SITE_KEY),
+        isTokenAutoRefreshEnabled:true
+      });
+    }catch(appCheckError){
+      firebaseAppCheck=null;
+      console.warn('[Hidden Crew] App Check initialization deferred',appCheckError);
+    }
     const ai=getAI(firebaseApp,{backend:new GoogleAIBackend()});
     firebaseAiService=ai;
     firebaseAiModel=getGenerativeModel(ai,{
@@ -110,10 +114,17 @@ async function initializeFirebaseMeetingAi(){
     firebaseAiReady=true;
     firebaseAiInitError='';
     updateFirebaseAiHelp();
-    await Promise.race([getAppCheckToken(appCheck,true),promiseTimeout(10000,'App Check token timeout')]);
-    firebaseAppCheckReady=true;
+    if(firebaseAppCheck){
+      try{
+        await Promise.race([getAppCheckToken(firebaseAppCheck,false),promiseTimeout(10000,'App Check token timeout')]);
+        firebaseAppCheckReady=true;
+      }catch(appCheckError){
+        firebaseAppCheckReady=false;
+        console.warn('[Hidden Crew] App Check token is not ready; Gemini will retry on the actual request',appCheckError);
+      }
+    }
     updateFirebaseAiHelp();
-    console.info('[Hidden Crew] Firebase App Check verified; Gemini request is ready');
+    console.info('[Hidden Crew] Firebase Gemini request is ready');
   }catch(error){
     firebaseAiModel=null;
     firebaseAiService=null;
@@ -133,9 +144,15 @@ async function testFirebaseAiConnection(){
   firebaseAiRequesting=true;firebaseAiLastError='';updateFirebaseAiHelp();
   try{
     await firebaseAiInitialization;
-    if(!firebaseAppCheck||!firebaseAiModel)throw new Error(firebaseAiInitError||'Firebase AIが初期化されていません');
-    await Promise.race([getAppCheckToken(firebaseAppCheck,true),promiseTimeout(10000,'App Check token timeout')]);
-    firebaseAppCheckReady=true;
+    if(!firebaseAiModel)throw new Error(firebaseAiInitError||'Firebase AIが初期化されていません');
+    if(firebaseAppCheck){
+      try{
+        await Promise.race([getAppCheckToken(firebaseAppCheck,false),promiseTimeout(6000,'App Check token timeout')]);
+        firebaseAppCheckReady=true;
+      }catch(appCheckError){
+        console.warn('[Hidden Crew] App Check preflight failed; trying the Gemini request directly',appCheckError);
+      }
+    }
     const result=await Promise.race([
       firebaseAiModel.generateContent('接続確認です。「接続できました」とだけ日本語で答えてください。'),
       promiseTimeout(12000,'Gemini response timeout')
@@ -228,7 +245,7 @@ async function runFirebaseCpuRequest(request){
   firebaseAiActiveRequests+=1;firebaseAiRequesting=true;firebaseAiLastError='';updateFirebaseAiHelp();
   try{
     await firebaseAiInitialization;
-    if(!firebaseAiModel||!firebaseAppCheckReady)throw new Error(firebaseAiInitError||'Firebase App Check is not ready');
+    if(!firebaseAiModel)throw new Error(firebaseAiInitError||'Firebase AI is not ready');
     let reply='',lastGenerationError=null;
     for(let attempt=0;attempt<2;attempt+=1){
       try{
@@ -393,6 +410,8 @@ let cpuMeetingSpeechLastAt=0;
 let cpuMeetingSpeechGeneration=0;
 let cpuMeetingLiveSession=null;
 let cpuMeetingAudioSource=null;
+let cpuMeetingSpeechLastError='';
+let cpuMeetingSpeechErrorShownAt=0;
 const cpuMeetingVoiceAssignments=new Map();
 let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastCorpseUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
@@ -1939,6 +1958,7 @@ function updateCpuSpeechButton(){
   if(!cpuSpeechSupported()){button.disabled=true;button.textContent='✨ Gemini音声 準備中';return}
   button.disabled=false;
   button.textContent=cpuMeetingSpeechEnabled?'✨ Gemini音声 ON':'✨ Gemini音声 OFF';
+  button.title=cpuMeetingSpeechLastError?`直前の音声エラー：${compactFirebaseError(cpuMeetingSpeechLastError)}`:'CPUの発言をGemini Liveの音声で再生します。';
   button.classList.toggle('muted',!cpuMeetingSpeechEnabled);
 }
 function stopCpuMeetingSpeech(){
@@ -2007,13 +2027,14 @@ async function playGeminiCpuSpeech(name,text,generation){
     await session.send(prompt,true);
     for await(const message of session.receive()){
       if(generation!==cpuMeetingSpeechGeneration)break;
-      for(const part of message?.modelTurn?.parts||[]){
+      const content=message?.serverContent||message;
+      for(const part of content?.modelTurn?.parts||[]){
         const inlineData=part?.inlineData;
         if(!inlineData?.data||!String(inlineData.mimeType||'').startsWith('audio/'))continue;
         audioChunks.push(inlineData.data);
         const rate=String(inlineData.mimeType).match(/rate=(\d+)/i);if(rate)sampleRate=Number(rate[1])||sampleRate;
       }
-      if(message?.turnComplete)break;
+      if(content?.turnComplete)break;
     }
   };
   try{
@@ -2033,8 +2054,19 @@ async function speakNextCpuMeetingLine(){
   const speechText=naturalizeCpuSpeech(item.text);if(!speechText){setTimeout(speakNextCpuMeetingLine,120);return}
   cpuMeetingSpeechActive=true;cpuMeetingSpeechLastAt=performance.now();
   const generation=cpuMeetingSpeechGeneration;
-  try{await playGeminiCpuSpeech(item.from,speechText,generation)}
-  catch(error){console.warn('[Hidden Crew] Gemini meeting audio failed',error)}
+  try{
+    await playGeminiCpuSpeech(item.from,speechText,generation);
+    cpuMeetingSpeechLastError='';updateCpuSpeechButton();
+  }catch(error){
+    cpuMeetingSpeechLastError=String(error?.message||error||'Gemini audio failed');
+    updateCpuSpeechButton();
+    const now=performance.now();
+    if(now-cpuMeetingSpeechErrorShownAt>5000){
+      cpuMeetingSpeechErrorShownAt=now;
+      showNotice(`Gemini音声失敗：${compactFirebaseError(cpuMeetingSpeechLastError)}`);
+    }
+    console.warn('[Hidden Crew] Gemini meeting audio failed',error);
+  }
   finally{
     if(generation===cpuMeetingSpeechGeneration){
       cpuMeetingSpeechActive=false;
@@ -2054,7 +2086,7 @@ if(cpuSpeechButton)cpuSpeechButton.onclick=()=>{
   cpuMeetingSpeechEnabled=!cpuMeetingSpeechEnabled;
   localStorage.setItem('hiddenCrewCpuSpeech',cpuMeetingSpeechEnabled?'on':'off');
   if(!cpuMeetingSpeechEnabled)stopCpuMeetingSpeech();
-  else{showNotice('CPUの会議発言をGemini音声で再生します。');speakNextCpuMeetingLine()}
+  else{cpuMeetingSpeechLastError='';unlockRemoteAudio();showNotice('CPUの会議発言をGemini音声で再生します。');speakNextCpuMeetingLine()}
   updateCpuSpeechButton();
 };
 updateCpuSpeechButton();
