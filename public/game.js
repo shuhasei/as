@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
 import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app-check.js';
-import { getAI, getGenerativeModel, GoogleAIBackend, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
+import { getAI, getGenerativeModel, getLiveGenerativeModel, GoogleAIBackend, ResponseModality, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),cpuControls:$('cpuControls'),addCpu:$('addCpuButton'),removeCpu:$('removeCpuButton'),cpuHelp:$('cpuHelp'),firebaseAiTest:$('firebaseAiTestButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
 const MAP_VERSION='aurora-natural-gemini-dialogue-v64';
@@ -36,7 +36,7 @@ const FIREBASE_CONFIG=Object.freeze({
 const FIREBASE_RECAPTCHA_SITE_KEY='6Ld3HmgtAAAAAPSue2cjfd2sTQTdBTVQcmCiOQsJ';
 const FIREBASE_AI_MODEL='gemini-3.6-flash';
 const FIREBASE_REPLY_SCHEMA=Schema.object({properties:{reply:Schema.string()}});
-let firebaseAiModel=null,firebaseAppCheck=null,firebaseAiReady=false,firebaseAppCheckReady=false,firebaseAiVerified=false,firebaseAiRequesting=false,firebaseAiActiveRequests=0,firebaseAiInitError='',firebaseAiLastError='',firebaseAiLastErrorCode='';
+let firebaseAiModel=null,firebaseAiService=null,firebaseAppCheck=null,firebaseAiReady=false,firebaseAppCheckReady=false,firebaseAiVerified=false,firebaseAiRequesting=false,firebaseAiActiveRequests=0,firebaseAiInitError='',firebaseAiLastError='',firebaseAiLastErrorCode='';
 function compactFirebaseError(value=''){
   const text=String(value||'').replace(/\s+/g,' ').trim();
   if(!text)return '';
@@ -82,6 +82,7 @@ async function initializeFirebaseMeetingAi(){
     });
     firebaseAppCheck=appCheck;
     const ai=getAI(firebaseApp,{backend:new GoogleAIBackend()});
+    firebaseAiService=ai;
     firebaseAiModel=getGenerativeModel(ai,{
       model:FIREBASE_AI_MODEL,
       systemInstruction:[
@@ -111,18 +112,21 @@ async function initializeFirebaseMeetingAi(){
     firebaseAiReady=true;
     firebaseAiInitError='';
     updateFirebaseAiHelp();
+    updateCpuSpeechButton();
     await Promise.race([getAppCheckToken(appCheck,true),promiseTimeout(10000,'App Check token timeout')]);
     firebaseAppCheckReady=true;
     updateFirebaseAiHelp();
     console.info('[Hidden Crew] Firebase App Check verified; Gemini request is ready');
   }catch(error){
     firebaseAiModel=null;
+    firebaseAiService=null;
     firebaseAppCheck=null;
     firebaseAiReady=false;
     firebaseAppCheckReady=false;
     firebaseAiInitError=String(error?.message||error||'Firebase AI initialization failed');
     firebaseAiLastErrorCode=String(error?.code||'');
     updateFirebaseAiHelp();
+    updateCpuSpeechButton();
     console.warn('[Hidden Crew] Firebase Gemini AI initialization failed',error);
   }
 }
@@ -388,8 +392,10 @@ let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',can
 let cpuMeetingSpeechEnabled=localStorage.getItem('hiddenCrewCpuSpeech')!=='off';
 let cpuMeetingSpeechQueue=[];
 let cpuMeetingSpeechActive=false;
-let cpuMeetingSpeechVoices=[];
 let cpuMeetingSpeechLastAt=0;
+let cpuMeetingSpeechGeneration=0;
+let cpuMeetingLiveSession=null;
+let cpuMeetingAudioSource=null;
 const cpuMeetingVoiceAssignments=new Map();
 let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastCorpseUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
@@ -552,16 +558,8 @@ function handle(m){
       }
     }
   }else if(m.type==='botMoves'){
-    const receivedAt=performance.now();
     for(const move of Array.isArray(m.moves)?m.moves:[]){
       const model=models.get(move.id);if(!model)continue;
-      const previousReceivedAt=Number(model.userData.botMoveReceivedAt||0);
-      const packetInterval=previousReceivedAt?Math.max(240,Math.min(440,receivedAt-previousReceivedAt)):330;
-      if(!model.userData.botMoveFrom)model.userData.botMoveFrom=new THREE.Vector3();
-      model.userData.botMoveFrom.copy(model.position);
-      model.userData.botMoveStartedAt=receivedAt;
-      model.userData.botMoveDuration=Math.max(300,Math.min(460,packetInterval*1.08));
-      model.userData.botMoveReceivedAt=receivedAt;
       model.userData.target.set(Number(move.x)||0,0,Number(move.z)||0);
       model.userData.rotation=Number(move.rotation)||0;
     }
@@ -1045,9 +1043,8 @@ function syncModels(){
     m.userData.playerId=p.id;m.userData.isBot=Boolean(p.bot);
     applySelectedSkin(m,p.color);
     applyHatAccessory(m,p.hat);
-    // プレイ中のCPU座標はbotMoves側で受信間隔に合わせて補間する。
-    // 状態更新で途中の補間目標を上書きすると、観戦カメラが瞬間移動する。
-    if(created||!p.bot||state.phase!=='playing')m.userData.target.set(p.x,0,p.z);
+    // botMoves が遅れたり欠けたりしても、定期状態から必ずCPUを追従させる。
+    m.userData.target.set(p.x,0,p.z);
     m.userData.rotation=p.rotation;
     if(created||p.id===myId&&(!localModel||hiddenChanged)){
       m.position.set(p.x,0,p.z);
@@ -1254,17 +1251,13 @@ function animate(now=performance.now()){
     for(const m of models.values()){
       if(m!==localModel&&m?.position&&m?.userData?.target){
         if(m.userData.isBot){
-          // CPU座標は約0.3秒間隔で届くため、次の受信まで一定速度で補間する。
-          // 指数補間のように早く追いついて停止しないので、AI視点でも前進が滑らかに見える。
-          const startedAt=Number(m.userData.botMoveStartedAt||0);
-          const duration=Math.max(1,Number(m.userData.botMoveDuration||330));
-          const from=m.userData.botMoveFrom||m.position;
-          const progress=startedAt?Math.max(0,Math.min(1,(now-startedAt)/duration)):1;
-          const nextX=from.x+(m.userData.target.x-from.x)*progress;
-          const nextZ=from.z+(m.userData.target.z-from.z)*progress;
+          // 通信間隔に依存せず、最新の状態へ軽い指数補間で追従する。
+          const a=1-Math.exp(-8*dt);
+          const nextX=m.position.x+(m.userData.target.x-m.position.x)*a;
+          const nextZ=m.position.z+(m.userData.target.z-m.position.z)*a;
           if(!collidesWithMap(nextX,m.position.z,.56))m.position.x=nextX;
           if(!collidesWithMap(m.position.x,nextZ,.56))m.position.z=nextZ;
-          if(progress>=1&&m.position.distanceToSquared(m.userData.target)<.02)m.position.copy(m.userData.target);
+          if(m.position.distanceToSquared(m.userData.target)<.0025)m.position.copy(m.userData.target);
         }else{
           const a=1-Math.exp(-12*dt);
           m.position.lerp(m.userData.target,a);
@@ -1941,52 +1934,29 @@ function renderVotes(){
   const skip=$('skipVoteButton');if(skip){skip.disabled=false;skip.onclick=()=>{send('vote',{targetId:'skip'});disableVotes()}}
 }
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
-function cpuSpeechSupported(){return typeof window!=='undefined'&&'speechSynthesis'in window&&typeof SpeechSynthesisUtterance!=='undefined'}
-function cpuVoiceScore(voice){
-  const name=String(voice?.name||'').toLowerCase(),lang=String(voice?.lang||'').toLowerCase();
-  let score=lang.startsWith('ja')?20:0;
-  if(voice?.localService)score+=2;
-  if(/nanami|keita|haruka|sayaka|ichiro|ayumi|日本語|japanese/.test(name))score+=11;
-  if(/natural|neural|premium|online/.test(name))score+=14;
-  if(/microsoft|google|apple/.test(name))score+=5;
-  return score;
-}
-function refreshCpuMeetingVoices(){
-  if(!cpuSpeechSupported())return;
-  const voices=window.speechSynthesis.getVoices?.()||[];
-  const japanese=voices.filter(voice=>String(voice.lang||'').toLowerCase().startsWith('ja')).sort((a,b)=>cpuVoiceScore(b)-cpuVoiceScore(a));
-  const natural=japanese.filter(voice=>/(natural|neural|online|nanami|keita|haruka|sayaka|ayumi)/i.test(String(voice.name||'')));
-  cpuMeetingSpeechVoices=natural.length?natural:japanese;
-  if(!cpuMeetingSpeechVoices.length)cpuMeetingSpeechVoices=[...voices].sort((a,b)=>cpuVoiceScore(b)-cpuVoiceScore(a));
-  cpuMeetingVoiceAssignments.clear();
+function cpuSpeechSupported(){
+  return Boolean(firebaseAiService&&firebaseAiReady&&(window.AudioContext||window.webkitAudioContext));
 }
 function updateCpuSpeechButton(){
   const button=$('cpuSpeechButton');if(!button)return;
-  if(!cpuSpeechSupported()){button.disabled=true;button.textContent='🤖 CPU音声非対応';return}
+  if(!cpuSpeechSupported()){button.disabled=true;button.textContent='✨ Gemini音声 準備中';return}
   button.disabled=false;
-  button.textContent=cpuMeetingSpeechEnabled?'🤖 CPU音声 ON':'🤖 CPU音声 OFF';
+  button.textContent=cpuMeetingSpeechEnabled?'✨ Gemini音声 ON':'✨ Gemini音声 OFF';
   button.classList.toggle('muted',!cpuMeetingSpeechEnabled);
 }
 function stopCpuMeetingSpeech(){
-  cpuMeetingSpeechQueue=[];cpuMeetingSpeechActive=false;cpuMeetingSpeechLastAt=0;
-  if(cpuSpeechSupported())try{window.speechSynthesis.cancel()}catch{}
+  cpuMeetingSpeechQueue=[];cpuMeetingSpeechActive=false;cpuMeetingSpeechLastAt=0;cpuMeetingSpeechGeneration++;
+  if(cpuMeetingAudioSource)try{cpuMeetingAudioSource.stop()}catch{}
+  cpuMeetingAudioSource=null;
+  if(cpuMeetingLiveSession)try{cpuMeetingLiveSession.close()}catch{}
+  cpuMeetingLiveSession=null;
   updateCpuSpeechButton();
-}
-function cpuVoicePitch(name=''){
-  let hash=0;for(const char of String(name))hash=(hash*31+char.charCodeAt(0))>>>0;
-  return .95+(hash%5)*.022;
-}
-function cpuVoiceRate(name='',text=''){
-  let hash=0;for(const char of String(name))hash=(hash*29+char.charCodeAt(0))>>>0;
-  const personalRate=.97+(hash%5)*.012;
-  return Math.max(.94,Math.min(1.04,personalRate-(String(text).length>88?.025:0)));
 }
 function cpuVoiceFor(name='CPU'){
   if(cpuMeetingVoiceAssignments.has(name))return cpuMeetingVoiceAssignments.get(name);
-  if(!cpuMeetingSpeechVoices.length)refreshCpuMeetingVoices();
-  if(!cpuMeetingSpeechVoices.length)return null;
+  const voices=['Kore','Puck','Aoede','Leda','Achird','Sulafat'];
   let hash=0;for(const char of String(name))hash=(hash*33+char.charCodeAt(0))>>>0;
-  const voice=cpuMeetingSpeechVoices[hash%Math.min(cpuMeetingSpeechVoices.length,5)]||cpuMeetingSpeechVoices[0];
+  const voice=voices[hash%voices.length];
   cpuMeetingVoiceAssignments.set(name,voice);return voice;
 }
 function naturalizeCpuSpeech(text=''){
@@ -1996,17 +1966,84 @@ function naturalizeCpuSpeech(text=''){
   if(value&&!/[。！？]$/.test(value))value+='。';
   return value.slice(0,130);
 }
-function speakNextCpuMeetingLine(){
+function decodeGeminiPcmChunks(chunks=[]){
+  const decoded=chunks.map(data=>{
+    const binary=atob(String(data||''));const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return bytes;
+  });
+  const length=decoded.reduce((total,bytes)=>total+bytes.length,0);
+  const merged=new Uint8Array(length);let offset=0;
+  for(const bytes of decoded){merged.set(bytes,offset);offset+=bytes.length}
+  return merged;
+}
+async function playGeminiPcm(bytes,sampleRate,generation){
+  if(!bytes?.length||generation!==cpuMeetingSpeechGeneration)return;
+  const context=getVoiceAudioContext();if(!context)throw new Error('AudioContext unavailable');
+  if(context.state==='suspended')await context.resume();
+  const sampleCount=Math.floor(bytes.length/2),buffer=context.createBuffer(1,sampleCount,sampleRate||24000),channel=buffer.getChannelData(0);
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  for(let i=0;i<sampleCount;i++)channel[i]=view.getInt16(i*2,true)/32768;
+  await new Promise((resolve,reject)=>{
+    if(generation!==cpuMeetingSpeechGeneration){resolve();return}
+    const source=context.createBufferSource();cpuMeetingAudioSource=source;
+    source.buffer=buffer;source.connect(context.destination);
+    source.onended=()=>{if(cpuMeetingAudioSource===source)cpuMeetingAudioSource=null;resolve()};
+    try{source.start()}catch(error){if(cpuMeetingAudioSource===source)cpuMeetingAudioSource=null;reject(error)}
+  });
+}
+async function playGeminiCpuSpeech(name,text,generation){
+  if(!firebaseAiService)throw new Error('Gemini audio is not ready');
+  const liveModel=getLiveGenerativeModel(firebaseAiService,{
+    model:'gemini-2.5-flash-native-audio-preview-12-2025',
+    generationConfig:{
+      responseModalities:[ResponseModality.AUDIO],
+      speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:cpuVoiceFor(name)}}}
+    }
+  });
+  const session=await liveModel.connect();
+  if(generation!==cpuMeetingSpeechGeneration){try{session.close()}catch{}return}
+  cpuMeetingLiveSession=session;
+  let audioChunks=[],sampleRate=24000;
+  const receiveAudio=async()=>{
+    const prompt=`次の発言だけを、一切言葉を足したり変えたりせず、友達と人狼ゲームをしている人のように自然な日本語で話してください。\n発言：${text}`;
+    await session.send(prompt,true);
+    for await(const message of session.receive()){
+      if(generation!==cpuMeetingSpeechGeneration)break;
+      for(const part of message?.modelTurn?.parts||[]){
+        const inlineData=part?.inlineData;
+        if(!inlineData?.data||!String(inlineData.mimeType||'').startsWith('audio/'))continue;
+        audioChunks.push(inlineData.data);
+        const rate=String(inlineData.mimeType).match(/rate=(\d+)/i);if(rate)sampleRate=Number(rate[1])||sampleRate;
+      }
+      if(message?.turnComplete)break;
+    }
+  };
+  try{
+    await Promise.race([receiveAudio(),promiseTimeout(18000,'Gemini audio timeout')]);
+  }finally{
+    if(cpuMeetingLiveSession===session)cpuMeetingLiveSession=null;
+    try{session.close()}catch{}
+  }
+  if(generation!==cpuMeetingSpeechGeneration)return;
+  const pcm=decodeGeminiPcmChunks(audioChunks);
+  if(!pcm.length)throw new Error('Gemini returned no audio');
+  await playGeminiPcm(pcm,sampleRate,generation);
+}
+async function speakNextCpuMeetingLine(){
   if(cpuMeetingSpeechActive||!cpuMeetingSpeechEnabled||!cpuSpeechSupported()||!meetingVoiceActive()||!canParticipateInMeeting())return;
   const item=cpuMeetingSpeechQueue.shift();if(!item)return;
   const speechText=naturalizeCpuSpeech(item.text);if(!speechText){setTimeout(speakNextCpuMeetingLine,120);return}
-  const utterance=new SpeechSynthesisUtterance(speechText);
-  const voice=cpuVoiceFor(item.from);if(voice)utterance.voice=voice;
-  utterance.lang=voice?.lang||'ja-JP';utterance.rate=cpuVoiceRate(item.from,speechText);utterance.pitch=cpuVoicePitch(item.from);utterance.volume=1;
   cpuMeetingSpeechActive=true;cpuMeetingSpeechLastAt=performance.now();
-  const finish=()=>{cpuMeetingSpeechActive=false;setTimeout(speakNextCpuMeetingLine,320)};
-  utterance.onend=finish;utterance.onerror=finish;
-  try{window.speechSynthesis.resume?.();window.speechSynthesis.speak(utterance)}catch{finish()}
+  const generation=cpuMeetingSpeechGeneration;
+  try{await playGeminiCpuSpeech(item.from,speechText,generation)}
+  catch(error){console.warn('[Hidden Crew] Gemini meeting audio failed',error)}
+  finally{
+    if(generation===cpuMeetingSpeechGeneration){
+      cpuMeetingSpeechActive=false;
+      setTimeout(speakNextCpuMeetingLine,240);
+    }
+  }
 }
 function queueCpuMeetingSpeech(message){
   if(!message?.bot||message.phase!=='meeting'||!cpuMeetingSpeechEnabled||!meetingVoiceActive()||!canParticipateInMeeting())return;
@@ -2015,16 +2052,12 @@ function queueCpuMeetingSpeech(message){
   if(cpuMeetingSpeechQueue.length>5)cpuMeetingSpeechQueue.splice(0,cpuMeetingSpeechQueue.length-5);
   speakNextCpuMeetingLine();
 }
-if(cpuSpeechSupported()){
-  refreshCpuMeetingVoices();
-  window.speechSynthesis.onvoiceschanged=refreshCpuMeetingVoices;
-}
 const cpuSpeechButton=$('cpuSpeechButton');
 if(cpuSpeechButton)cpuSpeechButton.onclick=()=>{
   cpuMeetingSpeechEnabled=!cpuMeetingSpeechEnabled;
   localStorage.setItem('hiddenCrewCpuSpeech',cpuMeetingSpeechEnabled?'on':'off');
   if(!cpuMeetingSpeechEnabled)stopCpuMeetingSpeech();
-  else{refreshCpuMeetingVoices();showNotice('CPUの会議発言を音声で読み上げます。');speakNextCpuMeetingLine()}
+  else{showNotice('CPUの会議発言をGemini音声で再生します。');speakNextCpuMeetingLine()}
   updateCpuSpeechButton();
 };
 updateCpuSpeechButton();
