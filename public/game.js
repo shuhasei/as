@@ -520,8 +520,16 @@ function handle(m){
       }
     }
   }else if(m.type==='botMoves'){
+    const receivedAt=performance.now();
     for(const move of Array.isArray(m.moves)?m.moves:[]){
       const model=models.get(move.id);if(!model)continue;
+      const previousReceivedAt=Number(model.userData.botMoveReceivedAt||0);
+      const packetInterval=previousReceivedAt?Math.max(240,Math.min(440,receivedAt-previousReceivedAt)):330;
+      if(!model.userData.botMoveFrom)model.userData.botMoveFrom=new THREE.Vector3();
+      model.userData.botMoveFrom.copy(model.position);
+      model.userData.botMoveStartedAt=receivedAt;
+      model.userData.botMoveDuration=Math.max(300,Math.min(460,packetInterval*1.08));
+      model.userData.botMoveReceivedAt=receivedAt;
       model.userData.target.set(Number(move.x)||0,0,Number(move.z)||0);
       model.userData.rotation=Number(move.rotation)||0;
     }
@@ -1005,7 +1013,9 @@ function syncModels(){
     m.userData.playerId=p.id;m.userData.isBot=Boolean(p.bot);
     applySelectedSkin(m,p.color);
     applyHatAccessory(m,p.hat);
-    m.userData.target.set(p.x,0,p.z);
+    // プレイ中のCPU座標はbotMoves側で受信間隔に合わせて補間する。
+    // 状態更新で途中の補間目標を上書きすると、観戦カメラが瞬間移動する。
+    if(created||!p.bot||state.phase!=='playing')m.userData.target.set(p.x,0,p.z);
     m.userData.rotation=p.rotation;
     if(created||p.id===myId&&(!localModel||hiddenChanged)){
       m.position.set(p.x,0,p.z);
@@ -1211,16 +1221,22 @@ function animate(now=performance.now()){
     if(state?.phase==='playing'&&localModel&&!securityOpen)moveLocal(dt);
     for(const m of models.values()){
       if(m!==localModel&&m?.position&&m?.userData?.target){
-        const a=1-Math.exp(-12*dt);
         if(m.userData.isBot){
-          // CPUも表示上で壁を横切らないよう、補間移動にも同じ当たり判定を適用する。
-          const nextX=m.position.x+(m.userData.target.x-m.position.x)*a;
-          const nextZ=m.position.z+(m.userData.target.z-m.position.z)*a;
+          // CPU座標は約0.3秒間隔で届くため、次の受信まで一定速度で補間する。
+          // 指数補間のように早く追いついて停止しないので、AI視点でも前進が滑らかに見える。
+          const startedAt=Number(m.userData.botMoveStartedAt||0);
+          const duration=Math.max(1,Number(m.userData.botMoveDuration||330));
+          const from=m.userData.botMoveFrom||m.position;
+          const progress=startedAt?Math.max(0,Math.min(1,(now-startedAt)/duration)):1;
+          const nextX=from.x+(m.userData.target.x-from.x)*progress;
+          const nextZ=from.z+(m.userData.target.z-from.z)*progress;
           if(!collidesWithMap(nextX,m.position.z,.56))m.position.x=nextX;
           if(!collidesWithMap(m.position.x,nextZ,.56))m.position.z=nextZ;
-          // サーバー側の安全な座標へ十分近い時だけ吸着し、壁越しの瞬間移動を防ぐ。
-          if(m.position.distanceToSquared(m.userData.target)<.02)m.position.copy(m.userData.target);
-        }else m.position.lerp(m.userData.target,a);
+          if(progress>=1&&m.position.distanceToSquared(m.userData.target)<.02)m.position.copy(m.userData.target);
+        }else{
+          const a=1-Math.exp(-12*dt);
+          m.position.lerp(m.userData.target,a);
+        }
         m.rotation.y=dampAngle(m.rotation.y,Number(m.userData.rotation||0),16,dt);
       }
     }
@@ -1386,13 +1402,19 @@ function cameraPointBlocked(x,y,z,r=.18){
   if(y-r<1.35&&Math.hypot(x,z-.5)<2.05+r)return true;
   return false;
 }
+const thirdPersonCameraPosition=new THREE.Vector3();
+const thirdPersonCameraTarget=new THREE.Vector3();
+const thirdPersonCameraPose={fov:54,position:thirdPersonCameraPosition,target:thirdPersonCameraTarget};
+const cameraIdlePosition=new THREE.Vector3(0,15,10);
+const cameraEyeScratch=new THREE.Vector3();
+const cameraForwardScratch=new THREE.Vector3();
+const cameraLookScratch=new THREE.Vector3();
 function getThirdPersonCameraPose(pos,mode=cameraMode){
   const wide=mode===0;
-  return {
-    fov:wide?54:62,
-    position:new THREE.Vector3(pos.x,pos.y+(wide?14.5:10.2),pos.z+(wide?9.5:6.4)),
-    target:new THREE.Vector3(pos.x,pos.y+(wide?.75:1.0),pos.z-(wide?1.8:1.15))
-  };
+  thirdPersonCameraPose.fov=wide?54:62;
+  thirdPersonCameraPosition.set(pos.x,pos.y+(wide?14.5:10.2),pos.z+(wide?9.5:6.4));
+  thirdPersonCameraTarget.set(pos.x,pos.y+(wide?.75:1.0),pos.z-(wide?1.8:1.15));
+  return thirdPersonCameraPose;
 }
 function cameraViewSubject(){
   const self=me(),target=!self?.alive?spectatorTarget():null;
@@ -1415,9 +1437,8 @@ function updateCamera(dt=.016){
   if(!viewModel){
     restoreSpectatorHiddenModel();
     setCameraLens(camera,54,.06);
-    const idlePosition=new THREE.Vector3(0,15,10);
-    if(!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z))camera.position.copy(idlePosition);
-    else camera.position.lerp(idlePosition,1-Math.exp(-5*Math.max(.001,dt)));
+    if(!Number.isFinite(camera.position.x)||!Number.isFinite(camera.position.y)||!Number.isFinite(camera.position.z))camera.position.copy(cameraIdlePosition);
+    else camera.position.lerp(cameraIdlePosition,1-Math.exp(-5*Math.max(.001,dt)));
     camera.lookAt(0,.8,0);return;
   }
   const pos=viewModel.position;
@@ -1434,9 +1455,10 @@ function updateCamera(dt=.016){
     }
     setCameraLens(camera,74,.045);
     const observedYaw=subject.following?Number(viewModel.rotation.y||viewModel.userData?.rotation||viewPlayer?.rotation||0):firstPersonYaw;
-    const eye=new THREE.Vector3(pos.x,pos.y+1.72,pos.z);
-    const forward=new THREE.Vector3(Math.sin(observedYaw),-.035,Math.cos(observedYaw)).normalize();
-    camera.position.copy(eye);camera.lookAt(eye.clone().addScaledVector(forward,12));return;
+    cameraEyeScratch.set(pos.x,pos.y+1.72,pos.z);
+    cameraForwardScratch.set(Math.sin(observedYaw),-.035,Math.cos(observedYaw)).normalize();
+    cameraLookScratch.copy(cameraEyeScratch).addScaledVector(cameraForwardScratch,12);
+    camera.position.copy(cameraEyeScratch);camera.lookAt(cameraLookScratch);return;
   }
   restoreSpectatorHiddenModel();
   if(localModel){const self=me();localModel.visible=playerVisibleToLocalViewer(self)}
