@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-ai-cpu-meeting-talk-v57";
+const MAP_VERSION = "aurora-ai-cpu-fluent-collision-v58";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -11,6 +11,12 @@ const LOCKERS = [
 ];
 const EMERGENCY_BUTTON = { x: 0, z: 0 };
 const DOOR_BARRIERS = Object.freeze([{"x":0,"z":6,"w":4.42,"d":0.56},{"x":-5,"z":-6,"w":3.42,"d":0.56},{"x":4,"z":-6,"w":3.42,"d":0.56},{"x":-7,"z":-2,"w":0.56,"d":3.62},{"x":7,"z":3,"w":0.56,"d":3.62},{"x":0,"z":13,"w":4.22,"d":0.56},{"x":-9,"z":18,"w":0.56,"d":3.82},{"x":9,"z":16,"w":0.56,"d":3.82},{"x":-22,"z":18,"w":0.56,"d":3.82},{"x":-27,"z":13,"w":3.82,"d":0.56},{"x":-27,"z":10,"w":3.82,"d":0.56},{"x":-22,"z":2,"w":0.56,"d":3.02},{"x":-21,"z":2,"w":0.56,"d":3.02},{"x":-11,"z":-2,"w":0.56,"d":3.62},{"x":-20,"z":-6,"w":2.82,"d":0.56},{"x":-20,"z":-12,"w":2.82,"d":0.56},{"x":-19,"z":-17,"w":0.56,"d":3.42},{"x":-5,"z":-12,"w":3.42,"d":0.56},{"x":-14,"z":-16,"w":0.56,"d":3.42},{"x":-2,"z":-17,"w":0.56,"d":3.42},{"x":4,"z":-13,"w":3.42,"d":0.56},{"x":2,"z":-17,"w":0.56,"d":3.42},{"x":12,"z":-16,"w":0.56,"d":3.22},{"x":15,"z":-16,"w":0.56,"d":3.22},{"x":24.5,"z":-11,"w":3.02,"d":0.56},{"x":23,"z":3,"w":0.56,"d":3.22},{"x":24.5,"z":-5,"w":3.02,"d":0.56},{"x":26,"z":5,"w":3.22,"d":0.56},{"x":17,"z":16,"w":0.56,"d":3.42},{"x":19,"z":10.5,"w":3.02,"d":0.56},{"x":26,"z":10.5,"w":3.22,"d":0.56},{"x":11,"z":3,"w":0.56,"d":3.42},{"x":21,"z":3,"w":0.56,"d":3.22},{"x":19,"z":8,"w":3.02,"d":0.56},{"x":-23,"z":2,"w":0.56,"d":2.72},{"x":-20,"z":2,"w":0.56,"d":2.72},{"x":-14,"z":-17,"w":0.56,"d":3.12},{"x":20.75,"z":3,"w":0.56,"d":2.92},{"x":23.25,"z":3,"w":0.56,"d":2.92}]);
+// クライアントと同じ壁・設備の当たり判定。CPUの壁抜け防止に使用します。
+const AI_COLLISION_WALLS = Object.freeze([{"x":-4.65,"z":6,"w":4.7,"d":0.48},{"x":4.65,"z":6,"w":4.7,"d":0.48},{"x":-6.9,"z":-6,"w":0.20000000000000018,"d":0.48},{"x":-0.5,"z":-6,"w":5.4,"d":0.48},{"x":6.4,"z":-6,"w":1.2000000000000002,"d":0.48},{"x":7,"z":-2.45,"w":0.48,"d":7.1},{"x":7,"z":5.45,"w":0.48,"d":1.0999999999999996},{"x":-7,"z":-4.95,"w":0.48,"d":2.1},{"x":-7,"z":2.95,"w":0.48,"d":6.1},{"x":0,"z":23,"w":18,"d":0.48},{"x":-5.6,"z":13,"w":6.8,"d":0.48},{"x":5.6,"z":13,"w":6.8,"d":0.48},{"x":9,"z":13.5,"w":0.48,"d":1},{"x":9,"z":20.5,"w":0.48,"d":5},{"x":-9,"z":14.5,"w":0.48,"d":3},{"x":-9,"z":21.5,"w":0.48,"d":3},{"x":-27,"z":23,"w":10,"d":0.48},{"x":-30.5,"z":13,"w":3,"d":0.48},{"x":-23.5,"z":13,"w":3,"d":0.48},{"x":-22,"z":14.5,"w":0.48,"d":3},{"x":-22,"z":21.5,"w":0.48,"d":3},{"x":-32,"z":18,"w":0.48,"d":10},{"x":-30.5,"z":10,"w":3,"d":0.48},{"x":-23.5,"z":10,"w":3,"d":0.48},{"x":-27,"z":2,"w":10,"d":0.48},{"x":-22,"z":6.8,"w":0.48,"d":6.4},{"x":-32,"z":6,"w":0.48,"d":8},{"x":-16,"z":2,"w":10,"d":0.48},{"x":-14.75,"z":-6,"w":7.5,"d":0.48},{"x":-11,"z":-4.95,"w":0.48,"d":2.1},{"x":-11,"z":0.9500000000000002,"w":0.48,"d":2.1},{"x":-21,"z":-2.8,"w":0.48,"d":6.4},{"x":-26.25,"z":-12,"w":9.5,"d":0.48},{"x":-25,"z":-22,"w":12,"d":0.48},{"x":-19,"z":-20.4,"w":0.48,"d":3.2},{"x":-19,"z":-13.6,"w":0.48,"d":3.2},{"x":-31,"z":-17,"w":0.48,"d":10},{"x":-10.4,"z":-12,"w":7.2,"d":0.48},{"x":-2.5999999999999996,"z":-12,"w":1.2000000000000002,"d":0.48},{"x":-8,"z":-22,"w":12,"d":0.48},{"x":-2,"z":-20.4,"w":0.48,"d":3.2},{"x":-2,"z":-13.6,"w":0.48,"d":3.2},{"x":-14,"z":-19.9,"w":0.48,"d":4.2},{"x":-14,"z":-13.1,"w":0.48,"d":2.2},{"x":2.0999999999999996,"z":-13,"w":0.20000000000000018,"d":0.48},{"x":8.9,"z":-13,"w":6.2,"d":0.48},{"x":7,"z":-21,"w":10,"d":0.48},{"x":12,"z":-19.35,"w":0.48,"d":3.3},{"x":12,"z":-13.65,"w":0.48,"d":1.2999999999999998},{"x":2,"z":-19.9,"w":0.48,"d":2.2},{"x":2,"z":-14.1,"w":0.48,"d":2.2},{"x":18.95,"z":-11,"w":7.9,"d":0.48},{"x":20,"z":-19,"w":10,"d":0.48},{"x":25,"z":-15,"w":0.48,"d":8},{"x":15,"z":-18.35,"w":0.48,"d":1.2999999999999998},{"x":15,"z":-12.65,"w":0.48,"d":3.3},{"x":23.65,"z":5,"w":1.2999999999999998,"d":0.48},{"x":31.35,"z":5,"w":7.3,"d":0.48},{"x":30.55,"z":-5,"w":8.9,"d":0.48},{"x":35,"z":0,"w":0.48,"d":10},{"x":23,"z":-1.85,"w":0.48,"d":6.3},{"x":23,"z":4.85,"w":0.48,"d":0.2999999999999998},{"x":23,"z":19.5,"w":12,"d":0.48},{"x":17.2,"z":10.5,"w":0.40000000000000036,"d":0.48},{"x":22.45,"z":10.5,"w":3.7,"d":0.48},{"x":28.35,"z":10.5,"w":1.2999999999999998,"d":0.48},{"x":29,"z":15,"w":0.48,"d":9},{"x":17,"z":12.35,"w":0.48,"d":3.7},{"x":17,"z":18.65,"w":0.48,"d":1.7000000000000002},{"x":14.2,"z":8,"w":6.4,"d":0.48},{"x":20.8,"z":8,"w":0.40000000000000036,"d":0.48},{"x":16,"z":0,"w":10,"d":0.48},{"x":21,"z":0.6499999999999999,"w":0.48,"d":1.2999999999999998},{"x":21,"z":6.35,"w":0.48,"d":3.3},{"x":11,"z":0.6000000000000001,"w":0.48,"d":1.2000000000000002},{"x":11,"z":6.4,"w":0.48,"d":3.2},{"x":-2.025,"z":13,"w":0.15000000000000013,"d":0.48},{"x":2.025,"z":13,"w":0.15000000000000013,"d":0.48},{"x":-2.025,"z":6,"w":0.15000000000000013,"d":0.48},{"x":2.025,"z":6,"w":0.15000000000000013,"d":0.48},{"x":2.1,"z":9.5,"w":0.48,"d":7},{"x":-2.1,"z":9.5,"w":0.48,"d":7},{"x":-15.5,"z":19.9,"w":13,"d":0.48},{"x":-15.5,"z":16.1,"w":13,"d":0.48},{"x":-9,"z":16.175,"w":0.48,"d":0.1499999999999999},{"x":-9,"z":19.825,"w":0.48,"d":0.1499999999999999},{"x":-22,"z":16.175,"w":0.48,"d":0.1499999999999999},{"x":-22,"z":19.825,"w":0.48,"d":0.1499999999999999},{"x":-28.925,"z":13,"w":0.1499999999999999,"d":0.48},{"x":-25.075,"z":13,"w":0.1499999999999999,"d":0.48},{"x":-28.925,"z":10,"w":0.1499999999999999,"d":0.48},{"x":-25.075,"z":10,"w":0.1499999999999999,"d":0.48},{"x":-25,"z":11.5,"w":0.48,"d":3},{"x":-29,"z":11.5,"w":0.48,"d":3},{"x":-21.5,"z":3.6,"w":3,"d":0.48},{"x":-21.5,"z":0.3999999999999999,"w":3,"d":0.48},{"x":-20,"z":0.4750000000000001,"w":0.48,"d":0.15000000000000013},{"x":-20,"z":3.525,"w":0.48,"d":0.15000000000000013},{"x":-23,"z":0.4750000000000001,"w":0.48,"d":0.15000000000000013},{"x":-23,"z":3.525,"w":0.48,"d":0.15000000000000013},{"x":-9,"z":-0.10000000000000009,"w":4,"d":0.48},{"x":-9,"z":-3.9,"w":4,"d":0.48},{"x":-7,"z":-3.825,"w":0.48,"d":0.1499999999999999},{"x":-7,"z":-0.17500000000000004,"w":0.48,"d":0.1499999999999999},{"x":-11,"z":-3.825,"w":0.48,"d":0.1499999999999999},{"x":-11,"z":-0.17500000000000004,"w":0.48,"d":0.1499999999999999},{"x":-21.525,"z":-6,"w":0.15000000000000013,"d":0.48},{"x":-18.475,"z":-6,"w":0.15000000000000013,"d":0.48},{"x":-21.525,"z":-12,"w":0.15000000000000013,"d":0.48},{"x":-18.475,"z":-12,"w":0.15000000000000013,"d":0.48},{"x":-18.4,"z":-9,"w":0.48,"d":6},{"x":-21.6,"z":-9,"w":0.48,"d":6},{"x":-16.5,"z":-15.2,"w":5,"d":0.48},{"x":-16.5,"z":-18.8,"w":5,"d":0.48},{"x":-14,"z":-18.725,"w":0.48,"d":0.15000000000000013},{"x":-14,"z":-15.275,"w":0.48,"d":0.15000000000000013},{"x":-19,"z":-18.725,"w":0.48,"d":0.15000000000000013},{"x":-19,"z":-15.275,"w":0.48,"d":0.15000000000000013},{"x":-6.725,"z":-6,"w":0.15000000000000013,"d":0.48},{"x":-3.275,"z":-6,"w":0.15000000000000013,"d":0.48},{"x":-6.725,"z":-12,"w":0.15000000000000013,"d":0.48},{"x":-3.275,"z":-12,"w":0.15000000000000013,"d":0.48},{"x":-3.2,"z":-9,"w":0.48,"d":6},{"x":-6.8,"z":-9,"w":0.48,"d":6},{"x":0,"z":-15.2,"w":4,"d":0.48},{"x":0,"z":-18.8,"w":4,"d":0.48},{"x":2,"z":-18.725,"w":0.48,"d":0.15000000000000013},{"x":2,"z":-15.275,"w":0.48,"d":0.15000000000000013},{"x":-2,"z":-18.725,"w":0.48,"d":0.15000000000000013},{"x":-2,"z":-15.275,"w":0.48,"d":0.15000000000000013},{"x":2.275,"z":-6,"w":0.15000000000000013,"d":0.48},{"x":5.725,"z":-6,"w":0.15000000000000013,"d":0.48},{"x":2.275,"z":-13,"w":0.15000000000000013,"d":0.48},{"x":5.725,"z":-13,"w":0.15000000000000013,"d":0.48},{"x":5.8,"z":-9.5,"w":0.48,"d":7},{"x":2.2,"z":-9.5,"w":0.48,"d":7},{"x":13.5,"z":-14.3,"w":3,"d":0.48},{"x":13.5,"z":-17.7,"w":3,"d":0.48},{"x":15,"z":-17.625,"w":0.48,"d":0.1499999999999999},{"x":15,"z":-14.375,"w":0.48,"d":0.1499999999999999},{"x":12,"z":-17.625,"w":0.48,"d":0.1499999999999999},{"x":12,"z":-14.375,"w":0.48,"d":0.1499999999999999},{"x":22.825,"z":-5,"w":0.1499999999999999,"d":0.48},{"x":26.175,"z":-5,"w":0.1499999999999999,"d":0.48},{"x":22.825,"z":-11,"w":0.1499999999999999,"d":0.48},{"x":26.175,"z":-11,"w":0.1499999999999999,"d":0.48},{"x":26.25,"z":-8,"w":0.48,"d":6},{"x":22.75,"z":-8,"w":0.48,"d":6},{"x":9,"z":4.8,"w":4,"d":0.48},{"x":9,"z":1.2,"w":4,"d":0.48},{"x":11,"z":1.275,"w":0.48,"d":0.15000000000000013},{"x":11,"z":4.725,"w":0.48,"d":0.15000000000000013},{"x":7,"z":1.275,"w":0.48,"d":0.15000000000000013},{"x":7,"z":4.725,"w":0.48,"d":0.15000000000000013},{"x":22,"z":4.7,"w":2.5,"d":0.48},{"x":22,"z":1.3,"w":2.5,"d":0.48},{"x":23.25,"z":1.375,"w":0.48,"d":0.1499999999999999},{"x":23.25,"z":4.625,"w":0.48,"d":0.1499999999999999},{"x":20.75,"z":1.375,"w":0.48,"d":0.1499999999999999},{"x":20.75,"z":4.625,"w":0.48,"d":0.1499999999999999},{"x":17.325,"z":10.5,"w":0.1499999999999999,"d":0.48},{"x":20.675,"z":10.5,"w":0.1499999999999999,"d":0.48},{"x":17.325,"z":8,"w":0.1499999999999999,"d":0.48},{"x":20.675,"z":8,"w":0.1499999999999999,"d":0.48},{"x":20.75,"z":9.25,"w":0.48,"d":2.5},{"x":17.25,"z":9.25,"w":0.48,"d":2.5},{"x":24.325,"z":10.5,"w":0.1499999999999999,"d":0.48},{"x":27.675,"z":10.5,"w":0.1499999999999999,"d":0.48},{"x":24.325,"z":5,"w":0.1499999999999999,"d":0.48},{"x":27.675,"z":5,"w":0.1499999999999999,"d":0.48},{"x":27.75,"z":7.75,"w":0.48,"d":5.5},{"x":24.25,"z":7.75,"w":0.48,"d":5.5},{"x":13,"z":17.8,"w":8,"d":0.48},{"x":13,"z":14.2,"w":8,"d":0.48},{"x":17,"z":14.275,"w":0.48,"d":0.15000000000000013},{"x":17,"z":17.725,"w":0.48,"d":0.15000000000000013},{"x":9,"z":14.275,"w":0.48,"d":0.15000000000000013},{"x":9,"z":17.725,"w":0.48,"d":0.15000000000000013}]);
+const AI_COLLISION_PROPS = Object.freeze([{"x":-18,"z":-2,"w":1.8,"d":1.6},{"x":-10.5,"z":-14.5,"w":1.6,"d":1.6},{"x":-5.2,"z":-19.2,"w":1.8,"d":1.5},{"x":18.2,"z":-16.8,"w":1.6,"d":1.6},{"x":25.5,"z":13,"w":1.5,"d":1.5},{"x":-29.3,"z":-19.4,"w":1.15,"d":0.9},{"x":-19.2,"z":-4.5,"w":1.15,"d":0.9},{"x":27,"z":17.2,"w":1.15,"d":0.9},{"x":-12,"z":-19.5,"w":1.15,"d":0.9}]);
+const AI_COLLISION_OBJECTS = Object.freeze([...AI_COLLISION_WALLS, ...AI_COLLISION_PROPS]);
+const AI_MAP_BOUNDS = Object.freeze({ minX: -33.2, maxX: 35.2, minZ: -22.2, maxZ: 23.2 });
+
 const CARGO_PICKUP = { x: -6, z: -17 };
 const CARGO_DELIVERY = { x: 13.2, z: 6.1 };
 const SPAWNS = [
@@ -57,6 +63,76 @@ const segmentHitsDoor = (x1, z1, x2, z2, radius = 0.58) => {
     if (pointHitsDoor(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, radius)) return true;
   }
   return false;
+};
+const pointHitsAiMap = (x, z, radius = 0.54, doorsLocked = false) => {
+  if (x < AI_MAP_BOUNDS.minX || x > AI_MAP_BOUNDS.maxX || z < AI_MAP_BOUNDS.minZ || z > AI_MAP_BOUNDS.maxZ) return true;
+  if (AI_COLLISION_OBJECTS.some((object) =>
+    Math.abs(x - object.x) < object.w / 2 + radius && Math.abs(z - object.z) < object.d / 2 + radius
+  )) return true;
+  return doorsLocked && pointHitsDoor(x, z, radius);
+};
+const segmentHitsAiMap = (x1, z1, x2, z2, radius = 0.54, doorsLocked = false) => {
+  const distance = Math.hypot(x2 - x1, z2 - z1);
+  const steps = Math.max(1, Math.ceil(distance / 0.13));
+  for (let index = 1; index <= steps; index += 1) {
+    const t = index / steps;
+    if (pointHitsAiMap(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, radius, doorsLocked)) return true;
+  }
+  return false;
+};
+const AI_GRID_STEP = 0.72;
+const aiGridPoint = (column, row) => ({
+  x: AI_MAP_BOUNDS.minX + column * AI_GRID_STEP,
+  z: AI_MAP_BOUNDS.minZ + row * AI_GRID_STEP,
+});
+const aiGridColumn = (x) => Math.round((x - AI_MAP_BOUNDS.minX) / AI_GRID_STEP);
+const aiGridRow = (z) => Math.round((z - AI_MAP_BOUNDS.minZ) / AI_GRID_STEP);
+const aiGridKey = (column, row) => `${column}:${row}`;
+const aiHeapPush = (heap, node) => {
+  heap.push(node);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (heap[parent].score <= node.score) break;
+    heap[index] = heap[parent];
+    index = parent;
+  }
+  heap[index] = node;
+};
+const aiHeapPop = (heap) => {
+  if (!heap.length) return null;
+  const root = heap[0];
+  const last = heap.pop();
+  if (heap.length && last) {
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      if (left >= heap.length) break;
+      const child = right < heap.length && heap[right].score < heap[left].score ? right : left;
+      if (heap[child].score >= last.score) break;
+      heap[index] = heap[child];
+      index = child;
+    }
+    heap[index] = last;
+  }
+  return root;
+};
+const nearestAiGridCell = (point, doorsLocked = false) => {
+  const baseColumn = aiGridColumn(point.x);
+  const baseRow = aiGridRow(point.z);
+  for (let radius = 0; radius <= 8; radius += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      for (let dz = -radius; dz <= radius; dz += 1) {
+        if (radius > 0 && Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
+        const column = baseColumn + dx;
+        const row = baseRow + dz;
+        const candidate = aiGridPoint(column, row);
+        if (!pointHitsAiMap(candidate.x, candidate.z, 0.52, doorsLocked)) return { column, row, ...candidate };
+      }
+    }
+  }
+  return null;
 };
 const pushPlayerOutsideDoors = (player) => {
   for (const door of DOOR_BARRIERS) {
@@ -170,27 +246,65 @@ const nearestAiZoneIndex = (point) => {
   });
   return best;
 };
-const buildAiRoute = (from, target) => {
-  const start = nearestAiZoneIndex(from);
-  const goal = nearestAiZoneIndex(target);
-  if (start === goal) return [{ x: target.x, z: target.z }];
-  const queue = [start];
-  const previous = new Map([[start, -1]]);
-  while (queue.length) {
-    const current = queue.shift();
-    if (current === goal) break;
-    for (const next of AI_ZONE_LINKS[current]) {
-      if (previous.has(next)) continue;
-      previous.set(next, current);
-      queue.push(next);
+const buildAiRoute = (from, target, doorsLocked = false) => {
+  if (!segmentHitsAiMap(from.x, from.z, target.x, target.z, 0.52, doorsLocked)) return [{ x: target.x, z: target.z }];
+  const startCell = nearestAiGridCell(from, doorsLocked);
+  const goalCell = nearestAiGridCell(target, doorsLocked);
+  if (!startCell || !goalCell) return [];
+  const startKey = aiGridKey(startCell.column, startCell.row);
+  const goalKey = aiGridKey(goalCell.column, goalCell.row);
+  const open = [];
+  const previous = new Map();
+  const costs = new Map([[startKey, 0]]);
+  aiHeapPush(open, { column: startCell.column, row: startCell.row, key: startKey, score: 0 });
+  const directions = [
+    [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
+    [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
+  ];
+  let iterations = 0;
+  while (open.length && iterations < 9000) {
+    iterations += 1;
+    const current = aiHeapPop(open);
+    if (!current) break;
+    if (current.key === goalKey) break;
+    const currentCost = costs.get(current.key);
+    if (!Number.isFinite(currentCost)) continue;
+    const currentPoint = aiGridPoint(current.column, current.row);
+    for (const [dx, dz, travelCost] of directions) {
+      const column = current.column + dx;
+      const row = current.row + dz;
+      const point = aiGridPoint(column, row);
+      if (pointHitsAiMap(point.x, point.z, 0.52, doorsLocked)) continue;
+      if (segmentHitsAiMap(currentPoint.x, currentPoint.z, point.x, point.z, 0.52, doorsLocked)) continue;
+      const key = aiGridKey(column, row);
+      const nextCost = currentCost + travelCost;
+      if (nextCost >= (costs.get(key) ?? Infinity)) continue;
+      costs.set(key, nextCost);
+      previous.set(key, current.key);
+      const heuristic = Math.hypot(column - goalCell.column, row - goalCell.row);
+      aiHeapPush(open, { column, row, key, score: nextCost + heuristic });
     }
   }
-  if (!previous.has(goal)) return [{ x: target.x, z: target.z }];
-  const indexes = [];
-  for (let current = goal; current !== -1; current = previous.get(current)) indexes.push(current);
-  indexes.reverse();
-  const route = indexes.slice(1).map((index) => ({ x: AI_ZONES[index].x, z: AI_ZONES[index].z }));
-  route.push({ x: target.x, z: target.z });
+  if (!costs.has(goalKey)) return [];
+  const cells = [];
+  for (let key = goalKey; key && key !== startKey; key = previous.get(key)) {
+    const [column, row] = key.split(':').map(Number);
+    cells.push(aiGridPoint(column, row));
+  }
+  cells.reverse();
+  const route = [];
+  let anchor = { x: from.x, z: from.z };
+  for (let index = 0; index < cells.length;) {
+    let farthest = index;
+    for (let candidate = index + 1; candidate < cells.length; candidate += 1) {
+      if (segmentHitsAiMap(anchor.x, anchor.z, cells[candidate].x, cells[candidate].z, 0.52, doorsLocked)) break;
+      farthest = candidate;
+    }
+    route.push(cells[farthest]);
+    anchor = cells[farthest];
+    index = farthest + 1;
+  }
+  if (!segmentHitsAiMap(anchor.x, anchor.z, target.x, target.z, 0.5, doorsLocked)) route.push({ x: target.x, z: target.z });
   return route;
 };
 
@@ -757,7 +871,7 @@ export class GameRoom extends DurableObject {
       bot.aiGoalX = target.x;
       bot.aiGoalZ = target.z;
       bot.aiRouteAt = Date.now();
-      bot.aiPath = buildAiRoute(bot, target);
+      bot.aiPath = buildAiRoute(bot, target, this.sabotage?.kind === "doors");
     }
     while (bot.aiPath.length && Math.hypot(bot.x - bot.aiPath[0].x, bot.z - bot.aiPath[0].z) < 0.72) bot.aiPath.shift();
     const waypoint = bot.aiPath[0] || target;
@@ -769,9 +883,28 @@ export class GameRoom extends DurableObject {
     const step = Math.min(distance, speed * clamp(dt, 0.05, 0.42));
     const nextX = bot.x + dx / distance * step;
     const nextZ = bot.z + dz / distance * step;
-    if (this.sabotage?.kind === "doors" && segmentHitsDoor(bot.x, bot.z, nextX, nextZ)) return false;
-    bot.x = clamp(nextX, -33.2, 35.2);
-    bot.z = clamp(nextZ, -22.2, 23.2);
+    const doorsLocked = this.sabotage?.kind === "doors";
+    let safeX = nextX;
+    let safeZ = nextZ;
+    if (segmentHitsAiMap(bot.x, bot.z, safeX, safeZ, 0.54, doorsLocked)) {
+      // 角や設備へ当たった時は、壁に沿って進める方向を探します。
+      const candidates = [
+        { x: nextX, z: bot.z }, { x: bot.x, z: nextZ },
+        { x: bot.x - dz / distance * step * 0.72, z: bot.z + dx / distance * step * 0.72 },
+        { x: bot.x + dz / distance * step * 0.72, z: bot.z - dx / distance * step * 0.72 },
+      ].filter((candidate) => !segmentHitsAiMap(bot.x, bot.z, candidate.x, candidate.z, 0.54, doorsLocked));
+      candidates.sort((a, b) => Math.hypot(a.x - waypoint.x, a.z - waypoint.z) - Math.hypot(b.x - waypoint.x, b.z - waypoint.z));
+      const alternative = candidates[0];
+      if (!alternative) {
+        bot.aiPath = [];
+        bot.aiRouteAt = 0;
+        return false;
+      }
+      safeX = alternative.x;
+      safeZ = alternative.z;
+    }
+    bot.x = clamp(safeX, -33.2, 35.2);
+    bot.z = clamp(safeZ, -22.2, 23.2);
     bot.rotation = Math.atan2(dx, dz);
     moves.push({ id: bot.id, x: bot.x, z: bot.z, rotation: bot.rotation });
     return Math.hypot(bot.x - target.x, bot.z - target.z) < 0.9;
@@ -841,47 +974,68 @@ export class GameRoom extends DurableObject {
     const accused = mentioned?.id === bot.id && /(怪し|人狼|犯人|やった|倒した|殺|うそ|嘘|投票)/.test(compact);
     const asksWhere = /(どこ|場所|いた|居た|現在地|アリバイ)/.test(compact);
     const asksWho = /(誰|だれ|怪し|人狼|犯人|投票先)/.test(compact);
-    const asksSaw = /(見た|みた|目撃|近く|一緒)/.test(compact);
-    const asksWhy = /(なぜ|なんで|理由|根拠)/.test(compact);
+    const asksSaw = /(見た|みた|目撃|近く|一緒|すれ違)/.test(compact);
+    const asksWhy = /(なぜ|なんで|どうして|理由|根拠)/.test(compact);
+    const agrees = /(そう思う|同意|賛成|どう思う)/.test(compact);
     const zone = aiZoneLabel(bot);
     const senderName = sender?.name || "みんな";
     const suspect = this.chooseBotSuspect(bot, new Set([sender?.id].filter(Boolean)));
     const suspectName = suspect?.name || "まだ分かりません";
-    const hasMemory = Boolean(bot.aiSuspectId && this.players.get(bot.aiSuspectId)?.alive);
+    const remembered = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
+    const hasMemory = Boolean(remembered?.alive);
+    const nearbyInfo = this.nearestPlayerFor(bot, (target) => target.alive && target.meetingEligible !== false && target.id !== bot.id && !target.practiceTarget);
+    const nearby = nearbyInfo.distance <= 7.5 ? nearbyInfo.player : null;
+    const pick = (lines) => lines[Math.floor(Math.random() * lines.length)];
 
     if (accused) {
-      if (bot.role === "impostor") {
-        return `${senderName}、私は違います。${zone}にいました。むしろ${suspectName}の動きが気になります。`;
-      }
-      return `${senderName}、私は人狼ではありません。${zone}で行動していました。私を追放するとクルーが不利です。`;
+      if (bot.role === "impostor") return pick([
+        `${senderName}さん、私は違います。会議の前は${zone}にいました。${suspectName}さんの動きも確認した方がいいと思います。`,
+        `その見方は違うと思います。私は${zone}で行動していました。決めつけずに、ほかの目撃情報も聞きたいです。`,
+      ]);
+      return pick([
+        `${senderName}さん、私はクルーです。会議の前は${zone}にいました。私を追放する前に、ほかの情報も確認してください。`,
+        `私は人狼ではありません。${zone}で行動していました。疑われる理由があるなら、もう少し詳しく教えてください。`,
+      ]);
     }
-    if (mentioned?.id === bot.id && asksWhere) return `${senderName}、私は会議前まで${zone}にいました。`;
+    if (mentioned?.id === bot.id && asksWhere) {
+      return nearby
+        ? `会議の前は${zone}にいました。最後に近くで見たのは${nearby.name}さんです。`
+        : `会議の前は${zone}にいました。近くには、はっきり確認できる人はいませんでした。`;
+    }
     if (mentioned?.id === bot.id && asksWhy) {
       return hasMemory
-        ? `${senderName}、${suspectName}を近くで見かけた直後に異変があったからです。`
-        : `${senderName}、決定的な証拠はありません。位置と動きから判断しています。`;
+        ? `${remembered.name}さんを近くで見たあとに異変が起きたので、少し気になっています。ただ、まだ断定はできません。`
+        : `決定的な証拠はありません。移動した場所と、会議までの動きから考えています。`;
     }
-    if (asksWhere && !asksWho) return `私は会議前まで${zone}にいました。近くにいた人は覚えていません。`;
+    if (asksWhere && !asksWho) {
+      return nearby
+        ? `私は${zone}にいました。${nearby.name}さんを近くで見かけました。`
+        : `私は${zone}にいました。近くにいた人までは確認できませんでした。`;
+    }
     if (asksSaw) {
       return hasMemory
-        ? `${suspectName}を近くで見ました。断定はできませんが、注意した方がいいです。`
-        : `決定的な瞬間は見ていません。私は${zone}にいました。`;
+        ? `${remembered.name}さんを近くで見ました。犯行そのものは見ていませんが、動きは少し気になりました。`
+        : `犯行の瞬間は見ていません。私は会議の前まで${zone}にいました。`;
     }
     if (asksWho) {
       return hasMemory
-        ? `私は${suspectName}が怪しいと思います。動きが不自然でした。`
-        : `まだ証拠が少ないです。今はスキップもありだと思います。`;
+        ? `今のところ、私は${remembered.name}さんが少し怪しいと思います。ただ、証拠はまだ十分ではありません。`
+        : `今の情報だけでは決めきれません。場所と目撃情報をもう少し整理してから投票したいです。`;
     }
     if (mentioned && mentioned.id !== bot.id) {
-      if (mentioned.id === bot.aiSuspectId) return `${mentioned.name}は少し怪しいです。近くで不自然な動きを見ました。`;
-      return `${mentioned.name}については、今のところ決め手がありません。`;
+      if (mentioned.id === bot.aiSuspectId) return `${mentioned.name}さんは少し気になっています。近くで見たあとの動きが不自然でした。`;
+      return `${mentioned.name}さんについては、今のところ決め手になる情報を持っていません。`;
     }
-    const generic = [
-      `私は${zone}にいました。情報がある人は教えてください。`,
-      hasMemory ? `${suspectName}の動きを確認したいです。` : "証拠が少ないので、場所を順番に確認しましょう。",
-      "急いで決めず、目撃情報を整理した方がいいと思います。",
-    ];
-    return generic[Math.floor(Math.random() * generic.length)];
+    if (agrees) {
+      return hasMemory
+        ? `${remembered.name}さんについては、私も少し気になっています。ただ、すぐに決めつけるのは危険だと思います。`
+        : `まだ情報が少ないので、今は断定せずに話を聞いた方がいいと思います。`;
+    }
+    return pick([
+      `私は${zone}にいました。知りたいことがあれば、場所や目撃した人について聞いてください。`,
+      `今のところ決定的な証拠はありません。みんなのいた場所を順番に確認したいです。`,
+      hasMemory ? `${remembered.name}さんの動きが少し気になっています。ほかに見た人がいれば教えてください。` : `情報がまだ足りません。焦らずに整理してから投票しましょう。`,
+    ]);
   }
 
   queueBotMeetingReplies(sender, text) {
@@ -972,10 +1126,6 @@ export class GameRoom extends DurableObject {
       const suspect = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
       if (suspect?.alive && suspect.meetingEligible !== false && suspect.id !== bot.id && Math.random() < 0.9) {
         targetId = suspect.id;
-        if (!bot.aiMeetingSpoken) {
-          bot.aiMeetingSpoken = true;
-          this.broadcastBotMeetingChat(bot, `${suspect.name}が怪しいと思います。動きが不自然でした。`);
-        }
       } else if (bot.role === "impostor") {
         const crewTargets = eligible.filter((target) => target.role !== "impostor");
         if (crewTargets.length && Math.random() > 0.16) targetId = crewTargets[Math.floor(Math.random() * crewTargets.length)].id;
@@ -1379,7 +1529,6 @@ export class GameRoom extends DurableObject {
         item.aiLastMeetingReplyAt = 0;
       }
     }
-    this.scheduleOpeningBotTalk(player, reason);
     this.meetingEndsAt = Date.now() + this.settings.meetingTime * 1000;
     await this.ctx.storage.setAlarm(this.meetingEndsAt);
     await this.persist();
