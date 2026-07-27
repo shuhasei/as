@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-auto-meeting-quality-v55";
+const MAP_VERSION = "aurora-ai-cpu-meeting-talk-v57";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -88,6 +88,113 @@ const shuffled = (items) => {
   return result;
 };
 
+const BOT_NAMES = [
+  "CPU アオ", "CPU ミドリ", "CPU ユキ", "CPU ソラ", "CPU モモ", "CPU レン",
+  "CPU ハル", "CPU ナギ", "CPU リン", "CPU カイ", "CPU ヒカリ"
+];
+const AI_ZONES = Object.freeze([
+  { id: "hub", x: 0, z: 0, w: 14, d: 12 },
+  { id: "atrium", x: 0, z: 18, w: 18, d: 10 },
+  { id: "reactorRoom", x: -27, z: 18, w: 10, d: 10 },
+  { id: "engineRoom", x: -27, z: 6, w: 10, d: 8 },
+  { id: "securityRoom", x: -16, z: -2, w: 10, d: 8 },
+  { id: "medicalRoom", x: -25, z: -17, w: 12, d: 10 },
+  { id: "storageRoom", x: -8, z: -17, w: 12, d: 10 },
+  { id: "commsRoom", x: 7, z: -17, w: 10, d: 8 },
+  { id: "shieldRoom", x: 20, z: -15, w: 10, d: 8 },
+  { id: "navigationRoom", x: 29, z: 0, w: 12, d: 10 },
+  { id: "weaponsRoom", x: 23, z: 15, w: 12, d: 9 },
+  { id: "adminRoom", x: 16, z: 4, w: 10, d: 8 },
+  { id: "c-hub-north", x: 0, z: 9.5, w: 4.2, d: 7 },
+  { id: "c-reactor-atrium", x: -15.5, z: 18, w: 13, d: 3.8 },
+  { id: "c-reactor-engine", x: -27, z: 11.5, w: 4, d: 3 },
+  { id: "c-engine-security", x: -21.5, z: 2, w: 3, d: 3.2 },
+  { id: "c-security-hub", x: -9, z: -2, w: 4, d: 3.8 },
+  { id: "c-security-medical", x: -20, z: -9, w: 3.2, d: 6 },
+  { id: "c-medical-storage", x: -16.5, z: -17, w: 5, d: 3.6 },
+  { id: "c-hub-storage", x: -5, z: -9, w: 3.6, d: 6 },
+  { id: "c-storage-comms", x: 0, z: -17, w: 4, d: 3.6 },
+  { id: "c-hub-comms", x: 4, z: -9.5, w: 3.6, d: 7 },
+  { id: "c-comms-shield", x: 13.5, z: -16, w: 3, d: 3.4 },
+  { id: "c-shield-navigation", x: 24.5, z: -8, w: 3.5, d: 6 },
+  { id: "c-hub-admin", x: 9, z: 3, w: 4, d: 3.6 },
+  { id: "c-admin-navigation", x: 22, z: 3, w: 2.5, d: 3.4 },
+  { id: "c-admin-weapons", x: 19, z: 9.25, w: 3.5, d: 2.5 },
+  { id: "c-weapons-navigation", x: 26, z: 7.75, w: 3.5, d: 5.5 },
+  { id: "c-atrium-weapons", x: 13, z: 16, w: 8, d: 3.6 },
+]);
+const AI_ZONE_LABELS = Object.freeze({
+  hub: "中央ホール", atrium: "アトリウム", reactorRoom: "リアクター室", engineRoom: "エンジン室",
+  securityRoom: "セキュリティ室", medicalRoom: "医務室", storageRoom: "倉庫", commsRoom: "通信室",
+  shieldRoom: "シールド室", navigationRoom: "ナビゲーション室", weaponsRoom: "武器庫", adminRoom: "管理室",
+});
+const aiZoneLabel = (player) => {
+  const zone = AI_ZONES[nearestAiZoneIndex(player)];
+  if (!zone) return "中央付近";
+  if (AI_ZONE_LABELS[zone.id]) return AI_ZONE_LABELS[zone.id];
+  const nearbyRoom = AI_ZONES
+    .filter((candidate) => AI_ZONE_LABELS[candidate.id])
+    .sort((a, b) => Math.hypot(player.x - a.x, player.z - a.z) - Math.hypot(player.x - b.x, player.z - b.z))[0];
+  return AI_ZONE_LABELS[nearbyRoom?.id] || "通路";
+};
+const AI_ZONE_INDEX = new Map(AI_ZONES.map((zone, index) => [zone.id, index]));
+const AI_ZONE_LINKS = AI_ZONES.map(() => []);
+for (let a = 0; a < AI_ZONES.length; a += 1) {
+  for (let b = a + 1; b < AI_ZONES.length; b += 1) {
+    const first = AI_ZONES[a];
+    const second = AI_ZONES[b];
+    const gapX = Math.max(0, Math.abs(first.x - second.x) - (first.w + second.w) / 2);
+    const gapZ = Math.max(0, Math.abs(first.z - second.z) - (first.d + second.d) / 2);
+    const overlapX = Math.min(first.x + first.w / 2, second.x + second.w / 2) - Math.max(first.x - first.w / 2, second.x - second.w / 2);
+    const overlapZ = Math.min(first.z + first.d / 2, second.z + second.d / 2) - Math.max(first.z - first.d / 2, second.z - second.d / 2);
+    if (gapX <= 1.2 && gapZ <= 1.2 && (overlapX > 0.3 || overlapZ > 0.3)) {
+      AI_ZONE_LINKS[a].push(b);
+      AI_ZONE_LINKS[b].push(a);
+    }
+  }
+}
+const pointInAiZone = (point, zone, margin = 0.35) =>
+  point.x >= zone.x - zone.w / 2 + margin && point.x <= zone.x + zone.w / 2 - margin &&
+  point.z >= zone.z - zone.d / 2 + margin && point.z <= zone.z + zone.d / 2 - margin;
+const nearestAiZoneIndex = (point) => {
+  const containing = AI_ZONES.findIndex((zone) => pointInAiZone(point, zone));
+  if (containing >= 0) return containing;
+  let best = 0;
+  let bestDistance = Infinity;
+  AI_ZONES.forEach((zone, index) => {
+    const distance = Math.hypot(point.x - zone.x, point.z - zone.z);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+  });
+  return best;
+};
+const buildAiRoute = (from, target) => {
+  const start = nearestAiZoneIndex(from);
+  const goal = nearestAiZoneIndex(target);
+  if (start === goal) return [{ x: target.x, z: target.z }];
+  const queue = [start];
+  const previous = new Map([[start, -1]]);
+  while (queue.length) {
+    const current = queue.shift();
+    if (current === goal) break;
+    for (const next of AI_ZONE_LINKS[current]) {
+      if (previous.has(next)) continue;
+      previous.set(next, current);
+      queue.push(next);
+    }
+  }
+  if (!previous.has(goal)) return [{ x: target.x, z: target.z }];
+  const indexes = [];
+  for (let current = goal; current !== -1; current = previous.get(current)) indexes.push(current);
+  indexes.reverse();
+  const route = indexes.slice(1).map((index) => ({ x: AI_ZONES[index].x, z: AI_ZONES[index].z }));
+  route.push({ x: target.x, z: target.z });
+  return route;
+};
+
+
 export class GameRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -105,6 +212,9 @@ export class GameRoom extends DurableObject {
     this.practiceMode = false;
     this.settings = { ...DEFAULT_SETTINGS };
     this.moveTicks = 0;
+    this.lastAiTickAt = 0;
+    this.lastAiPersistAt = 0;
+    this.aiTickRunning = false;
 
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment();
@@ -118,15 +228,13 @@ export class GameRoom extends DurableObject {
       // Durable Objectの再起動後に、切断済みプレイヤーだけが保存状態へ
       // 残ることがあります。現在接続中のWebSocketを基準に整理します。
       const connectedIds = new Set(this.sessions.keys());
-      for (const playerId of [...this.players.keys()]) {
-        if (!connectedIds.has(playerId)) this.players.delete(playerId);
+      for (const [playerId, player] of [...this.players.entries()]) {
+        if (!player.isBot && !connectedIds.has(playerId)) this.players.delete(playerId);
       }
 
-      if (this.hostId && !this.players.has(this.hostId)) {
-        this.hostId = this.players.keys().next().value || null;
-      }
-
-      if (this.players.size === 0) {
+      this.hostId = this.pickHumanHost(this.hostId);
+      const hasConnectedHuman = [...this.players.values()].some((player) => !player.isBot && connectedIds.has(player.id));
+      if (!hasConnectedHuman) {
         await this.resetEmptyRoom();
       } else {
         await this.persist();
@@ -149,12 +257,13 @@ export class GameRoom extends DurableObject {
       carryingCargo: Boolean(p.carryingCargo),
       groupVoiceJoined: Boolean(p.groupVoiceJoined),
       meetingEligible: p.meetingEligible !== false,
+      isBot: Boolean(p.isBot),
+      aiPath: Array.isArray(p.aiPath) ? p.aiPath : [],
+      aiPendingReplies: Array.isArray(p.aiPendingReplies) ? p.aiPendingReplies : [],
     }]));
     this.votes = new Map(saved.votes || []);
 
-    if (this.hostId && !this.players.has(this.hostId)) {
-      this.hostId = this.players.keys().next().value || null;
-    }
+    this.hostId = this.pickHumanHost(this.hostId);
   }
 
   serializableState() {
@@ -174,6 +283,14 @@ export class GameRoom extends DurableObject {
       })),
       votes: [...this.votes.entries()],
     };
+  }
+
+  pickHumanHost(preferredId = null) {
+    if (preferredId) {
+      const preferred = this.players.get(preferredId);
+      if (preferred && !preferred.isBot && this.sessions.has(preferredId)) return preferredId;
+    }
+    return [...this.players.values()].find((player) => !player.isBot && this.sessions.has(player.id))?.id || null;
   }
 
   async persist() {
@@ -286,7 +403,8 @@ export class GameRoom extends DurableObject {
         z: p.z,
         rotation: p.rotation,
         alive: p.alive,
-        connected: this.sessions.has(p.id),
+        connected: Boolean(p.isBot) || this.sessions.has(p.id),
+        bot: Boolean(p.isBot),
         host: p.id === this.hostId,
         role: p.id === forId ? p.role : undefined,
         tasks: p.id === forId ? p.tasks : undefined,
@@ -381,6 +499,12 @@ export class GameRoom extends DurableObject {
     switch (message.type) {
       case "move":
         this.move(player, message);
+        break;
+      case "botControl":
+        await this.botControl(player, message);
+        break;
+      case "aiTick":
+        await this.aiTick(player);
         break;
       case "start":
         await this.start(player);
@@ -518,6 +642,7 @@ export class GameRoom extends DurableObject {
       carryingCargo: false,
       hat: HATS.has(String(message.hat || "none")) ? String(message.hat || "none") : "none",
       groupVoiceJoined: false,
+      isBot: false,
       shielded: false,
       abilityUsed: false,
       downedAt: 0,
@@ -529,6 +654,459 @@ export class GameRoom extends DurableObject {
     await this.persist();
     this.send(id, { type: "joined", id, room: this.roomCode, phase: this.phase });
     this.syncAll();
+  }
+
+  createBot() {
+    if (this.players.size >= 12) return null;
+    const usedNames = new Set([...this.players.values()].map((player) => player.name));
+    const usedColors = new Set([...this.players.values()].map((player) => player.color));
+    const name = BOT_NAMES.find((candidate) => !usedNames.has(candidate)) || `CPU ${this.players.size + 1}`;
+    const color = COLORS.find((candidate) => !usedColors.has(candidate)) || COLORS[this.players.size % COLORS.length];
+    const hats = [...HATS].filter((hat) => hat !== "none");
+    const id = `bot-${uid()}`;
+    const [x, z] = SPAWNS[this.players.size % SPAWNS.length];
+    const now = Date.now();
+    const bot = {
+      id,
+      name,
+      color,
+      x,
+      z,
+      rotation: 0,
+      alive: true,
+      role: "crew",
+      tasks: [],
+      completedTasks: new Set(),
+      tasksDone: 0,
+      emergencyUsed: false,
+      lastKillAt: 0,
+      reported: false,
+      spectator: false,
+      meetingEligible: true,
+      hidden: false,
+      hiddenAt: null,
+      carryingCargo: false,
+      hat: hats[Math.floor(Math.random() * hats.length)] || "none",
+      groupVoiceJoined: false,
+      shielded: false,
+      abilityUsed: false,
+      downedAt: 0,
+      bodyX: null,
+      bodyZ: null,
+      bodyRotation: 0,
+      isBot: true,
+      aiPath: [],
+      aiGoalKey: "",
+      aiGoalX: x,
+      aiGoalZ: z,
+      aiRouteAt: 0,
+      aiActionKey: "",
+      aiActionAt: 0,
+      aiVoteAt: 0,
+      aiMeetingSpoken: false,
+      aiPendingReplies: [],
+      aiLastMeetingReplyAt: 0,
+      aiSuspectId: null,
+      aiNextSabotageAt: now + 18000 + Math.random() * 18000,
+      aiPatrolIndex: Math.floor(Math.random() * TASKS.length),
+    };
+    this.players.set(id, bot);
+    return bot;
+  }
+
+  async botControl(player, message) {
+    if (player.id !== this.hostId || player.isBot || this.phase !== "lobby") {
+      this.send(player.id, { type: "error", message: "CPUはホストがロビーで追加・削除できます。" });
+      return;
+    }
+    const action = String(message.action || "");
+    if (action === "add") {
+      if (!this.createBot()) {
+        this.send(player.id, { type: "error", message: "参加人数は最大12人です。" });
+        return;
+      }
+    } else if (action === "remove") {
+      const bot = [...this.players.values()].reverse().find((item) => item.isBot);
+      if (!bot) {
+        this.send(player.id, { type: "error", message: "削除できるCPUがいません。" });
+        return;
+      }
+      this.players.delete(bot.id);
+      this.votes.delete(bot.id);
+    } else {
+      return;
+    }
+    await this.persist();
+    this.syncAll();
+  }
+
+  botActionReady(bot, key, now, minimum = 650, maximum = 1250) {
+    if (bot.aiActionKey !== key) {
+      bot.aiActionKey = key;
+      bot.aiActionAt = now + minimum + Math.random() * Math.max(0, maximum - minimum);
+      return false;
+    }
+    return now >= Number(bot.aiActionAt || 0);
+  }
+
+  moveBotToward(bot, target, key, dt, moves) {
+    if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.z)) return false;
+    const goalMoved = Math.hypot(Number(bot.aiGoalX || 0) - target.x, Number(bot.aiGoalZ || 0) - target.z) > 2.2;
+    if (bot.aiGoalKey !== key || !Array.isArray(bot.aiPath) || bot.aiPath.length === 0 || goalMoved || Date.now() - Number(bot.aiRouteAt || 0) > 5500) {
+      bot.aiGoalKey = key;
+      bot.aiGoalX = target.x;
+      bot.aiGoalZ = target.z;
+      bot.aiRouteAt = Date.now();
+      bot.aiPath = buildAiRoute(bot, target);
+    }
+    while (bot.aiPath.length && Math.hypot(bot.x - bot.aiPath[0].x, bot.z - bot.aiPath[0].z) < 0.72) bot.aiPath.shift();
+    const waypoint = bot.aiPath[0] || target;
+    const dx = waypoint.x - bot.x;
+    const dz = waypoint.z - bot.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance < 0.05) return true;
+    const speed = (2.15 + ((bot.id.charCodeAt(bot.id.length - 1) || 0) % 5) * 0.06) * this.settings.speed;
+    const step = Math.min(distance, speed * clamp(dt, 0.05, 0.42));
+    const nextX = bot.x + dx / distance * step;
+    const nextZ = bot.z + dz / distance * step;
+    if (this.sabotage?.kind === "doors" && segmentHitsDoor(bot.x, bot.z, nextX, nextZ)) return false;
+    bot.x = clamp(nextX, -33.2, 35.2);
+    bot.z = clamp(nextZ, -22.2, 23.2);
+    bot.rotation = Math.atan2(dx, dz);
+    moves.push({ id: bot.id, x: bot.x, z: bot.z, rotation: bot.rotation });
+    return Math.hypot(bot.x - target.x, bot.z - target.z) < 0.9;
+  }
+
+  nearestPlayerFor(bot, predicate) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (const target of this.players.values()) {
+      if (target.id === bot.id || !predicate(target)) continue;
+      const distance = dist(bot, target);
+      if (distance < bestDistance) {
+        best = target;
+        bestDistance = distance;
+      }
+    }
+    return { player: best, distance: bestDistance };
+  }
+
+  broadcastBotMeetingChat(bot, text, replyTo = null) {
+    const cleaned = String(text || "").replace(/[<>]/g, "").trim().slice(0, 120);
+    if (!cleaned || this.phase !== "meeting" || !bot?.alive || bot.meetingEligible === false) return;
+    this.broadcast({
+      type: "chat",
+      from: bot.name,
+      fromId: bot.id,
+      text: cleaned,
+      alive: true,
+      phase: "meeting",
+      bot: true,
+      replyTo,
+      spoken: true,
+    });
+  }
+
+  mentionedPlayerInText(text) {
+    const normalized = String(text || "").toLowerCase().replace(/[\s　]/g, "");
+    if (!normalized) return null;
+    const candidates = [...this.players.values()]
+      .filter((player) => player.alive && player.meetingEligible !== false && !player.practiceTarget)
+      .sort((a, b) => b.name.length - a.name.length);
+    return candidates.find((player) => {
+      const full = player.name.toLowerCase().replace(/[\s　]/g, "");
+      const short = full.replace(/^cpu/, "");
+      return normalized.includes(full) || (short.length >= 2 && normalized.includes(short));
+    }) || null;
+  }
+
+  chooseBotSuspect(bot, excludedIds = new Set()) {
+    const remembered = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
+    if (remembered?.alive && remembered.meetingEligible !== false && remembered.id !== bot.id && !excludedIds.has(remembered.id)) return remembered;
+    const candidates = [...this.players.values()].filter((target) =>
+      target.alive && target.meetingEligible !== false && target.id !== bot.id && !target.practiceTarget && !excludedIds.has(target.id)
+    );
+    if (!candidates.length) return null;
+    if (bot.role === "impostor") {
+      const crew = candidates.filter((target) => target.role !== "impostor");
+      if (crew.length) return crew[Math.floor(Math.random() * crew.length)];
+    }
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  buildBotMeetingReply(bot, sender, text) {
+    const source = String(text || "").trim();
+    const compact = source.toLowerCase().replace(/[\s　]/g, "");
+    const mentioned = this.mentionedPlayerInText(source);
+    const accused = mentioned?.id === bot.id && /(怪し|人狼|犯人|やった|倒した|殺|うそ|嘘|投票)/.test(compact);
+    const asksWhere = /(どこ|場所|いた|居た|現在地|アリバイ)/.test(compact);
+    const asksWho = /(誰|だれ|怪し|人狼|犯人|投票先)/.test(compact);
+    const asksSaw = /(見た|みた|目撃|近く|一緒)/.test(compact);
+    const asksWhy = /(なぜ|なんで|理由|根拠)/.test(compact);
+    const zone = aiZoneLabel(bot);
+    const senderName = sender?.name || "みんな";
+    const suspect = this.chooseBotSuspect(bot, new Set([sender?.id].filter(Boolean)));
+    const suspectName = suspect?.name || "まだ分かりません";
+    const hasMemory = Boolean(bot.aiSuspectId && this.players.get(bot.aiSuspectId)?.alive);
+
+    if (accused) {
+      if (bot.role === "impostor") {
+        return `${senderName}、私は違います。${zone}にいました。むしろ${suspectName}の動きが気になります。`;
+      }
+      return `${senderName}、私は人狼ではありません。${zone}で行動していました。私を追放するとクルーが不利です。`;
+    }
+    if (mentioned?.id === bot.id && asksWhere) return `${senderName}、私は会議前まで${zone}にいました。`;
+    if (mentioned?.id === bot.id && asksWhy) {
+      return hasMemory
+        ? `${senderName}、${suspectName}を近くで見かけた直後に異変があったからです。`
+        : `${senderName}、決定的な証拠はありません。位置と動きから判断しています。`;
+    }
+    if (asksWhere && !asksWho) return `私は会議前まで${zone}にいました。近くにいた人は覚えていません。`;
+    if (asksSaw) {
+      return hasMemory
+        ? `${suspectName}を近くで見ました。断定はできませんが、注意した方がいいです。`
+        : `決定的な瞬間は見ていません。私は${zone}にいました。`;
+    }
+    if (asksWho) {
+      return hasMemory
+        ? `私は${suspectName}が怪しいと思います。動きが不自然でした。`
+        : `まだ証拠が少ないです。今はスキップもありだと思います。`;
+    }
+    if (mentioned && mentioned.id !== bot.id) {
+      if (mentioned.id === bot.aiSuspectId) return `${mentioned.name}は少し怪しいです。近くで不自然な動きを見ました。`;
+      return `${mentioned.name}については、今のところ決め手がありません。`;
+    }
+    const generic = [
+      `私は${zone}にいました。情報がある人は教えてください。`,
+      hasMemory ? `${suspectName}の動きを確認したいです。` : "証拠が少ないので、場所を順番に確認しましょう。",
+      "急いで決めず、目撃情報を整理した方がいいと思います。",
+    ];
+    return generic[Math.floor(Math.random() * generic.length)];
+  }
+
+  queueBotMeetingReplies(sender, text) {
+    if (this.phase !== "meeting" || !sender?.alive || sender.meetingEligible === false || sender.isBot) return;
+    const now = Date.now();
+    const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
+    if (!bots.length) return;
+    const mentioned = this.mentionedPlayerInText(text);
+    const selected = [];
+    if (mentioned?.isBot) selected.push(mentioned);
+    const remaining = bots
+      .filter((bot) => !selected.includes(bot))
+      .sort((a, b) => {
+        const aPriority = a.aiSuspectId ? 0 : 1;
+        const bPriority = b.aiSuspectId ? 0 : 1;
+        return aPriority - bPriority || Number(a.aiLastMeetingReplyAt || 0) - Number(b.aiLastMeetingReplyAt || 0) || Math.random() - 0.5;
+      });
+    const replyCount = mentioned?.isBot ? 1 : Math.min(2, bots.length);
+    while (selected.length < replyCount && remaining.length) selected.push(remaining.shift());
+    selected.forEach((bot, index) => {
+      const pending = Array.isArray(bot.aiPendingReplies) ? bot.aiPendingReplies : [];
+      if (pending.length >= 2) return;
+      const reply = this.buildBotMeetingReply(bot, sender, text);
+      pending.push({ at: now + 650 + index * 950 + Math.random() * 500, text: reply, replyTo: sender.id });
+      bot.aiPendingReplies = pending;
+      bot.aiVoteAt = Math.max(Number(bot.aiVoteAt || 0), now + 4300 + index * 900);
+    });
+  }
+
+  scheduleOpeningBotTalk(reporter, reason) {
+    const now = Date.now();
+    const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
+    const speakers = bots
+      .sort((a, b) => Number(Boolean(b.aiSuspectId)) - Number(Boolean(a.aiSuspectId)) || Math.random() - 0.5)
+      .slice(0, Math.min(2, bots.length));
+    speakers.forEach((bot, index) => {
+      let text;
+      if (reporter?.id === bot.id) text = `${reason}。私は${aiZoneLabel(bot)}付近で見つけました。`;
+      else if (bot.aiSuspectId && this.players.get(bot.aiSuspectId)?.alive) text = `私は${this.players.get(bot.aiSuspectId).name}の動きが気になっています。`;
+      else text = `私は会議前まで${aiZoneLabel(bot)}にいました。`;
+      bot.aiPendingReplies = [{ at: now + 1000 + index * 1300 + Math.random() * 450, text, replyTo: null }];
+      bot.aiVoteAt = now + 7000 + index * 900 + Math.random() * 3500;
+    });
+  }
+
+  async aiTick(player) {
+    if (player.id !== this.hostId || player.isBot || !this.sessions.has(player.id)) return;
+    if (this.phase !== "playing" && this.phase !== "meeting") return;
+    const now = Date.now();
+    if (this.aiTickRunning || now - this.lastAiTickAt < 190) return;
+    this.aiTickRunning = true;
+    const dt = clamp((now - (this.lastAiTickAt || now - 240)) / 1000, 0.08, 0.4);
+    this.lastAiTickAt = now;
+    try {
+      if (this.phase === "meeting") {
+        await this.runAiMeeting(now);
+      } else {
+        await this.runAiPlaying(now, dt);
+      }
+      if (now - this.lastAiPersistAt > 2500) {
+        this.lastAiPersistAt = now;
+        await this.persist();
+      }
+    } finally {
+      this.aiTickRunning = false;
+    }
+  }
+
+  async runAiMeeting(now) {
+    const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
+    for (const bot of bots) {
+      if (this.phase !== "meeting") break;
+      const pending = Array.isArray(bot.aiPendingReplies) ? bot.aiPendingReplies : [];
+      const readyIndex = pending.findIndex((reply) => Number(reply?.at || 0) <= now);
+      if (readyIndex >= 0) {
+        const [reply] = pending.splice(readyIndex, 1);
+        bot.aiPendingReplies = pending;
+        bot.aiMeetingSpoken = true;
+        bot.aiLastMeetingReplyAt = now;
+        this.broadcastBotMeetingChat(bot, reply.text, reply.replyTo || null);
+      }
+      if (this.votes.has(bot.id)) continue;
+      if (!bot.aiVoteAt) bot.aiVoteAt = now + 6500 + Math.random() * 5000;
+      if (pending.length) bot.aiVoteAt = Math.max(bot.aiVoteAt, Number(pending[pending.length - 1]?.at || 0) + 900);
+      if (now < bot.aiVoteAt) continue;
+      const eligible = [...this.players.values()].filter((target) => target.alive && target.meetingEligible !== false && target.id !== bot.id && !target.practiceTarget);
+      let targetId = "skip";
+      const suspect = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
+      if (suspect?.alive && suspect.meetingEligible !== false && suspect.id !== bot.id && Math.random() < 0.9) {
+        targetId = suspect.id;
+        if (!bot.aiMeetingSpoken) {
+          bot.aiMeetingSpoken = true;
+          this.broadcastBotMeetingChat(bot, `${suspect.name}が怪しいと思います。動きが不自然でした。`);
+        }
+      } else if (bot.role === "impostor") {
+        const crewTargets = eligible.filter((target) => target.role !== "impostor");
+        if (crewTargets.length && Math.random() > 0.16) targetId = crewTargets[Math.floor(Math.random() * crewTargets.length)].id;
+      } else if (eligible.length && Math.random() > 0.62) {
+        targetId = eligible[Math.floor(Math.random() * eligible.length)].id;
+      }
+      await this.vote(bot, { targetId });
+    }
+  }
+
+  async runAiPlaying(now, dt) {
+    const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && !bot.spectator);
+    const moves = [];
+    for (const bot of bots) {
+      if (this.phase !== "playing") break;
+      if (bot.hidden) {
+        bot.hidden = false;
+        bot.hiddenAt = null;
+      }
+
+      const nearbyBody = [...this.players.values()].find((target) =>
+        !target.alive && !target.reported && target.downedAt && dist(bot, bodyPoint(target)) <= 2.8
+      );
+      const bodyAbilityAvailable = nearbyBody && (
+        (bot.role === "doctor" && !bot.abilityUsed && now - nearbyBody.downedAt <= 19500) ||
+        (bot.role === "detective" && !bot.abilityUsed)
+      );
+      if (nearbyBody && !bodyAbilityAvailable && (bot.role !== "impostor" || Math.random() < 0.12) && this.botActionReady(bot, `report:${nearbyBody.id}`, now, 450, 1000)) {
+        await this.report(bot, { bodyId: nearbyBody.id });
+        break;
+      }
+
+      if (this.sabotage && bot.role !== "impostor") {
+        const station = SABOTAGE_STATIONS[this.sabotage.kind];
+        const point = station ? TASK_POSITIONS[station] : null;
+        if (point) {
+          this.moveBotToward(bot, point, `repair:${station}`, dt, moves);
+          if (Math.hypot(bot.x - point.x, bot.z - point.z) <= 3.1 && this.botActionReady(bot, `fix:${station}`, now, 500, 1150)) {
+            await this.fixSabotage(bot, { station });
+          }
+          continue;
+        }
+      }
+
+      if (bot.role === "doctor" && !bot.abilityUsed) {
+        const body = [...this.players.values()].find((target) =>
+          !target.alive && !target.reported && !target.spectator && target.downedAt && now - target.downedAt <= 19500
+        );
+        if (body) {
+          const point = bodyPoint(body);
+          this.moveBotToward(bot, point, `revive:${body.id}`, dt, moves);
+          if (dist(bot, point) <= 2.7 && this.botActionReady(bot, `revive-action:${body.id}`, now, 450, 900)) await this.revive(bot, { targetId: body.id });
+          continue;
+        }
+      }
+
+      if (bot.role === "detective" && !bot.abilityUsed) {
+        const body = [...this.players.values()].find((target) => !target.alive && !target.reported && target.downedAt);
+        if (body) {
+          const point = bodyPoint(body);
+          this.moveBotToward(bot, point, `inspect:${body.id}`, dt, moves);
+          if (dist(bot, point) <= 3.0 && this.botActionReady(bot, `inspect-action:${body.id}`, now, 450, 900)) await this.inspect(bot, { targetId: body.id });
+          continue;
+        }
+      }
+
+      if (bot.role === "guard" && !bot.abilityUsed) {
+        const protectedTarget = this.nearestPlayerFor(bot, (target) => target.alive && !target.spectator && target.role !== "impostor" && !target.shielded).player;
+        if (protectedTarget) {
+          this.moveBotToward(bot, protectedTarget, `protect:${protectedTarget.id}`, dt, moves);
+          if (dist(bot, protectedTarget) <= 2.65 && this.botActionReady(bot, `protect-action:${protectedTarget.id}`, now, 400, 850)) await this.protect(bot, { targetId: protectedTarget.id });
+          continue;
+        }
+      }
+
+      if (bot.role === "impostor") {
+        if (!this.sabotage && now >= Number(bot.aiNextSabotageAt || 0)) {
+          const kinds = ["lights", "comms", "doors", "reactor"];
+          bot.aiNextSabotageAt = now + 24000 + Math.random() * 22000;
+          await this.startSabotage(bot, { kind: kinds[Math.floor(Math.random() * kinds.length)] });
+        }
+        const targetInfo = this.nearestPlayerFor(bot, (target) => target.alive && !target.spectator && !target.hidden && target.role !== "impostor");
+        const target = targetInfo.player;
+        if (target) {
+          const witnesses = [...this.players.values()].filter((other) =>
+            other.alive && other.id !== bot.id && other.id !== target.id && !other.hidden && dist(other, target) < 5.2
+          );
+          const cooldownReady = now - Number(bot.lastKillAt || 0) >= this.settings.killCooldown * 1000;
+          if (targetInfo.distance <= 2.65 && cooldownReady && (witnesses.length === 0 || Math.random() < 0.06) && this.botActionReady(bot, `kill:${target.id}`, now, 350, 750)) {
+            await this.kill(bot, { targetId: target.id });
+            continue;
+          }
+          if (targetInfo.distance < 23) {
+            this.moveBotToward(bot, target, `hunt:${target.id}`, dt, moves);
+            continue;
+          }
+        }
+        const fakeTask = TASKS[bot.aiPatrolIndex % TASKS.length];
+        const fakePoint = TASK_POSITIONS[fakeTask];
+        if (this.moveBotToward(bot, fakePoint, `fake:${fakeTask}`, dt, moves)) bot.aiPatrolIndex = (bot.aiPatrolIndex + 1) % TASKS.length;
+        continue;
+      }
+
+      const pendingTask = bot.tasks.find((task) => !bot.completedTasks.has(task));
+      if (!pendingTask) {
+        const patrolTask = TASKS[bot.aiPatrolIndex % TASKS.length];
+        const patrolPoint = TASK_POSITIONS[patrolTask];
+        if (this.moveBotToward(bot, patrolPoint, `patrol:${patrolTask}`, dt, moves)) bot.aiPatrolIndex = (bot.aiPatrolIndex + 1) % TASKS.length;
+        continue;
+      }
+
+      if (pendingTask === "cargo") {
+        if (!bot.carryingCargo) {
+          this.moveBotToward(bot, CARGO_PICKUP, "cargo:pickup", dt, moves);
+          if (dist(bot, CARGO_PICKUP) <= 2.8 && this.botActionReady(bot, "cargo:load", now, 700, 1400)) {
+            bot.carryingCargo = true;
+            bot.aiActionKey = "";
+          }
+        } else {
+          this.moveBotToward(bot, CARGO_DELIVERY, "cargo:delivery", dt, moves);
+          if (dist(bot, CARGO_DELIVERY) <= 2.8 && this.botActionReady(bot, "cargo:complete", now, 700, 1400)) await this.completeTask(bot, { task: "cargo" });
+        }
+        continue;
+      }
+
+      const taskPoint = TASK_POSITIONS[pendingTask];
+      if (!taskPoint) continue;
+      this.moveBotToward(bot, taskPoint, `task:${pendingTask}`, dt, moves);
+      if (dist(bot, taskPoint) <= 3.0 && this.botActionReady(bot, `task-action:${pendingTask}`, now, 750, 1550)) await this.completeTask(bot, { task: pendingTask });
+    }
+    if (moves.length) this.broadcast({ type: "botMoves", moves, serverTime: now });
   }
 
   async updateSettings(player, settings = {}) {
@@ -587,18 +1165,22 @@ export class GameRoom extends DurableObject {
       return;
     }
 
-    const list = [...this.players.values()];
+    let list = [...this.players.values()];
+    const humanPlayers = list.filter((item) => !item.isBot);
+    const botPlayers = list.filter((item) => item.isBot);
+    if (humanPlayers.length === 1 && botPlayers.length === 0) {
+      while (this.players.size < 6) this.createBot();
+      list = [...this.players.values()];
+      this.send(player.id, { type: "abilityResult", message: "一人プレイ用にCPUを5人追加しました。" });
+    }
     if (list.length === 0) {
       this.send(player.id, { type: "error", message: "参加者がいません。" });
       return;
     }
 
-    this.practiceMode = list.length === 1;
-    // 1人練習でも人狼役を試せるよう、必ず1人以上を人狼にします。
-    // 2人以上では最低1人のクルーを残します。
-    const impostorCount = list.length === 1
-      ? 1
-      : Math.min(this.settings.impostors, Math.max(1, list.length - 1));
+    this.practiceMode = false;
+    // CPUを含めた参加者全体から役職を決め、必ずクルー側を1人以上残します。
+    const impostorCount = Math.min(this.settings.impostors, Math.max(1, list.length - 1));
     const impostorIds = new Set(shuffled(list).slice(0, impostorCount).map((item) => item.id));
 
     list.forEach((item, index) => {
@@ -626,6 +1208,16 @@ export class GameRoom extends DurableObject {
         bodyX: null,
         bodyZ: null,
         bodyRotation: 0,
+        aiPath: [],
+        aiGoalKey: "",
+        aiActionKey: "",
+        aiActionAt: 0,
+        aiVoteAt: 0,
+        aiMeetingSpoken: false,
+        aiPendingReplies: [],
+        aiLastMeetingReplyAt: 0,
+        aiSuspectId: null,
+        aiNextSabotageAt: Date.now() + 18000 + Math.random() * 18000,
       });
     });
 
@@ -746,6 +1338,10 @@ export class GameRoom extends DurableObject {
     target.bodyZ = Number(target.z);
     target.bodyRotation = Number(target.rotation || 0);
     player.lastKillAt = Date.now();
+    for (const witness of this.players.values()) {
+      if (!witness.isBot || !witness.alive || witness.role === "impostor" || witness.id === target.id) continue;
+      if (dist(witness, target) <= 8.2) witness.aiSuspectId = player.id;
+    }
     await this.persist();
     this.broadcast({ type: "killEffect", killerId: player.id, targetId: target.id });
     this.syncAll();
@@ -774,7 +1370,16 @@ export class GameRoom extends DurableObject {
     this.sabotage = null;
     this.phase = "meeting";
     this.votes.clear();
-    for (const item of this.players.values()) item.meetingEligible = item.alive;
+    for (const item of this.players.values()) {
+      item.meetingEligible = item.alive;
+      if (item.isBot) {
+        item.aiVoteAt = Date.now() + 6500 + Math.random() * 5000;
+        item.aiMeetingSpoken = false;
+        item.aiPendingReplies = [];
+        item.aiLastMeetingReplyAt = 0;
+      }
+    }
+    this.scheduleOpeningBotTalk(player, reason);
     this.meetingEndsAt = Date.now() + this.settings.meetingTime * 1000;
     await this.ctx.storage.setAlarm(this.meetingEndsAt);
     await this.persist();
@@ -835,7 +1440,12 @@ export class GameRoom extends DurableObject {
     this.votes.clear();
     for (const item of this.players.values()) {
       item.meetingEligible = true;
+      item.aiVoteAt = 0;
+      item.aiMeetingSpoken = false;
+      item.aiPendingReplies = [];
+      item.aiLastMeetingReplyAt = 0;
       if (!item.alive) item.reported = true;
+      if (item.aiSuspectId && !this.players.get(item.aiSuspectId)?.alive) item.aiSuspectId = null;
     }
     await this.ctx.storage.deleteAlarm();
     await this.persist();
@@ -851,7 +1461,8 @@ export class GameRoom extends DurableObject {
     const now = Date.now();
     if (player.lastChatAt && now - player.lastChatAt < 450) return;
     player.lastChatAt = now;
-    const payload = { type: "chat", from: player.name, text, alive: player.alive, phase: this.phase };
+    const payload = { type: "chat", from: player.name, fromId: player.id, text, alive: player.alive, phase: this.phase, bot: Boolean(player.isBot) };
+    if (this.phase === "meeting" && !player.isBot) this.queueBotMeetingReplies(player, text);
     if (this.phase === "playing" && !player.alive) {
       for (const target of this.players.values()) {
         if (!target.alive && this.sessions.has(target.id)) this.send(target.id, payload);
@@ -1094,6 +1705,14 @@ export class GameRoom extends DurableObject {
     if (player.id !== this.hostId) return;
     const targetId = String(message.targetId || "");
     if (!targetId || targetId === player.id || !this.players.has(targetId)) return;
+    const target = this.players.get(targetId);
+    if (target?.isBot) {
+      this.players.delete(targetId);
+      this.votes.delete(targetId);
+      await this.persist();
+      this.syncAll();
+      return;
+    }
     this.send(targetId, { type: "error", message: "ホストによってルームから退出されました。" });
     try { this.sessions.get(targetId)?.close(4001, "Removed by host"); } catch {}
     await this.disconnect(targetId);
@@ -1166,6 +1785,14 @@ export class GameRoom extends DurableObject {
         bodyX: null,
         bodyZ: null,
         bodyRotation: 0,
+        aiPath: [],
+        aiGoalKey: "",
+        aiActionKey: "",
+        aiActionAt: 0,
+        aiVoteAt: 0,
+        aiMeetingSpoken: false,
+        aiSuspectId: null,
+        aiNextSabotageAt: Date.now() + 18000 + Math.random() * 18000,
       });
     }
     await this.ctx.storage.deleteAlarm();
@@ -1179,13 +1806,15 @@ export class GameRoom extends DurableObject {
 
     this.players.delete(id);
     this.votes.delete(id);
-    if (this.hostId === id) this.hostId = this.players.keys().next().value || null;
+    this.hostId = this.pickHumanHost(this.hostId === id ? null : this.hostId);
 
-    if (this.players.size === 0) {
+    const hasConnectedHuman = [...this.players.values()].some((player) => !player.isBot && this.sessions.has(player.id));
+    if (!hasConnectedHuman) {
       await this.resetEmptyRoom();
-    } else {
-      await this.persist();
+      this.syncAll();
+      return;
     }
+    await this.persist();
     this.syncAll();
     if (this.phase === "playing") await this.checkWin();
     if (this.phase === "meeting") {
