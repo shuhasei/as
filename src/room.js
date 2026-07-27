@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-firebase-gemini-ai-v61";
+const MAP_VERSION = "aurora-firebase-gemini-ai-v62";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -182,6 +182,19 @@ const BOT_NAMES = [
   "CPU アオ", "CPU ミドリ", "CPU ユキ", "CPU ソラ", "CPU モモ", "CPU レン",
   "CPU ハル", "CPU ナギ", "CPU リン", "CPU カイ", "CPU ヒカリ"
 ];
+const BOT_PERSONALITIES = Object.freeze([
+  "慎重で、分からないことは無理に断定しない",
+  "少しくだけた話し方で、短く要点を答える",
+  "観察した内容を先に話し、推測は控えめにする",
+  "迷いながらも、質問された内容には直接答える",
+  "落ち着いた話し方で、他の人の意見も気にする",
+]);
+const botPersonalityFor = (bot) => {
+  const source = String(bot?.name || bot?.id || "CPU");
+  let hash = 0;
+  for (const char of source) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+  return BOT_PERSONALITIES[hash % BOT_PERSONALITIES.length];
+};
 const AI_ZONES = Object.freeze([
   { id: "hub", x: 0, z: 0, w: 14, d: 12 },
   { id: "atrium", x: 0, z: 18, w: 18, d: 10 },
@@ -346,6 +359,7 @@ export class GameRoom extends DurableObject {
     this.externalAiBusy = false;
     this.lastExternalAiAt = 0;
     this.pendingClientAiRequests = new Map();
+    this.meetingChatHistory = [];
 
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment();
@@ -395,8 +409,11 @@ export class GameRoom extends DurableObject {
       aiNextObservationAt: Number(p.aiNextObservationAt) || 0,
       aiReplyInFlight: false,
       aiAwaitingClientRequestId: null,
+      aiRecentReplies: Array.isArray(p.aiRecentReplies) ? p.aiRecentReplies.slice(-4) : [],
+      aiPersonality: String(p.aiPersonality || botPersonalityFor(p)),
     }]));
     this.votes = new Map(saved.votes || []);
+    this.meetingChatHistory = [];
 
     this.hostId = this.pickHumanHost(this.hostId);
   }
@@ -443,6 +460,7 @@ export class GameRoom extends DurableObject {
     this.practiceMode = false;
     this.settings = { ...DEFAULT_SETTINGS };
     this.pendingClientAiRequests.clear();
+    this.meetingChatHistory = [];
     await this.ctx.storage.deleteAlarm();
     await this.persist();
   }
@@ -848,6 +866,8 @@ export class GameRoom extends DurableObject {
       aiLastMeetingReplyAt: 0,
       aiReplyInFlight: false,
       aiAwaitingClientRequestId: null,
+      aiRecentReplies: [],
+      aiPersonality: botPersonalityFor({ id, name }),
       aiSuspectId: null,
       aiSeen: {},
       aiNextObservationAt: 0,
@@ -954,9 +974,20 @@ export class GameRoom extends DurableObject {
     return { player: best, distance: bestDistance };
   }
 
-  broadcastBotMeetingChat(bot, text, replyTo = null) {
-    const cleaned = String(text || "").replace(/[<>]/g, "").trim().slice(0, 120);
+  recordMeetingChatLine(from, text, bot = false) {
+    if (this.phase !== "meeting") return;
+    const cleaned = String(text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!cleaned) return;
+    const history = Array.isArray(this.meetingChatHistory) ? this.meetingChatHistory : [];
+    history.push({ from: String(from || "プレイヤー").slice(0, 18), text: cleaned, bot: Boolean(bot), at: Date.now() });
+    this.meetingChatHistory = history.slice(-14);
+  }
+
+  broadcastBotMeetingChat(bot, text, replyTo = null, aiSource = "local") {
+    const cleaned = String(text || "").replace(/[<>]/g, "").trim().slice(0, 125);
     if (!cleaned || this.phase !== "meeting" || !bot?.alive || bot.meetingEligible === false) return;
+    bot.aiRecentReplies = [...(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []), cleaned].slice(-4);
+    this.recordMeetingChatLine(bot.name, cleaned, true);
     this.broadcast({
       type: "chat",
       from: bot.name,
@@ -967,7 +998,24 @@ export class GameRoom extends DurableObject {
       bot: true,
       replyTo,
       spoken: true,
+      aiSource: aiSource === "gemini" ? "gemini" : "local",
     });
+  }
+
+  classifyMeetingQuestion(text, mentioned, bot) {
+    const compact = String(text || "").toLowerCase().replace(/[\s　]/g, "");
+    const selfMentioned = mentioned?.id === bot?.id;
+    if (selfMentioned && /(人狼|犯人|怪し|やった|倒した|殺|キル|嘘|うそ)/.test(compact)) return "弁明";
+    if (/(なぜ|なんで|どうして|理由|根拠)/.test(compact)) return "疑う理由";
+    if (/(どこ|場所|いた|居た|現在地|アリバイ)/.test(compact)) return "場所";
+    if (/(犯行|倒した瞬間|殺した瞬間|キルした|やったところ|襲った|犯人.*見|人狼.*見)/.test(compact)) return "犯行の目撃";
+    if (/(見た|みた|目撃|近く|一緒|すれ違|誰と|だれと)/.test(compact)) return "目撃情報";
+    if (/(何して|なにして|何をして|行動|タスク|作業)/.test(compact)) return "行動";
+    if (/(誰|だれ|怪し|人狼|犯人|投票先)/.test(compact)) return "疑っている相手";
+    if (/(役職|クルーですか|人狼ですか|人狼なの)/.test(compact)) return "役職への質問";
+    if (/(本当|ほんと|確実|自信|間違いない)/.test(compact)) return "確信度";
+    if (/(どう思う|どうおもう|意見|賛成|同意)/.test(compact)) return "意見";
+    return "その他";
   }
 
   mentionedPlayerInText(text) {
@@ -1051,7 +1099,12 @@ export class GameRoom extends DurableObject {
       .filter(({ player, item }) => player?.alive && item && Date.now() - Number(item.at || 0) <= 32000)
       .sort((a, b) => Number(b.item.at || 0) - Number(a.item.at || 0));
     const latestSeen = seenEntries[0] || null;
-    const pick = (lines) => lines[Math.floor(Math.random() * lines.length)];
+    const pick = (lines) => {
+      const recent = Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : [];
+      const fresh = lines.filter((line) => !recent.some((previous) => previous === line || previous.includes(line.slice(0, 18))));
+      const pool = fresh.length ? fresh : lines;
+      return pool[Math.floor(Math.random() * pool.length)];
+    };
 
     if (accused || (selfMentioned && asksRole)) {
       return pick([
@@ -1163,12 +1216,16 @@ export class GameRoom extends DurableObject {
 
   botMeetingFacts(bot, sender, question) {
     const now = Date.now();
+    const mentioned = this.mentionedPlayerInText(question);
     const seen = Object.entries(bot.aiSeen && typeof bot.aiSeen === "object" ? bot.aiSeen : {})
       .map(([id, item]) => ({ player: this.players.get(id), item }))
       .filter(({ player, item }) => player?.alive && item && now - Number(item.at || 0) <= 32000)
       .sort((a, b) => Number(b.item.at || 0) - Number(a.item.at || 0))
-      .slice(0, 3)
-      .map(({ player, item }) => `${player.name}を${item.zone}付近で見たかもしれない`);
+      .slice(0, 4)
+      .map(({ player, item }) => {
+        const seconds = Math.max(1, Math.round((now - Number(item.at || now)) / 1000));
+        return `${player.name}を${item.zone}付近で約${seconds}秒前に見たかもしれない`;
+      });
     const suspect = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
     const pendingTask = Array.isArray(bot.tasks)
       ? bot.tasks.find((task) => !(bot.completedTasks instanceof Set ? bot.completedTasks.has(task) : false))
@@ -1179,15 +1236,24 @@ export class GameRoom extends DurableObject {
       : taskLabel
         ? `${taskLabel}の端末へ向かっていた`
         : "周囲を移動して様子を見ていた";
+    const recentConversation = (Array.isArray(this.meetingChatHistory) ? this.meetingChatHistory : [])
+      .slice(-8)
+      .map((line) => `${line.from}：${line.text}`);
     return {
       speaker: bot.name,
+      personality: String(bot.aiPersonality || botPersonalityFor(bot)),
       questioner: sender?.name || "プレイヤー",
-      question: String(question || "").slice(0, 120),
+      question: String(question || "").slice(0, 140),
+      questionIntent: this.classifyMeetingQuestion(question, mentioned, bot),
+      targetPlayer: mentioned?.name || "指定なし",
       lastKnownPlace: `${aiZoneLabel(bot)}付近`,
       safeActivity,
       uncertainMemories: seen,
       weakSuspicion: suspect?.alive ? `${suspect.name}が少し気になるが証拠はない` : "特にいない",
-      suspicionReason: suspect?.alive ? `${suspect.name}を近くで見た記憶があるが、はっきりした証拠ではない` : "怪しいと断定できる材料はない",
+      suspicionReason: suspect?.alive ? `${suspect.name}を近くで見た記憶があるが、犯行は見ていない` : "怪しいと断定できる材料はない",
+      recentConversation,
+      previousAnswers: (Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []).slice(-3),
+      alivePlayers: [...this.players.values()].filter((item) => item.alive && item.meetingEligible !== false && !item.practiceTarget).map((item) => item.name),
     };
   }
 
@@ -1233,10 +1299,10 @@ export class GameRoom extends DurableObject {
     }
   }
 
-  queueLocalBotReply(bot, senderId, text, delay = 220) {
+  queueLocalBotReply(bot, senderId, text, delay = 220, aiSource = "local") {
     if (!bot || this.phase !== "meeting" || !bot.alive || bot.meetingEligible === false) return;
     const pending = Array.isArray(bot.aiPendingReplies) ? bot.aiPendingReplies : [];
-    pending.push({ at: Date.now() + Math.max(80, delay), text, replyTo: senderId || null });
+    pending.push({ at: Date.now() + Math.max(80, delay), text, replyTo: senderId || null, aiSource: aiSource === "gemini" ? "gemini" : "local" });
     bot.aiPendingReplies = pending;
     bot.aiVoteAt = Math.max(Number(bot.aiVoteAt || 0), Date.now() + 5200 + Math.random() * 2600);
   }
@@ -1246,7 +1312,7 @@ export class GameRoom extends DurableObject {
     const host = this.players.get(this.hostId);
     if (!host || host.isBot || !host.alive || host.meetingEligible === false || !this.sessions.has(host.id)) return false;
     const requestId = `firebase-ai-${uid()}`;
-    const expiresAt = Date.now() + 6200;
+    const expiresAt = Date.now() + 11200;
     this.pendingClientAiRequests.set(requestId, {
       requestId,
       botId: bot.id,
@@ -1274,7 +1340,7 @@ export class GameRoom extends DurableObject {
       const bot = this.players.get(request.botId);
       if (!bot || bot.aiAwaitingClientRequestId !== requestId) continue;
       bot.aiAwaitingClientRequestId = null;
-      this.queueLocalBotReply(bot, request.senderId, request.localReply, 120);
+      this.queueLocalBotReply(bot, request.senderId, request.localReply, 120, "local");
     }
   }
 
@@ -1288,7 +1354,13 @@ export class GameRoom extends DurableObject {
     if (!bot || bot.aiAwaitingClientRequestId !== requestId || !bot.alive || bot.meetingEligible === false) return;
     bot.aiAwaitingClientRequestId = null;
     const reply = message.failed ? null : this.sanitizeExternalBotReply(message.text, bot);
-    this.queueLocalBotReply(bot, request.senderId, reply || request.localReply, reply ? 240 : 100);
+    this.queueLocalBotReply(bot, request.senderId, reply || request.localReply, reply ? 240 : 100, reply ? "gemini" : "local");
+    if (message.failed) {
+      this.send(player.id, {
+        type: "abilityResult",
+        message: `Gemini回答を使えなかったため内蔵回答へ切り替えました${message.errorMessage ? `：${String(message.errorMessage).slice(0, 70)}` : ""}`,
+      });
+    }
   }
 
   async queueBotMeetingReplies(sender, text) {
@@ -1312,11 +1384,11 @@ export class GameRoom extends DurableObject {
       const externalReply = await this.generateExternalBotMeetingReply(selected, sender, text);
       if (this.phase !== "meeting" || !selected.alive || selected.meetingEligible === false) return;
       if (externalReply) {
-        this.queueLocalBotReply(selected, sender.id, externalReply, 450 + Math.random() * 650);
+        this.queueLocalBotReply(selected, sender.id, externalReply, 450 + Math.random() * 650, "gemini");
         return;
       }
       if (!this.requestFirebaseBotReply(selected, sender, text, localReply)) {
-        this.queueLocalBotReply(selected, sender.id, localReply, 450 + Math.random() * 650);
+        this.queueLocalBotReply(selected, sender.id, localReply, 450 + Math.random() * 650, "local");
       }
     } finally {
       selected.aiReplyInFlight = false;
@@ -1374,7 +1446,7 @@ export class GameRoom extends DurableObject {
         bot.aiPendingReplies = pending;
         bot.aiMeetingSpoken = true;
         bot.aiLastMeetingReplyAt = now;
-        this.broadcastBotMeetingChat(bot, reply.text, reply.replyTo || null);
+        this.broadcastBotMeetingChat(bot, reply.text, reply.replyTo || null, reply.aiSource || "local");
       }
       if (this.votes.has(bot.id)) continue;
       if (!bot.aiVoteAt) bot.aiVoteAt = now + 6500 + Math.random() * 5000;
@@ -1627,6 +1699,8 @@ export class GameRoom extends DurableObject {
         aiMeetingSpoken: false,
         aiPendingReplies: [],
         aiLastMeetingReplyAt: 0,
+        aiRecentReplies: [],
+        aiPersonality: String(item.aiPersonality || botPersonalityFor(item)),
         aiSuspectId: null,
         aiSeen: {},
         aiNextObservationAt: 0,
@@ -1784,6 +1858,7 @@ export class GameRoom extends DurableObject {
     this.phase = "meeting";
     this.votes.clear();
     this.pendingClientAiRequests.clear();
+    this.meetingChatHistory = [];
     for (const item of this.players.values()) {
       item.meetingEligible = item.alive;
       if (item.isBot) {
@@ -1791,6 +1866,8 @@ export class GameRoom extends DurableObject {
         item.aiMeetingSpoken = false;
         item.aiPendingReplies = [];
         item.aiLastMeetingReplyAt = 0;
+        item.aiRecentReplies = [];
+        item.aiPersonality = String(item.aiPersonality || botPersonalityFor(item));
         item.aiAwaitingClientRequestId = null;
       }
     }
@@ -1864,6 +1941,7 @@ export class GameRoom extends DurableObject {
       if (!item.alive) item.reported = true;
       if (item.aiSuspectId && (!this.players.get(item.aiSuspectId)?.alive || Math.random() < 0.35)) item.aiSuspectId = null;
     }
+    this.meetingChatHistory = [];
     await this.ctx.storage.deleteAlarm();
     await this.persist();
     this.broadcast({ type: "meetingEnded", ejected });
@@ -1879,6 +1957,7 @@ export class GameRoom extends DurableObject {
     if (player.lastChatAt && now - player.lastChatAt < 450) return;
     player.lastChatAt = now;
     const payload = { type: "chat", from: player.name, fromId: player.id, text, alive: player.alive, phase: this.phase, bot: Boolean(player.isBot) };
+    if (this.phase === "meeting") this.recordMeetingChatLine(player.name, text, Boolean(player.isBot));
     if (this.phase === "meeting" && !player.isBot) {
       const task = this.queueBotMeetingReplies(player, text).catch((error) => console.warn("CPU meeting reply failed", error));
       this.ctx.waitUntil(task);
