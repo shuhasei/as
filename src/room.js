@@ -1213,7 +1213,7 @@ export class GameRoom extends DurableObject {
       .replace(/[\r\n]+/g, " ")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 110);
+      .slice(0, 120);
     if (!cleaned) return null;
     if (bot?.role === "impostor" && /(私は|自分は).{0,4}人狼|人狼です|犯人です/.test(cleaned)) return null;
     if (!/[。！？]$/.test(cleaned)) cleaned += "。";
