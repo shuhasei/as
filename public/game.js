@@ -104,15 +104,12 @@ async function initializeFirebaseMeetingAi(){
         responseMimeType:'application/json',
         responseSchema:FIREBASE_REPLY_SCHEMA,
         maxOutputTokens:512,
-        temperature:0.82,
-        topP:0.92,
         thinkingConfig:{thinkingLevel:ThinkingLevel.LOW}
       }
     });
     firebaseAiReady=true;
     firebaseAiInitError='';
     updateFirebaseAiHelp();
-    updateCpuSpeechButton();
     await Promise.race([getAppCheckToken(appCheck,true),promiseTimeout(10000,'App Check token timeout')]);
     firebaseAppCheckReady=true;
     updateFirebaseAiHelp();
@@ -126,14 +123,14 @@ async function initializeFirebaseMeetingAi(){
     firebaseAiInitError=String(error?.message||error||'Firebase AI initialization failed');
     firebaseAiLastErrorCode=String(error?.code||'');
     updateFirebaseAiHelp();
-    updateCpuSpeechButton();
     console.warn('[Hidden Crew] Firebase Gemini AI initialization failed',error);
   }
 }
 const firebaseAiInitialization=initializeFirebaseMeetingAi();
+firebaseAiInitialization.finally(()=>updateCpuSpeechButton());
 async function testFirebaseAiConnection(){
   if(firebaseAiRequesting)return;
-  firebaseAiRequesting=true;firebaseAiLastError='';firebaseAiInitError='';updateFirebaseAiHelp();
+  firebaseAiRequesting=true;firebaseAiLastError='';updateFirebaseAiHelp();
   try{
     await firebaseAiInitialization;
     if(!firebaseAppCheck||!firebaseAiModel)throw new Error(firebaseAiInitError||'Firebase AIが初期化されていません');
