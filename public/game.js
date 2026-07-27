@@ -36,7 +36,7 @@ const FIREBASE_CONFIG=Object.freeze({
 const FIREBASE_RECAPTCHA_SITE_KEY='6Ld3HmgtAAAAAPSue2cjfd2sTQTdBTVQcmCiOQsJ';
 const FIREBASE_AI_MODEL='gemini-3.6-flash';
 const FIREBASE_REPLY_SCHEMA=Schema.object({properties:{reply:Schema.string()}});
-let firebaseAiModel=null,firebaseAppCheck=null,firebaseAiReady=false,firebaseAppCheckReady=false,firebaseAiVerified=false,firebaseAiRequesting=false,firebaseAiInitError='',firebaseAiLastError='',firebaseAiLastErrorCode='',firebaseAiRequestChain=Promise.resolve();
+let firebaseAiModel=null,firebaseAppCheck=null,firebaseAiReady=false,firebaseAppCheckReady=false,firebaseAiVerified=false,firebaseAiRequesting=false,firebaseAiActiveRequests=0,firebaseAiInitError='',firebaseAiLastError='',firebaseAiLastErrorCode='';
 function compactFirebaseError(value=''){
   const text=String(value||'').replace(/\s+/g,' ').trim();
   if(!text)return '';
@@ -69,6 +69,9 @@ function updateFirebaseAiHelp(){
 }
 function promiseTimeout(ms,message){
   return new Promise((_,reject)=>setTimeout(()=>reject(new Error(message)),ms));
+}
+function promiseDelay(ms){
+  return new Promise(resolve=>setTimeout(resolve,ms));
 }
 async function initializeFirebaseMeetingAi(){
   try{
@@ -151,7 +154,7 @@ async function testFirebaseAiConnection(){
     showNotice(`Gemini接続失敗：${compactFirebaseError(firebaseAiLastError)}`);
     console.error('[Hidden Crew] Firebase Gemini connection test failed',error);
   }finally{
-    firebaseAiRequesting=false;updateFirebaseAiHelp();
+    firebaseAiRequesting=firebaseAiActiveRequests>0;updateFirebaseAiHelp();
   }
 }
 if(ui.firebaseAiTest)ui.firebaseAiTest.addEventListener('click',testFirebaseAiConnection);
@@ -221,13 +224,26 @@ function firebaseCpuPrompt(request){
 }
 async function runFirebaseCpuRequest(request){
   if(!request?.requestId||state?.hostId!==myId||state?.phase!=='meeting'||!canParticipateInMeeting())return;
-  firebaseAiRequesting=true;firebaseAiLastError='';updateFirebaseAiHelp();
+  firebaseAiActiveRequests+=1;firebaseAiRequesting=true;firebaseAiLastError='';updateFirebaseAiHelp();
   try{
     await firebaseAiInitialization;
     if(!firebaseAiModel||!firebaseAppCheckReady)throw new Error(firebaseAiInitError||'Firebase App Check is not ready');
-    const generation=firebaseAiModel.generateContent(firebaseCpuPrompt(request));
-    const result=await Promise.race([generation,promiseTimeout(9500,'Gemini response timeout')]);
-    const reply=parseFirebaseCpuReply(result?.response?.text?.()||'',request);
+    let reply='',lastGenerationError=null;
+    for(let attempt=0;attempt<2;attempt+=1){
+      try{
+        const generation=firebaseAiModel.generateContent(firebaseCpuPrompt(request));
+        const result=await Promise.race([generation,promiseTimeout(12500,'Gemini response timeout')]);
+        reply=parseFirebaseCpuReply(result?.response?.text?.()||'',request);
+        if(reply)break;
+      }catch(error){
+        lastGenerationError=error;
+        const message=String(error?.message||error||'');
+        const retryable=!/(403|permission|forbidden|denied|app.?check|recaptcha|429|quota|resource.?exhausted)/i.test(message);
+        if(attempt===0&&retryable){await promiseDelay(280);continue}
+        throw error;
+      }
+    }
+    if(!reply&&lastGenerationError)throw lastGenerationError;
     if(!reply)throw new Error('Gemini returned an empty reply');
     firebaseAiVerified=true;firebaseAiLastError='';firebaseAiLastErrorCode='';
     send('cpuAiReply',{requestId:request.requestId,botId:request.botId,text:reply,source:'gemini'});
@@ -237,11 +253,14 @@ async function runFirebaseCpuRequest(request){
     console.warn('[Hidden Crew] Firebase CPU reply failed',error);
     send('cpuAiReply',{requestId:request.requestId,botId:request.botId,failed:true,errorCode:firebaseAiLastErrorCode,errorMessage:compactFirebaseError(firebaseAiLastError)});
   }finally{
-    firebaseAiRequesting=false;updateFirebaseAiHelp();
+    firebaseAiActiveRequests=Math.max(0,firebaseAiActiveRequests-1);
+    firebaseAiRequesting=firebaseAiActiveRequests>0;updateFirebaseAiHelp();
   }
 }
 function queueFirebaseCpuRequest(request){
-  firebaseAiRequestChain=firebaseAiRequestChain.catch(()=>{}).then(()=>runFirebaseCpuRequest(request));
+  // 会議開始時は複数CPUが同時に話すため、直列待ちで期限切れにしない。
+  // サーバー側で最大3件に制限し、ここでは独立してGeminiへ送る。
+  runFirebaseCpuRequest(request).catch(error=>console.warn('[Hidden Crew] Firebase CPU queue failed',error));
 }
 const TASKS={
   reactor:['リアクター安定化',-28,18],
@@ -1955,14 +1974,19 @@ function stopCpuMeetingSpeech(){
 }
 function cpuVoicePitch(name=''){
   let hash=0;for(const char of String(name))hash=(hash*31+char.charCodeAt(0))>>>0;
-  return .99+(hash%4)*.008;
+  return .95+(hash%5)*.022;
+}
+function cpuVoiceRate(name='',text=''){
+  let hash=0;for(const char of String(name))hash=(hash*29+char.charCodeAt(0))>>>0;
+  const personalRate=.97+(hash%5)*.012;
+  return Math.max(.94,Math.min(1.04,personalRate-(String(text).length>88?.025:0)));
 }
 function cpuVoiceFor(name='CPU'){
   if(cpuMeetingVoiceAssignments.has(name))return cpuMeetingVoiceAssignments.get(name);
   if(!cpuMeetingSpeechVoices.length)refreshCpuMeetingVoices();
   if(!cpuMeetingSpeechVoices.length)return null;
   let hash=0;for(const char of String(name))hash=(hash*33+char.charCodeAt(0))>>>0;
-  const voice=cpuMeetingSpeechVoices[hash%Math.min(cpuMeetingSpeechVoices.length,2)]||cpuMeetingSpeechVoices[0];
+  const voice=cpuMeetingSpeechVoices[hash%Math.min(cpuMeetingSpeechVoices.length,5)]||cpuMeetingSpeechVoices[0];
   cpuMeetingVoiceAssignments.set(name,voice);return voice;
 }
 function naturalizeCpuSpeech(text=''){
@@ -1978,7 +2002,7 @@ function speakNextCpuMeetingLine(){
   const speechText=naturalizeCpuSpeech(item.text);if(!speechText){setTimeout(speakNextCpuMeetingLine,120);return}
   const utterance=new SpeechSynthesisUtterance(speechText);
   const voice=cpuVoiceFor(item.from);if(voice)utterance.voice=voice;
-  utterance.lang=voice?.lang||'ja-JP';utterance.rate=speechText.length>72?.91:speechText.length>40?.94:.97;utterance.pitch=cpuVoicePitch(item.from);utterance.volume=1;
+  utterance.lang=voice?.lang||'ja-JP';utterance.rate=cpuVoiceRate(item.from,speechText);utterance.pitch=cpuVoicePitch(item.from);utterance.volume=1;
   cpuMeetingSpeechActive=true;cpuMeetingSpeechLastAt=performance.now();
   const finish=()=>{cpuMeetingSpeechActive=false;setTimeout(speakNextCpuMeetingLine,320)};
   utterance.onend=finish;utterance.onerror=finish;
