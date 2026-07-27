@@ -183,11 +183,11 @@ const BOT_NAMES = [
   "CPU ハル", "CPU ナギ", "CPU リン", "CPU カイ", "CPU ヒカリ"
 ];
 const BOT_PERSONALITIES = Object.freeze([
-  "慎重で、分からないことは無理に断定しない",
-  "少しくだけた話し方で、短く要点を答える",
-  "観察した内容を先に話し、推測は控えめにする",
-  "迷いながらも、質問された内容には直接答える",
-  "落ち着いた話し方で、他の人の意見も気にする",
+  "慎重だけど堅苦しくない。迷うと「たぶん」「まだ何とも言えないかな」と話す",
+  "フランクで短め。「うん」「いや」「〜だと思うよ」と友達のように話す",
+  "見たことを率直に話す。「〜は見た」「でもそこから先は分からない」と区切る",
+  "少し考えながら話す。「えっと」「たしか」を時々使うが、毎回は使わない",
+  "落ち着いて柔らかい。「そうだね」「〜じゃないかな」と周りにも話を振る",
 ]);
 const botPersonalityFor = (bot) => {
   const source = String(bot?.name || bot?.id || "CPU");
@@ -1114,84 +1114,84 @@ export class GameRoom extends DurableObject {
 
     if (accused || (selfMentioned && asksRole)) {
       return pick([
-        `${senderName}さん、私は違います。会議の前は${zone}あたりにいました。ただ、私の説明だけで決めずに、ほかの人の話も聞いてください。`,
-        `私は人狼ではありません。最後は${zone}付近にいました。見間違いや勘違いもあると思うので、すぐに決めつけないでほしいです。`,
+        `いや、私は違うよ。会議前は${zone}にいた。私だけで決めずに、ほかの人の話も聞いてみて。`,
+        `私じゃない。最後にいたのは${zone}あたりだよ。いきなり決めつけるのは待ってほしいな。`,
       ]);
     }
 
     if (selfMentioned && asksWhere) {
-      return `会議の前は${zone}付近にいました。ずっと同じ場所ではないので、正確にはその周辺です。`;
+      return `会議前は${zone}あたり。ずっとそこにいたわけじゃないけど、最後にいたのはその辺だよ。`;
     }
 
     if (mentioned && mentioned.id !== bot.id && asksWhere) {
       if (observation && Math.random() < 0.68) {
-        return `${mentioned.name}さんは、少し前に${observation.zone}付近で見たと思います。ただ、その後どこへ行ったかまでは分かりません。`;
+        return `${mentioned.name}なら、少し前に${observation.zone}で見た気がする。その後どこへ行ったかは見てないよ。`;
       }
-      return `${mentioned.name}さんがどこにいたかは、はっきり覚えていません。私は直接確認できていません。`;
+      return `${mentioned.name}がどこにいたかは覚えてないな。少なくとも、私はちゃんと見てない。`;
     }
 
     if (asksTask && (!mentioned || selfMentioned)) {
       return pick([
-        `私はタスク端末を回っていました。会議の直前は${zone}付近です。`,
-        `会議まではタスクを進めながら移動していました。最後にいたのは${zone}あたりです。`,
+        `タスクを回ってたよ。会議の直前は${zone}あたりにいた。`,
+        `ずっとタスクしながら移動してた。最後は${zone}の近くだったかな。`,
       ]);
     }
 
     if (asksSawKill) {
       if (reliableMemory && Math.random() < 0.42) {
-        return `倒される瞬間までは見ていません。ただ、直前に${reliableMemory.name}さんを近くで見た気がします。確実ではありません。`;
+        return `倒された瞬間は見てない。ただ、その少し前に${reliableMemory.name}を近くで見た気はする。確実じゃないよ。`;
       }
-      return `倒される瞬間は見ていません。犯人を断定できる情報は持っていません。`;
+      return `いや、倒されたところは見てない。だから犯人が誰かまでは分からない。`;
     }
 
     if (mentioned && mentioned.id !== bot.id && asksSaw) {
       if (observation && Math.random() < 0.7) {
-        return `${mentioned.name}さんは${observation.zone}付近で見かけました。ただ、一緒にいた時間は短かったです。`;
+        return `${mentioned.name}は${observation.zone}で見かけたよ。でも、ほんの一瞬だった。`;
       }
-      return `${mentioned.name}さんは、今回ははっきり見ていません。`;
+      return `${mentioned.name}は、今回はちゃんと見てないな。`;
     }
 
     if (asksSaw) {
       if (latestSeen && Math.random() < 0.62) {
-        return `最後に近くで見たのは${latestSeen.player.name}さんです。${latestSeen.item.zone}付近だったと思います。`;
+        return `最後に近くで見たのは${latestSeen.player.name}かな。場所は${latestSeen.item.zone}だったと思う。`;
       }
-      return `近くにいた人はいたと思いますが、名前までは自信がありません。`;
+      return `誰か近くにいた気はするけど、名前までは自信ない。`;
     }
 
     if (asksWhy) {
       const target = mentioned && mentioned.id !== bot.id ? mentioned : reliableMemory;
       if (target && target.id === bot.aiSuspectId) {
-        return `${target.name}さんを少し気にしているのは、倒れた人の近くで見かけたからです。でも、犯行そのものは見ていません。`;
+        return `${target.name}が気になるのは、倒れた人の近くで見かけたから。でも、やったところを見たわけじゃないよ。`;
       }
-      return `今のところ、はっきりした根拠はありません。場所と目撃情報を聞いてから考えたいです。`;
+      return `うーん、まだはっきりした根拠はない。みんながどこにいたか聞いてから考えたいな。`;
     }
 
     if (asksWho) {
       const suspect = reliableMemory || guessedSuspect;
       if (suspect && Math.random() < 0.58) {
-        return `今は${suspect.name}さんが少し気になります。ただ、まだ勘に近くて、追放できるほどの証拠はありません。`;
+        return `今は${suspect.name}がちょっと気になる。でもほぼ勘だから、これだけで追放はできないかな。`;
       }
-      return `今の情報だけでは誰が人狼か分かりません。今回はスキップでもいいと思っています。`;
+      return `正直、今の話だけじゃ誰か決められない。今回はスキップでもいいんじゃないかな。`;
     }
 
     if (mentioned && mentioned.id !== bot.id) {
       if (mentioned.id === bot.aiSuspectId && Math.random() < 0.5) {
-        return `${mentioned.name}さんは少し気になっていますが、確実な証拠はありません。`;
+        return `${mentioned.name}は少し気になってる。でも、まだ決め手はないよ。`;
       }
-      if (observation) return `${mentioned.name}さんは${observation.zone}付近で見たと思います。それ以上のことは分かりません。`;
-      return `${mentioned.name}さんについては、今のところ判断できる情報を持っていません。`;
+      if (observation) return `${mentioned.name}なら${observation.zone}で見たと思う。それ以上はちょっと分からない。`;
+      return `${mentioned.name}については、まだ何とも言えないな。ちゃんと見てないんだ。`;
     }
 
     if (asksOpinion || asksCertainty) {
       return reliableMemory
-        ? `${reliableMemory.name}さんは少し気になりますが、自信はありません。ほかの人の話も聞きたいです。`
-        : `まだ自信はありません。今の段階で決めつけるのは早いと思います。`;
+        ? `${reliableMemory.name}は少し気になる。でも自信はないし、ほかの人の話も聞きたい。`
+        : `まだ自信ないな。今ここで決めつけるのは早いと思う。`;
     }
 
     return pick([
-      `今のところ決定的な情報はありません。場所や見た人についてなら答えられます。`,
-      `質問を取り違えていたらごめんなさい。私は会議前、${zone}付近にいました。`,
-      `まだ分からないことが多いです。私は確実に見たことだけ話します。`,
+      `今のところ決め手はないな。誰をどこで見たかなら話せるよ。`,
+      `ごめん、質問の意味を取り違えたかも。私は会議前、${zone}にいたよ。`,
+      `まだ分からないことが多いな。とりあえず、ちゃんと見たことだけ話すよ。`,
     ]);
   }
 
