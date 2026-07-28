@@ -1045,17 +1045,25 @@ export class GameRoom extends DurableObject {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 20000);
         try {
-          const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+          const model = String(this.env?.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview");
+          const prompt = `次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`;
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
             method: "POST",
             headers: {
               "x-goog-api-key": apiKey,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              model: String(this.env?.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview"),
-              input: `次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`,
-              response_format: { type: "audio" },
-              generation_config: { speech_config: [{ voice: this.geminiVoiceFor(item.botName) }] },
+              model,
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                responseModalities: ["AUDIO"],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName: this.geminiVoiceFor(item.botName) },
+                  },
+                },
+              },
             }),
             signal: controller.signal,
           });
@@ -1070,7 +1078,8 @@ export class GameRoom extends DurableObject {
             const detail = payload?.error?.message || payload?.error?.details?.[0]?.reason || payload?.message || responseText || `HTTP ${response.status}`;
             throw new Error(String(detail).slice(0, 180));
           }
-          const audio = payload?.output_audio;
+          const parts = payload?.candidates?.[0]?.content?.parts || [];
+          const audio = parts.find((part) => part?.inlineData?.data)?.inlineData;
           const data = String(audio?.data || "");
           if (!data || data.length > 1800000) throw new Error(data ? "音声データが大きすぎます" : "Geminiから音声が返りませんでした");
           if (this.phase !== "meeting") break;
