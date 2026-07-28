@@ -36,7 +36,7 @@ const FIREBASE_CONFIG=Object.freeze({
 const FIREBASE_RECAPTCHA_SITE_KEY='6Ld3HmgtAAAAAPSue2cjfd2sTQTdBTVQcmCiOQsJ';
 const FIREBASE_AI_MODEL='gemini-3.6-flash';
 const FIREBASE_REPLY_SCHEMA=Schema.object({properties:{reply:Schema.string()}});
-let firebaseAiModel=null,firebaseAiService=null,firebaseAppCheck=null,firebaseAiReady=false,firebaseAppCheckReady=false,firebaseAiVerified=false,firebaseAiRequesting=false,firebaseAiActiveRequests=0,firebaseAiInitError='',firebaseAiLastError='',firebaseAiLastErrorCode='';
+let firebaseAiModel=null,firebaseAiService=null,firebaseAppCheck=null,firebaseAppCheckRefreshPromise=null,firebaseAiReady=false,firebaseAppCheckReady=false,firebaseAiVerified=false,firebaseAiRequesting=false,firebaseAiActiveRequests=0,firebaseAiInitError='',firebaseAiLastError='',firebaseAiLastErrorCode='';
 function compactFirebaseError(value=''){
   const text=String(value||'').replace(/\s+/g,' ').trim();
   if(!text)return '';
@@ -72,6 +72,18 @@ function promiseTimeout(ms,message){
 }
 function promiseDelay(ms){
   return new Promise(resolve=>setTimeout(resolve,ms));
+}
+async function refreshFirebaseAppCheckToken(){
+  if(!firebaseAppCheck)throw new Error('Firebase App Check is not initialized');
+  if(firebaseAppCheckRefreshPromise)return firebaseAppCheckRefreshPromise;
+  const refreshOperation=(async()=>{
+    const result=await Promise.race([getAppCheckToken(firebaseAppCheck,true),promiseTimeout(10000,'App Check refresh timeout')]);
+    firebaseAppCheckReady=true;
+    return result;
+  })();
+  firebaseAppCheckRefreshPromise=refreshOperation;
+  try{return await refreshOperation}
+  finally{if(firebaseAppCheckRefreshPromise===refreshOperation)firebaseAppCheckRefreshPromise=null}
 }
 async function initializeFirebaseMeetingAi(){
   try{
@@ -147,10 +159,11 @@ async function testFirebaseAiConnection(){
     if(!firebaseAiModel)throw new Error(firebaseAiInitError||'Firebase AIが初期化されていません');
     if(firebaseAppCheck){
       try{
-        await Promise.race([getAppCheckToken(firebaseAppCheck,false),promiseTimeout(6000,'App Check token timeout')]);
-        firebaseAppCheckReady=true;
+        // 接続確認を明示的に押した時だけ、古い無効トークンを破棄して取り直す。
+        await refreshFirebaseAppCheckToken();
       }catch(appCheckError){
-        console.warn('[Hidden Crew] App Check preflight failed; trying the Gemini request directly',appCheckError);
+        firebaseAppCheckReady=false;
+        throw appCheckError;
       }
     }
     const result=await Promise.race([
@@ -256,7 +269,18 @@ async function runFirebaseCpuRequest(request){
       }catch(error){
         lastGenerationError=error;
         const message=String(error?.message||error||'');
-        const retryable=!/(403|permission|forbidden|denied|app.?check|recaptcha|429|quota|resource.?exhausted)/i.test(message);
+        const appCheckFailure=/(401|unauthenticated|app.?check|recaptcha|attestation|invalid token)/i.test(message);
+        const retryable=!/(403|permission|forbidden|denied|429|quota|resource.?exhausted)/i.test(message);
+        if(attempt===0&&appCheckFailure&&firebaseAppCheck){
+          try{
+            await refreshFirebaseAppCheckToken();
+            await promiseDelay(120);
+            continue;
+          }catch(refreshError){
+            firebaseAppCheckReady=false;
+            throw refreshError;
+          }
+        }
         if(attempt===0&&retryable){await promiseDelay(280);continue}
         throw error;
       }
