@@ -79,7 +79,7 @@ const segmentHitsDoor = (x1, z1, x2, z2, radius = 0.58) => {
   return false;
 };
 const pointHitsAiMap = (x, z, radius = 0.54, doorsLocked = false) => {
-  if (x < AI_MAP_BOUNDS.minX || x > AI_MAP_BOUNDS.maxX || z < AI_MAP_BOUNDS.minZ || z > AI_MAP_BOUNDS.maxZ) return true;
+  if (x - radius < AI_MAP_BOUNDS.minX || x + radius > AI_MAP_BOUNDS.maxX || z - radius < AI_MAP_BOUNDS.minZ || z + radius > AI_MAP_BOUNDS.maxZ) return true;
   if (AI_COLLISION_OBJECTS.some((object) =>
     Math.abs(x - object.x) < object.w / 2 + radius && Math.abs(z - object.z) < object.d / 2 + radius
   )) return true;
@@ -93,6 +93,18 @@ const segmentHitsAiMap = (x1, z1, x2, z2, radius = 0.54, doorsLocked = false) =>
     if (pointHitsAiMap(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, radius, doorsLocked)) return true;
   }
   return false;
+};
+const nearestAiWalkablePoint = (x, z, radius = 0.54, doorsLocked = false) => {
+  if (!pointHitsAiMap(x, z, radius, doorsLocked)) return { x, z };
+  for (let distance = 0.3; distance <= 4.2; distance += 0.3) {
+    const steps = Math.max(16, Math.ceil(distance * 22));
+    for (let index = 0; index < steps; index += 1) {
+      const angle = index / steps * Math.PI * 2;
+      const candidate = { x: x + Math.cos(angle) * distance, z: z + Math.sin(angle) * distance };
+      if (!pointHitsAiMap(candidate.x, candidate.z, radius, doorsLocked)) return candidate;
+    }
+  }
+  return { x: -4.5, z: -3.5 };
 };
 const AI_GRID_STEP = 0.72;
 const aiGridPoint = (column, row) => ({
@@ -922,16 +934,32 @@ export class GameRoom extends DurableObject {
 
   moveBotToward(bot, target, key, dt, moves) {
     if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.z)) return false;
+    const doorsLocked = this.sabotage?.kind === "doors";
+    if (pointHitsAiMap(bot.x, bot.z, 0.54, doorsLocked)) {
+      const rescued = nearestAiWalkablePoint(bot.x, bot.z, 0.54, doorsLocked);
+      bot.x = rescued.x;
+      bot.z = rescued.z;
+      bot.aiPath = [];
+      bot.aiRouteAt = 0;
+      moves.push({ id: bot.id, x: bot.x, z: bot.z, rotation: bot.rotation });
+      return false;
+    }
+    if (Math.hypot(bot.x - target.x, bot.z - target.z) < 0.9) return true;
+    const now = Date.now();
     const goalMoved = Math.hypot(Number(bot.aiGoalX || 0) - target.x, Number(bot.aiGoalZ || 0) - target.z) > 2.2;
-    if (bot.aiGoalKey !== key || !Array.isArray(bot.aiPath) || bot.aiPath.length === 0 || goalMoved || Date.now() - Number(bot.aiRouteAt || 0) > 7200) {
+    const routeMissing = !Array.isArray(bot.aiPath);
+    const routeExhausted = Array.isArray(bot.aiPath) && bot.aiPath.length === 0;
+    if (bot.aiGoalKey !== key || goalMoved || now - Number(bot.aiRouteAt || 0) > 7200 || ((routeMissing || routeExhausted) && now - Number(bot.aiRouteAt || 0) > 900)) {
       bot.aiGoalKey = key;
       bot.aiGoalX = target.x;
       bot.aiGoalZ = target.z;
-      bot.aiRouteAt = Date.now();
-      bot.aiPath = buildAiRoute(bot, target, this.sabotage?.kind === "doors");
+      bot.aiRouteAt = now;
+      bot.aiPath = buildAiRoute(bot, target, doorsLocked);
     }
+    if (!Array.isArray(bot.aiPath) || !bot.aiPath.length) return false;
     while (bot.aiPath.length && Math.hypot(bot.x - bot.aiPath[0].x, bot.z - bot.aiPath[0].z) < 0.72) bot.aiPath.shift();
-    const waypoint = bot.aiPath[0] || target;
+    if (!bot.aiPath.length) return Math.hypot(bot.x - target.x, bot.z - target.z) < 0.9;
+    const waypoint = bot.aiPath[0];
     const dx = waypoint.x - bot.x;
     const dz = waypoint.z - bot.z;
     const distance = Math.hypot(dx, dz);
@@ -940,7 +968,6 @@ export class GameRoom extends DurableObject {
     const step = Math.min(distance, speed * clamp(dt, 0.05, 0.42));
     const nextX = bot.x + dx / distance * step;
     const nextZ = bot.z + dz / distance * step;
-    const doorsLocked = this.sabotage?.kind === "doors";
     let safeX = nextX;
     let safeZ = nextZ;
     if (segmentHitsAiMap(bot.x, bot.z, safeX, safeZ, 0.54, doorsLocked)) {
