@@ -34,9 +34,10 @@ const FIREBASE_CONFIG=Object.freeze({
   appId:'1:306157594392:web:badfad84cf158620f6206d'
 });
 const FIREBASE_RECAPTCHA_SITE_KEY='6Ld3HmgtAAAAAPSue2cjfd2sTQTdBTVQcmCiOQsJ';
-const FIREBASE_AI_MODEL='gemini-3.6-flash';
+const FIREBASE_AI_MODEL='gemini-3.5-flash-lite';
 const FIREBASE_REPLY_SCHEMA=Schema.object({properties:{reply:Schema.string()}});
 let firebaseAiModel=null,firebaseAiService=null,firebaseAppCheck=null,firebaseAppCheckRefreshPromise=null,firebaseAiReady=false,firebaseAppCheckReady=false,firebaseAiVerified=false,firebaseAiRequesting=false,firebaseAiActiveRequests=0,firebaseAiInitError='',firebaseAiLastError='',firebaseAiLastErrorCode='';
+let firebaseCpuRequestQueue=[],firebaseCpuQueueRunning=false;
 function compactFirebaseError(value=''){
   const text=String(value||'').replace(/\s+/g,' ').trim();
   if(!text)return '';
@@ -119,8 +120,8 @@ async function initializeFirebaseMeetingAi(){
       generationConfig:{
         responseMimeType:'application/json',
         responseSchema:FIREBASE_REPLY_SCHEMA,
-        maxOutputTokens:512,
-        thinkingConfig:{thinkingLevel:ThinkingLevel.LOW}
+        maxOutputTokens:256,
+        thinkingConfig:{thinkingLevel:ThinkingLevel.MINIMAL}
       }
     });
     firebaseAiReady=true;
@@ -270,6 +271,7 @@ async function runFirebaseCpuRequest(request){
         lastGenerationError=error;
         const message=String(error?.message||error||'');
         const appCheckFailure=/(401|unauthenticated|app.?check|recaptcha|attestation|invalid token)/i.test(message);
+        const quotaFailure=/(429|quota|rate.?limit|resource.?exhausted)/i.test(message);
         const retryable=!/(403|permission|forbidden|denied|429|quota|resource.?exhausted)/i.test(message);
         if(attempt===0&&appCheckFailure&&firebaseAppCheck){
           try{
@@ -280,6 +282,10 @@ async function runFirebaseCpuRequest(request){
             firebaseAppCheckReady=false;
             throw refreshError;
           }
+        }
+        if(attempt===0&&quotaFailure){
+          await promiseDelay(1400);
+          continue;
         }
         if(attempt===0&&retryable){await promiseDelay(280);continue}
         throw error;
@@ -300,9 +306,25 @@ async function runFirebaseCpuRequest(request){
   }
 }
 function queueFirebaseCpuRequest(request){
-  // 会議開始時は複数CPUが同時に話すため、直列待ちで期限切れにしない。
-  // サーバー側で最大3件に制限し、ここでは独立してGeminiへ送る。
-  runFirebaseCpuRequest(request).catch(error=>console.warn('[Hidden Crew] Firebase CPU queue failed',error));
+  if(!request?.requestId)return;
+  firebaseCpuRequestQueue.push(request);
+  if(firebaseCpuRequestQueue.length>6)firebaseCpuRequestQueue.splice(0,firebaseCpuRequestQueue.length-6);
+  if(firebaseCpuQueueRunning)return;
+  firebaseCpuQueueRunning=true;
+  (async()=>{
+    try{
+      while(firebaseCpuRequestQueue.length){
+        const next=firebaseCpuRequestQueue.shift();
+        await runFirebaseCpuRequest(next);
+        if(firebaseCpuRequestQueue.length)await promiseDelay(360);
+      }
+    }catch(error){
+      console.warn('[Hidden Crew] Firebase CPU queue failed',error);
+    }finally{
+      firebaseCpuQueueRunning=false;
+      if(firebaseCpuRequestQueue.length)queueFirebaseCpuRequest(firebaseCpuRequestQueue.shift());
+    }
+  })();
 }
 const TASKS={
   reactor:['リアクター安定化',-28,18],
@@ -433,6 +455,7 @@ let cpuMeetingSpeechActive=false;
 let cpuMeetingSpeechLastAt=0;
 let cpuMeetingSpeechGeneration=0;
 let cpuMeetingLiveSession=null;
+let cpuMeetingLiveReceiver=null;
 let cpuMeetingAudioSource=null;
 let cpuMeetingSpeechLastError='';
 let cpuMeetingSpeechErrorShownAt=0;
@@ -1991,6 +2014,7 @@ function stopCpuMeetingSpeech(){
   cpuMeetingAudioSource=null;
   if(cpuMeetingLiveSession)try{cpuMeetingLiveSession.close()}catch{}
   cpuMeetingLiveSession=null;
+  cpuMeetingLiveReceiver=null;
   updateCpuSpeechButton();
 }
 function cpuVoiceFor(name='CPU'){
@@ -2035,21 +2059,28 @@ async function playGeminiPcm(bytes,sampleRate,generation){
 }
 async function playGeminiCpuSpeech(name,text,generation){
   if(!firebaseAiService)throw new Error('Gemini audio is not ready');
-  const liveModel=getLiveGenerativeModel(firebaseAiService,{
-    model:'gemini-2.5-flash-native-audio-preview-12-2025',
-    generationConfig:{
-      responseModalities:[ResponseModality.AUDIO],
-      speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:cpuVoiceFor(name)}}}
-    }
-  });
-  const session=await liveModel.connect();
-  if(generation!==cpuMeetingSpeechGeneration){try{session.close()}catch{}return}
-  cpuMeetingLiveSession=session;
+  if(!cpuMeetingLiveSession||cpuMeetingLiveSession.isClosed||!cpuMeetingLiveReceiver){
+    const liveModel=getLiveGenerativeModel(firebaseAiService,{
+      model:'gemini-2.5-flash-native-audio-preview-12-2025',
+      systemInstruction:'入力された日本語の発言だけを、友達と人狼ゲームをしている人のように自然に話してください。言葉を追加、削除、変更してはいけません。',
+      generationConfig:{
+        responseModalities:[ResponseModality.AUDIO],
+        speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:'Achird'}}}
+      }
+    });
+    const session=await liveModel.connect();
+    if(generation!==cpuMeetingSpeechGeneration){try{session.close()}catch{}return}
+    cpuMeetingLiveSession=session;
+    cpuMeetingLiveReceiver=session.receive();
+  }
+  const session=cpuMeetingLiveSession,receiver=cpuMeetingLiveReceiver;
   let audioChunks=[],sampleRate=24000;
   const receiveAudio=async()=>{
-    const prompt=`次の発言だけを、一切言葉を足したり変えたりせず、友達と人狼ゲームをしている人のように自然な日本語で話してください。\n発言：${text}`;
-    await session.send(prompt,true);
-    for await(const message of session.receive()){
+    await session.send(`発言：${text}`,true);
+    while(true){
+      const next=await receiver.next();
+      if(next.done)throw new Error('Gemini audio session ended');
+      const message=next.value;
       if(generation!==cpuMeetingSpeechGeneration)break;
       const content=message?.serverContent||message;
       for(const part of content?.modelTurn?.parts||[]){
@@ -2063,9 +2094,13 @@ async function playGeminiCpuSpeech(name,text,generation){
   };
   try{
     await Promise.race([receiveAudio(),promiseTimeout(18000,'Gemini audio timeout')]);
-  }finally{
-    if(cpuMeetingLiveSession===session)cpuMeetingLiveSession=null;
+  }catch(error){
+    if(cpuMeetingLiveSession===session){
+      cpuMeetingLiveSession=null;
+      cpuMeetingLiveReceiver=null;
+    }
     try{session.close()}catch{}
+    throw error;
   }
   if(generation!==cpuMeetingSpeechGeneration)return;
   const pcm=decodeGeminiPcmChunks(audioChunks);
