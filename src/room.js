@@ -1050,7 +1050,6 @@ export class GameRoom extends DurableObject {
             headers: {
               "x-goog-api-key": apiKey,
               "Content-Type": "application/json",
-              "Api-Revision": "2026-05-20",
             },
             body: JSON.stringify({
               model: String(this.env?.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview"),
@@ -1060,9 +1059,15 @@ export class GameRoom extends DurableObject {
             }),
             signal: controller.signal,
           });
-          const payload = await response.json().catch(() => ({}));
+          const responseText = await response.text();
+          let payload = {};
+          try {
+            payload = responseText ? JSON.parse(responseText) : {};
+          } catch {
+            payload = {};
+          }
           if (!response.ok) {
-            const detail = payload?.error?.message || payload?.message || `HTTP ${response.status}`;
+            const detail = payload?.error?.message || payload?.error?.details?.[0]?.reason || payload?.message || responseText || `HTTP ${response.status}`;
             throw new Error(String(detail).slice(0, 180));
           }
           const audio = payload?.output_audio;
