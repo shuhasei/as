@@ -1018,9 +1018,15 @@ export class GameRoom extends DurableObject {
     return voices[hash % voices.length];
   }
 
+  async geminiApiKey() {
+    const binding = this.env?.GEMINI_API_KEY;
+    if (typeof binding === "string") return binding.trim();
+    if (binding && typeof binding.get === "function") return String(await binding.get()).trim();
+    return "";
+  }
+
   queueGeminiBotSpeech(bot, text) {
-    const apiKey = String(this.env?.GEMINI_API_KEY || "").trim();
-    if (!apiKey || this.phase !== "meeting" || !bot?.id) return;
+    if (!this.env?.GEMINI_API_KEY || this.phase !== "meeting" || !bot?.id) return;
     const cleaned = String(text || "").replace(/[🤖👻📢]/g, "").replace(/^CPU[\s　]*/i, "").replace(/[「」『』]/g, "").replace(/\s+/g, " ").trim().slice(0, 125);
     if (!cleaned) return;
     this.geminiTtsQueue.push({ botId: bot.id, botName: String(bot.name || "CPU").slice(0, 18), text: cleaned });
@@ -1034,7 +1040,7 @@ export class GameRoom extends DurableObject {
     try {
       while (this.geminiTtsQueue.length && this.phase === "meeting") {
         const item = this.geminiTtsQueue.shift();
-        const apiKey = String(this.env?.GEMINI_API_KEY || "").trim();
+        const apiKey = await this.geminiApiKey();
         if (!apiKey) break;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 20000);
