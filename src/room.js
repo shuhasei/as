@@ -85,14 +85,34 @@ const pointHitsAiMap = (x, z, radius = 0.54, doorsLocked = false) => {
   )) return true;
   return doorsLocked && pointHitsDoor(x, z, radius);
 };
-const segmentHitsAiMap = (x1, z1, x2, z2, radius = 0.54, doorsLocked = false) => {
-  const distance = Math.hypot(x2 - x1, z2 - z1);
-  const steps = Math.max(1, Math.ceil(distance / 0.13));
-  for (let index = 1; index <= steps; index += 1) {
-    const t = index / steps;
-    if (pointHitsAiMap(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, radius, doorsLocked)) return true;
+const segmentIntersectsExpandedBox = (x1, z1, x2, z2, object, radius) => {
+  const minX = object.x - object.w / 2 - radius;
+  const maxX = object.x + object.w / 2 + radius;
+  const minZ = object.z - object.d / 2 - radius;
+  const maxZ = object.z + object.d / 2 + radius;
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  let enter = 0;
+  let exit = 1;
+  for (const [start, delta, min, max] of [[x1, dx, minX, maxX], [z1, dz, minZ, maxZ]]) {
+    if (Math.abs(delta) < 1e-9) {
+      if (start < min || start > max) return false;
+      continue;
+    }
+    let first = (min - start) / delta;
+    let second = (max - start) / delta;
+    if (first > second) [first, second] = [second, first];
+    enter = Math.max(enter, first);
+    exit = Math.min(exit, second);
+    if (enter > exit) return false;
   }
-  return false;
+  return exit >= 0 && enter <= 1;
+};
+const segmentHitsAiMap = (x1, z1, x2, z2, radius = 0.54, doorsLocked = false) => {
+  if (x1 - radius < AI_MAP_BOUNDS.minX || x1 + radius > AI_MAP_BOUNDS.maxX || z1 - radius < AI_MAP_BOUNDS.minZ || z1 + radius > AI_MAP_BOUNDS.maxZ) return true;
+  if (x2 - radius < AI_MAP_BOUNDS.minX || x2 + radius > AI_MAP_BOUNDS.maxX || z2 - radius < AI_MAP_BOUNDS.minZ || z2 + radius > AI_MAP_BOUNDS.maxZ) return true;
+  if (AI_COLLISION_OBJECTS.some((object) => segmentIntersectsExpandedBox(x1, z1, x2, z2, object, radius))) return true;
+  return doorsLocked && DOOR_BARRIERS.some((door) => segmentIntersectsExpandedBox(x1, z1, x2, z2, door, radius));
 };
 const nearestAiWalkablePoint = (x, z, radius = 0.54, doorsLocked = false) => {
   if (!pointHitsAiMap(x, z, radius, doorsLocked)) return { x, z };
@@ -114,6 +134,29 @@ const aiGridPoint = (column, row) => ({
 const aiGridColumn = (x) => Math.round((x - AI_MAP_BOUNDS.minX) / AI_GRID_STEP);
 const aiGridRow = (z) => Math.round((z - AI_MAP_BOUNDS.minZ) / AI_GRID_STEP);
 const aiGridKey = (column, row) => `${column}:${row}`;
+const AI_GRID_POINT_CACHE = [new Map(), new Map()];
+const AI_GRID_EDGE_CACHE = [new Map(), new Map()];
+const aiGridPointBlocked = (column, row, doorsLocked = false) => {
+  const cache = AI_GRID_POINT_CACHE[doorsLocked ? 1 : 0];
+  const key = aiGridKey(column, row);
+  if (!cache.has(key)) {
+    const point = aiGridPoint(column, row);
+    cache.set(key, pointHitsAiMap(point.x, point.z, 0.52, doorsLocked));
+  }
+  return cache.get(key);
+};
+const aiGridEdgeBlocked = (fromColumn, fromRow, toColumn, toRow, doorsLocked = false) => {
+  const cache = AI_GRID_EDGE_CACHE[doorsLocked ? 1 : 0];
+  const first = aiGridKey(fromColumn, fromRow);
+  const second = aiGridKey(toColumn, toRow);
+  const key = first < second ? `${first}>${second}` : `${second}>${first}`;
+  if (!cache.has(key)) {
+    const from = aiGridPoint(fromColumn, fromRow);
+    const to = aiGridPoint(toColumn, toRow);
+    cache.set(key, segmentHitsAiMap(from.x, from.z, to.x, to.z, 0.52, doorsLocked));
+  }
+  return cache.get(key);
+};
 const aiHeapPush = (heap, node) => {
   heap.push(node);
   let index = heap.length - 1;
@@ -154,7 +197,7 @@ const nearestAiGridCell = (point, doorsLocked = false) => {
         const column = baseColumn + dx;
         const row = baseRow + dz;
         const candidate = aiGridPoint(column, row);
-        if (!pointHitsAiMap(candidate.x, candidate.z, 0.52, doorsLocked)) return { column, row, ...candidate };
+        if (!aiGridPointBlocked(column, row, doorsLocked)) return { column, row, ...candidate };
       }
     }
   }
@@ -295,7 +338,7 @@ const buildAiRoute = (from, target, doorsLocked = false) => {
   const open = [];
   const previous = new Map();
   const costs = new Map([[startKey, 0]]);
-  aiHeapPush(open, { column: startCell.column, row: startCell.row, key: startKey, score: 0 });
+  aiHeapPush(open, { column: startCell.column, row: startCell.row, key: startKey, cost: 0, score: 0 });
   const directions = [
     [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
     [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
@@ -305,23 +348,22 @@ const buildAiRoute = (from, target, doorsLocked = false) => {
     iterations += 1;
     const current = aiHeapPop(open);
     if (!current) break;
-    if (current.key === goalKey) break;
     const currentCost = costs.get(current.key);
     if (!Number.isFinite(currentCost)) continue;
-    const currentPoint = aiGridPoint(current.column, current.row);
+    if (current.cost !== currentCost) continue;
+    if (current.key === goalKey) break;
     for (const [dx, dz, travelCost] of directions) {
       const column = current.column + dx;
       const row = current.row + dz;
-      const point = aiGridPoint(column, row);
-      if (pointHitsAiMap(point.x, point.z, 0.52, doorsLocked)) continue;
-      if (segmentHitsAiMap(currentPoint.x, currentPoint.z, point.x, point.z, 0.52, doorsLocked)) continue;
+      if (aiGridPointBlocked(column, row, doorsLocked)) continue;
+      if (aiGridEdgeBlocked(current.column, current.row, column, row, doorsLocked)) continue;
       const key = aiGridKey(column, row);
       const nextCost = currentCost + travelCost;
       if (nextCost >= (costs.get(key) ?? Infinity)) continue;
       costs.set(key, nextCost);
       previous.set(key, current.key);
       const heuristic = Math.hypot(column - goalCell.column, row - goalCell.row);
-      aiHeapPush(open, { column, row, key, score: nextCost + heuristic });
+      aiHeapPush(open, { column, row, key, cost: nextCost, score: nextCost + heuristic });
     }
   }
   if (!costs.has(goalKey)) return [];
