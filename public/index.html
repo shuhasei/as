@@ -30,26 +30,89 @@
   </section>
 
   <section id="gameScreen" class="screen hidden">
-    <canvas id="gameCanvas"></canvas><canvas id="map2dCanvas" class="hidden"></canvas>
-    <div id="sabotageBanner" class="sabotage-banner hidden"><b id="sabotageTitle"></b><span id="sabotageTimer"></span></div>
-    <aside id="taskPanel" class="glass"><div class="task-panel-head"><div><span class="eyebrow">MISSION LOG</span><h3>タスク</h3></div><b id="taskCounter">0/0</b></div><div class="progress"><i id="taskProgress"></i></div><div id="taskList"></div></aside>
-    <aside id="playerPanel" class="glass"><div class="player-panel-head"><div><b id="roomCode"></b><button id="copyRoomButton" class="icon-button">コピー</button></div><span id="playerCount"></span></div><p id="roleText"></p><p id="statusText"></p><div id="playerList"></div><div class="call-controls"><p id="callHelp">📞を押して個別通話</p><button id="hangupCallButton" class="danger small hidden" type="button">通話終了</button></div><div id="cpuControls" class="cpu-controls hidden"><button id="addCpuButton" class="secondary">CPU追加</button><button id="removeCpuButton" class="secondary">CPU削除</button><button id="firebaseAiTestButton" class="secondary" type="button">Gemini接続確認</button></div><p id="cpuHelp" class="cpu-help hidden"></p><button id="settingsButton" class="secondary hidden">ルール設定</button><button id="startButton" class="primary hidden">ゲーム開始</button></aside>
-    <button id="cameraButton" class="glass camera-button">視点切替</button>
-    <canvas id="miniMap" width="220" height="220"></canvas>
-    <div id="globalChatPanel" class="glass chat-panel collapsed"><div class="chat-header"><b>いつでもチャット</b><button id="chatToggleButton" class="small" type="button">開く</button></div><div id="globalChatLog" class="chat-log"></div><form id="globalChatForm" class="chat-form"><input id="globalChatInput" maxlength="120" placeholder="いつでもチャットできます" autocomplete="off"><button type="submit">送信</button></form></div>
-    <div id="groupVoicePanel" class="glass group-voice-panel"><div class="group-voice-head"><b>グループトーク</b><span id="groupVoiceStatus">グループ音声：未接続</span></div><div class="group-voice-actions"><button id="groupSpeakerButton" class="secondary" type="button">🔊 聞くだけで参加</button><button id="groupMicButton" type="button">🎙 マイクで参加</button><button id="groupLeaveButton" class="danger hidden" type="button">退出</button></div></div>
-    <div id="actionBar">
-      <button id="useButton">使う</button><button id="reportButton" class="danger">報告</button><button id="killButton" class="danger hidden">攻撃 <span id="killCooldown"></span></button><button id="sabotageButton" class="danger hidden">妨害</button><button id="meetingButton">緊急会議</button>
+    <canvas id="gameCanvas"></canvas>
+    <header id="topBar" class="glass">
+      <div><b>ROOM</b> <button id="copyRoomButton" class="link-button"><span id="roomCode">------</span></button></div>
+      <div id="roleText">役職：---</div><div id="statusText">ロビー</div>
+      <button id="cameraButton" class="small">近い視点へ切替</button>
+    </header>
+
+    <aside id="playerPanel" class="glass panel">
+      <div class="panel-title"><h2>PLAYERS</h2><span id="playerCount">0/12</span></div>
+      <div id="playerList"></div><div id="cpuControls" class="cpu-controls hidden"><button id="addCpuButton" class="primary small" type="button">＋ CPU追加</button><button id="removeCpuButton" class="secondary small" type="button">－ CPU削除</button><button id="firebaseAiTestButton" class="secondary small" type="button">Gemini接続確認</button></div><small id="cpuHelp" class="cpu-help hidden">1人で開始するとCPUが5人、自動で参加します。Firebase Gemini接続時は会議の返答がより自然になります。</small><div class="call-controls"><button id="hangupCallButton" class="danger small hidden" type="button" disabled>📴 通話終了</button><span id="callHelp">📞を押して個別通話</span></div>
+      <button id="startButton" class="primary hidden">ゲーム開始</button>
+      <button id="settingsButton" class="secondary hidden">ルール設定</button>
+    </aside>
+
+    <aside id="taskPanel" class="glass panel hidden">
+      <div class="panel-title"><h2>TASKS</h2><span id="taskCounter">0/0</span></div>
+      <div id="taskList"></div><div class="progress"><i id="taskProgress"></i></div>
+    </aside>
+
+    <aside id="sabotageBanner" class="sabotage-banner hidden"><strong id="sabotageTitle">緊急事態</strong><span id="sabotageTimer"></span></aside>
+    <canvas id="miniMap" width="220" height="160"></canvas>
+
+    <div id="actionBar" class="glass hidden">
+      <button id="useButton">使用 <kbd>E</kbd></button>
+      <button id="reportButton">通報 <kbd>R</kbd></button>
+      <button id="killButton" class="danger hidden">攻撃 <span id="killCooldown"></span></button>
+      <button id="sabotageButton" class="danger hidden">妨害</button>
+      <button id="meetingButton">会議</button>
+      <button id="abilityButton" class="primary hidden">能力</button>
+      <button id="hideButton" class="secondary">隠れる</button>
+      <button id="securityButton" class="secondary">監視カメラ</button>
     </div>
-    <div id="joystick"><div id="stick"></div></div>
+
+    <aside id="globalChatPanel" class="glass chat-panel">
+      <div class="chat-panel-header">
+        <strong>CHAT</strong>
+        <button id="chatToggleButton" class="small secondary" type="button">最小化</button>
+      </div>
+      <div id="groupVoiceBar" class="group-voice-bar">
+        <span id="groupVoiceStatus" class="group-voice-status">グループトーク：未参加</span>
+        <div class="group-voice-actions">
+          <button id="groupSpeakerButton" type="button" class="secondary">🔊 聞くだけで参加</button>
+          <button id="groupMicButton" type="button" class="primary">🎙 マイクで参加</button>
+          <button id="groupLeaveButton" type="button" class="danger hidden">退出</button>
+        </div>
+      </div>
+      <div id="globalChatLog" class="chat-log" aria-live="polite"></div>
+      <form id="globalChatForm" class="chat-form">
+        <input id="globalChatInput" maxlength="120" placeholder="いつでもチャットできます" autocomplete="off">
+        <button type="submit">送信</button>
+      </form>
+    </aside>
+
+    <div id="spectatorPanel" class="glass spectator-panel hidden" aria-live="polite">
+      <div class="spectator-heading"><strong>観戦モード</strong><span id="spectatorStatus">自由観戦中</span></div>
+      <div class="spectator-actions">
+        <button id="spectatorFreeButton" type="button" class="secondary">自由観戦</button>
+        <button id="spectatorPrevButton" type="button">◀ 前の生存者</button>
+        <button id="spectatorNextButton" type="button">次の生存者 ▶</button>
+      </div>
+      <small>自由観戦では移動できます。生存者を選ぶと、その人の視点をリアルタイムで共有します。</small>
+    </div>
+    <div id="joystick" class="hidden"><div id="stick"></div></div>
+    <div id="controlHint" class="glass">見下ろし：方向移動　一人称：前後で移動・左右で旋回　使用：E　通報：R</div>
     <div id="notice"></div>
+    <div id="interactionHint" class="interaction-hint" aria-live="polite"></div>
   </section>
 
-  <dialog id="settingsDialog"><div class="dialog-card"><h2>ルール設定</h2><div class="settings-grid"><label>タスク数<input id="taskCountInput" type="number" min="1" max="8"></label><label>キルクール<input id="killCooldownInput" type="number" min="5" max="60"></label><label>会議時間<input id="meetingTimeInput" type="number" min="15" max="120"></label><label>人狼数<input id="impostorCountInput" type="number" min="1" max="3"></label><label>特殊役職<select id="specialRolesInput"><option value="on">あり</option><option value="off">なし</option></select></label></div><button id="saveSettingsButton" class="primary">保存</button></div></dialog>
-  <dialog id="tutorialDialog"><div class="dialog-card tutorial-card"><button id="tutorialCloseButton" class="close-button">×</button><h2>遊び方</h2><div class="tutorial-grid"><section><h3>クルー</h3><p>施設内のタスクを完了し、人狼を会議で追放します。</p></section><section><h3>人狼</h3><p>クルーに紛れ、妨害と攻撃を使います。</p></section><section><h3>特殊役職</h3><p>医者は倒れた直後の仲間を救助、探偵は遺体を調査、警備員は1回だけ仲間を守れます。</p></section><section><h3>操作</h3><p>PC: WASD/矢印、Eで使う、Rで報告、Q/Spaceで攻撃。スマホ: 左スティックと下ボタン。</p></section><section><h3>通信</h3><p>常設チャット、会議チャット、会議音声、グループトーク、個別通話を利用できます。</p></section></div></div></dialog>
-  <dialog id="taskDialog"><div class="dialog-card task-card"><button id="taskCloseButton" class="close-button">×</button><h2 id="taskTitle"></h2><p id="taskInstructions"></p><div id="taskGame"></div></div></dialog>
-  <dialog id="sabotageDialog"><div class="dialog-card"><h2>妨害</h2><div class="sabotage-grid"><button data-sabotage="lights">照明停止</button><button data-sabotage="reactor">リアクター暴走</button><button data-sabotage="comms">通信妨害</button><button data-sabotage="doors">ドア封鎖</button></div></div></dialog>
-  <dialog id="securityDialog"><div class="dialog-card security-card"><button id="securityCloseButton" class="close-button">×</button><h2>監視カメラ</h2><div class="security-toolbar"><span id="securityCameraLabel">CAM 1</span><span id="securityCameraStatus">接続中</span></div><div id="securityFeedWrap"><canvas id="securityCanvas"></canvas><div class="security-scanlines"></div><span class="security-rec">● REC</span><span class="security-timestamp" id="securityTimestamp"></span></div><div class="security-controls"><button id="securityPrevButton">◀ 前</button><button id="securityNextButton">次 ▶</button></div></div></dialog>
+  <dialog id="tutorialDialog"><div class="dialog-card"><button class="close" data-close="tutorialDialog">×</button><h2>遊び方</h2><ol><li>クルー側はタスクを完了し、人狼を投票で追放します。</li><li>人狼は攻撃と妨害を使います。</li><li>医者は倒れた人を20秒以内に1回救助できます。</li><li>探偵は倒れた人の痕跡を1回調査できます。</li><li>警備員は近くの人を1回守れます。</li><li>途中参加者もクルーとして参加し、すぐに移動できます。</li><li>1人で開始した場合はCPUが5人自動参加します。ロビーでCPU人数を増減できます。</li></ol><p>操作：見下ろしは方向移動。一人称はW/↑で前進、S/↓で後退、A/←・D/→で左右旋回。E 使用、R 通報、Q 攻撃、M 会議</p></div></dialog>
+  <dialog id="securityDialog"><div class="dialog-card security-dialog-card"><button class="close" data-close="securityDialog">×</button><h2>監視カメラ</h2><p class="security-help"><strong>見方</strong>：① 下のボタンでカメラを選ぶ　② 映像を3か所確認する　③ 「確認完了」を押す</p><div class="security-monitor"><div class="security-screen"><canvas id="securityFeed" aria-label="監視カメラのライブ映像"></canvas><div class="security-feed-header"><span id="securityCameraName">CAM 01　中央アトリウム</span><span id="securityCameraStatus">● LIVE</span></div><div class="security-scanlines"></div></div><div class="security-camera-controls"><button id="securityPrevButton" type="button" class="secondary">◀ 前のカメラ</button><button id="securityNextButton" type="button" class="primary">次のカメラ ▶</button></div><div id="securityCameraButtons" class="security-camera-buttons"></div><div id="securityTaskPanel" class="security-task-panel hidden"><strong>監視カメラ確認タスク</strong><span id="securityTaskProgress">ライブ映像を確認：0 / 3か所</span><button id="securityTaskComplete" type="button" class="primary" disabled>3か所確認してください</button></div><p class="security-note">映像はリアルタイムです。ロッカー内のプレイヤーは映りません。</p></div></div></dialog>
+
+  <dialog id="settingsDialog"><div class="dialog-card"><button class="close" data-close="settingsDialog">×</button><h2>ルール設定</h2>
+    <div class="settings-grid">
+      <label>人狼<select id="settingImpostors"><option value="1">1人</option><option value="2">2人</option><option value="3">3人</option></select></label>
+      <label>タスク数<select id="settingTasks"><option value="4">4</option><option value="6" selected>6</option><option value="8">8</option><option value="10">10</option></select></label>
+      <label>移動速度<select id="settingSpeed"><option value="0.85">ゆっくり</option><option value="1" selected>標準</option><option value="1.2">速い</option></select></label>
+      <label>攻撃待ち時間<select id="settingKillCooldown"><option value="10">10秒</option><option value="15" selected>15秒</option><option value="25">25秒</option><option value="35">35秒</option></select></label>
+      <label>会議時間<select id="settingMeeting"><option value="30">30秒</option><option value="45" selected>45秒</option><option value="60">60秒</option></select></label>
+      <label>役職表示<span class="fixed-setting">常に非公開</span><select id="settingReveal" class="hidden"><option value="no" selected>表示しない</option></select></label>
+    </div><button id="saveSettingsButton" class="primary">保存</button></div></dialog>
+
+  <dialog id="taskDialog"><div class="dialog-card"><button class="close" data-close="taskDialog">×</button><h2 id="taskTitle">TASK</h2><div id="taskGame"></div></div></dialog>
+  <dialog id="sabotageDialog"><div class="dialog-card"><button class="close" data-close="sabotageDialog">×</button><h2>妨害を選択</h2><div class="sabotage-grid"><button data-sabotage="lights">照明停止</button><button data-sabotage="comms">通信妨害</button><button data-sabotage="doors">ドア封鎖</button><button data-sabotage="reactor" class="danger">リアクター暴走</button></div></div></dialog>
   <dialog id="meetingDialog"><div class="dialog-card meeting-card"><h2 id="meetingReason">緊急会議</h2><div class="meeting-columns"><section><h3>投票</h3><div id="voteList"></div><button id="skipVoteButton">スキップ</button><p id="meetingTimer"></p></section><section><div class="voice-header"><h3>会議音声・チャット</h3><div class="meeting-voice-actions"><button id="speakerButton" type="button" class="secondary">🔊 音声を聞く</button><button id="micButton" type="button">🎙 マイク開始</button><button id="cpuSpeechButton" type="button" class="secondary">🤖 CPU音声 ON</button></div></div><p id="voiceStatus" class="voice-status">会議開始時に、生存している全員の音声へ自動接続します。</p><div id="remoteAudio" aria-live="polite"></div><div id="meetingChatLog" class="chat-log"></div><form id="meetingChatForm" class="chat-form"><input id="meetingChatInput" maxlength="120" placeholder="会議チャット" autocomplete="off"><button type="submit">送信</button></form></section></div></div></dialog>
   <dialog id="incomingCallDialog"><div class="dialog-card call-dialog"><h2>着信</h2><p id="incomingCallerName">メンバーから着信です</p><div class="call-answer-row"><button id="acceptCallButton" class="primary" type="button">📞 応答</button><button id="declineCallButton" class="danger" type="button">拒否</button></div></div></dialog>
   <dialog id="resultDialog"><div class="dialog-card result-card"><h2 id="resultTitle">GAME OVER</h2><p id="resultText"></p><div id="resultPlayers"></div><div class="result-actions"><button id="resultCloseButton" class="secondary" type="button">ゲーム画面へ戻る</button><button id="returnLobbyButton" class="primary" type="button">ロビーへ戻る</button></div></div></dialog>
