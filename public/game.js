@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken }
 import { getAI, getGenerativeModel, GoogleAIBackend, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),cpuControls:$('cpuControls'),addCpu:$('addCpuButton'),removeCpu:$('removeCpuButton'),cpuHelp:$('cpuHelp'),firebaseAiTest:$('firebaseAiTestButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-cpu-live-voice-v66';
+const MAP_VERSION='aurora-direct-cpu-call-v68';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -259,7 +259,11 @@ function firebaseCpuPrompt(request){
   });
 }
 async function runFirebaseCpuRequest(request){
-  if(!request?.requestId||state?.hostId!==myId||state?.phase!=='meeting'||!canParticipateInMeeting())return;
+  const requestMode=String(request?.mode||'meeting');
+  const validContext=requestMode==='meeting'
+    ? state?.phase==='meeting'&&canParticipateInMeeting()
+    : Boolean(state&&state.phase!=='finished'&&me()?.alive);
+  if(!request?.requestId||state?.hostId!==myId||!validContext)return;
   firebaseAiActiveRequests+=1;firebaseAiRequesting=true;firebaseAiLastError='';updateFirebaseAiHelp();
   try{
     await firebaseAiInitialization;
@@ -453,7 +457,7 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,cpuCallRecognition=null,cpuCallRecognitionActive=false,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0,meetingVoiceBorrowedFromGroup=false,meetingVoiceLastSentAt=0,meetingVoiceSpeechUntil=0,meetingAutoVoicePending=false;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,cpuCallRecognition=null,cpuCallRecognitionActive=false,cpuCallReplyBusy=false,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0,meetingVoiceBorrowedFromGroup=false,meetingVoiceLastSentAt=0,meetingVoiceSpeechUntil=0,meetingAutoVoicePending=false;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
 let cpuMeetingSpeechEnabled=localStorage.getItem('hiddenCrewCpuSpeech')!=='off';
 let cpuMeetingSpeechQueue=[];
 let cpuMeetingSpeechActive=false;
@@ -516,6 +520,9 @@ function submitChatMessage(form,input){
   if(!form||!input)return;
   const text=String(input.value||'').trim();if(!text)return;
   if(!socket||socket.readyState!==WebSocket.OPEN){showNotice('チャットサーバーへ接続されていません。再読み込みしてください。');return}
+  if(form.id==='globalChatForm'&&activeCallIsCpu()){
+    input.value='';runLocalCpuCallReply(text.slice(0,180));return;
+  }
   if(form.id==='meetingChatForm'){
     if(state?.phase!=='meeting'){showNotice('現在は会議中ではありません。');return}
     if(!canParticipateInMeeting()){showNotice('死亡者や会議途中の参加者は会議チャットへ送信できません。');return}
@@ -643,7 +650,7 @@ function handle(m){
   }else if(m.type==='cpuSpeechAudio'){
     queueCpuMeetingAudio(m);
   }else if(m.type==='cpuCallMessage'){
-    if(activeCallPeer===m.fromId)setVoiceStatus(`🤖 ${m.from||currentCallName()}：${m.text||''}`,true);
+    if(activeCallPeer===m.fromId){setVoiceStatus(`🤖 ${m.from||currentCallName()}：${m.text||''}`,true);speakCpuBrowserFallback(m.text,m.from,true)}
   }else if(m.type==='cpuSpeechError'){
     cpuMeetingSpeechLastError=String(m.message||'Gemini音声の生成に失敗しました');
     updateCpuSpeechButton();
@@ -2035,16 +2042,34 @@ function renderVotes(){
 }
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
 function cpuSpeechSupported(){
-  return Boolean(window.AudioContext||window.webkitAudioContext);
+  return Boolean(window.AudioContext||window.webkitAudioContext||window.speechSynthesis);
 }
 function updateCpuSpeechButton(){
   const button=$('cpuSpeechButton');if(!button)return;
   if(!cpuSpeechSupported()){button.disabled=true;button.textContent='✨ Gemini音声 非対応';button.title='このブラウザでは音声を再生できません。';return}
-  if(state&&!state.cpuGeminiTts){button.disabled=true;button.textContent='✨ Gemini音声 要設定';button.title='Cloudflare Workerのシークレット「GEMINI_API_KEY」を設定してください。';return}
+  if(state&&!state.cpuGeminiTts){
+    const browserVoice=Boolean(window.speechSynthesis&&window.SpeechSynthesisUtterance);
+    button.disabled=!browserVoice;
+    button.textContent=browserVoice?'🔊 CPU音声 ブラウザ':'🔇 CPU音声 非対応';
+    button.title=browserVoice?'サーバー音声未設定のため、端末の日本語音声ですぐ読み上げます。':'このブラウザでは音声を再生できません。';
+    button.classList.toggle('muted',!cpuMeetingSpeechEnabled);
+    return;
+  }
   button.disabled=false;
   button.textContent=cpuMeetingSpeechEnabled?'✨ Gemini音声 ON':'✨ Gemini音声 OFF';
   button.title=cpuMeetingSpeechLastError?`直前の音声エラー：${compactFirebaseError(cpuMeetingSpeechLastError)}`:'CPUの発言をGeminiの音声で再生します。';
   button.classList.toggle('muted',!cpuMeetingSpeechEnabled);
+}
+function speakCpuBrowserFallback(text,from='',priority=false,force=false){
+  if((!cpuMeetingSpeechEnabled&&!force)||(!force&&state?.cpuGeminiTts)||!window.speechSynthesis||!window.SpeechSynthesisUtterance)return false;
+  const cleaned=String(text||'').replace(/[🤖👻📢]/g,'').replace(/\s+/g,' ').trim().slice(0,125);if(!cleaned)return false;
+  try{
+    if(priority)window.speechSynthesis.cancel();
+    const utterance=new SpeechSynthesisUtterance(cleaned);utterance.lang='ja-JP';utterance.rate=1.16;utterance.pitch=.96;utterance.volume=1;
+    const voices=window.speechSynthesis.getVoices?.()||[];
+    const japanese=voices.filter(voice=>/^ja/i.test(voice.lang||''));if(japanese.length){let hash=0;for(const char of String(from||''))hash=(hash*33+char.charCodeAt(0))>>>0;utterance.voice=japanese[hash%japanese.length]}
+    window.speechSynthesis.speak(utterance);return true;
+  }catch(error){console.warn('Browser CPU speech failed',error);return false}
 }
 function stopCpuMeetingSpeech(){
   cpuMeetingSpeechQueue=[];cpuMeetingSpeechActive=false;cpuMeetingSpeechLastAt=0;cpuMeetingSpeechGeneration++;
@@ -2132,7 +2157,20 @@ if(cpuSpeechButton)cpuSpeechButton.onclick=()=>{
 };
 updateCpuSpeechButton();
 // チャット送信処理はWebSocket接続処理より前に登録済みです。
-function appendChat(m){const phase={lobby:'ロビー',playing:'ゲーム',meeting:'会議',finished:'終了'}[m.phase]||'';for(const id of ['globalChatLog','meetingChatLog']){const log=$(id);if(!log)continue;const d=document.createElement('div');d.className=`chat-line ${m.bot?'cpu-chat-line':''}`;const ghost=m.alive===false?'👻 ':'';const bot=m.bot?'🤖 ':'';const source=m.bot&&m.aiSource?`<span class="cpu-ai-source ${escapeHtml(m.aiSource)}">${m.aiSource==='gemini'?'Gemini':'内蔵'}</span>`:'';d.innerHTML=`<span class="chat-name">${ghost}${bot}${escapeHtml(m.from)}</span><span class="chat-phase">${escapeHtml(phase)}</span>${source}<br>${escapeHtml(m.text)}`;log.append(d);while(log.children.length>120)log.firstElementChild?.remove();log.scrollTop=log.scrollHeight}}
+function appendChat(m){
+  const phase={lobby:'ロビー',playing:'ゲーム',meeting:'会議',finished:'終了'}[m.phase]||'';
+  for(const id of ['globalChatLog','meetingChatLog']){
+    const log=$(id);if(!log)continue;const d=document.createElement('div');d.className=`chat-line ${m.bot?'cpu-chat-line':''}`;
+    const ghost=m.alive===false?'👻 ':'';const bot=m.bot?'🤖 ':'';
+    const source=m.bot&&m.aiSource?`<span class="cpu-ai-source ${escapeHtml(m.aiSource)}">${m.aiSource==='gemini'?'Gemini':'内蔵'}</span>`:'';
+    d.innerHTML=`<span class="chat-name">${ghost}${bot}${escapeHtml(m.from)}</span><span class="chat-phase">${escapeHtml(phase)}</span>${source}<br>${escapeHtml(m.text)}`;
+    log.append(d);while(log.children.length>120)log.firstElementChild?.remove();log.scrollTop=log.scrollHeight;
+  }
+  if(m.bot&&!state?.cpuGeminiTts){
+    const shouldSpeak=m.phase==='meeting'&&meetingVoiceActive()||m.channel==='group'&&groupVoiceActive();
+    if(shouldSpeak)speakCpuBrowserFallback(m.text,m.from,false);
+  }
+}
 const chatPanel=$('globalChatPanel'),chatToggle=$('chatToggleButton');
 if(chatPanel&&chatToggle){
   const mobileChatLayout=()=>matchMedia('(max-width: 640px)').matches;
@@ -2246,21 +2284,49 @@ function armVoiceFallback(peerId,ms=5000){clearVoiceFallbackTimer();voiceFallbac
 function clearIncomingCall(notify=false){if(incomingCallTimeoutId){clearTimeout(incomingCallTimeoutId);incomingCallTimeoutId=0}if(notify&&incomingCallPeer)send('callControl',{targetId:incomingCallPeer,action:'decline'});incomingCallPeer=null;closeDialog('incomingCallDialog');updateCallUi()}
 function currentCallName(){return state?.players?.find(p=>p.id===activeCallPeer)?.name||'相手'}
 function activeCallIsCpu(){return Boolean(state?.players?.find(player=>player.id===activeCallPeer)?.bot)}
+async function runLocalCpuCallReply(text){
+  if(!activeCallIsCpu()||cpuCallReplyBusy)return;
+  const targetId=activeCallPeer,target=state?.players?.find(player=>player.id===targetId),question=String(text||'').trim().slice(0,180);if(!question)return;
+  cpuCallReplyBusy=true;setVoiceStatus(`🤖 ${target?.name||'CPU'}が考えています…`,true);
+  let reply='';
+  try{
+    await firebaseAiInitialization;
+    if(!firebaseAiModel)throw new Error(firebaseAiInitError||'Firebase AI is not ready');
+    const prompt=JSON.stringify({
+      task:'人狼ゲーム中の個人通話として、相手の発言へ自然に返事をする',
+      cpuName:target?.name||'CPU',
+      speakingStyle:'友達同士のくだけた自然な日本語',
+      latestQuestion:question,
+      strictRules:['返答本文だけ','1〜2文','70文字以内','毎回違う言い回し','知らないゲーム情報を作らない']
+    });
+    const result=await Promise.race([firebaseAiModel.generateContent(prompt),promiseTimeout(8500,'CPU call response timeout')]);
+    reply=parseFirebaseCpuReply(result?.response?.text?.()||'',{});
+    firebaseAiVerified=true;firebaseAiLastError='';
+  }catch(error){
+    console.warn('Direct CPU call reply failed',error);
+    const choices=['うん、聞こえてるよ。もう少し詳しく話して。','なるほど。そのことは覚えておくね。','ちょっと考えてた。今はまだ決めつけないほうがよさそう。'];
+    reply=choices[Math.floor(Math.random()*choices.length)];
+  }finally{cpuCallReplyBusy=false;updateFirebaseAiHelp()}
+  if(activeCallPeer!==targetId)return;
+  setVoiceStatus(`🤖 ${target?.name||'CPU'}：${reply}`,true);speakCpuBrowserFallback(reply,target?.name||'CPU',true,true);
+}
 function stopCpuCallRecognition(){
   cpuCallRecognitionActive=false;
   if(cpuCallRecognition){cpuCallRecognition.onend=null;try{cpuCallRecognition.stop()}catch{}cpuCallRecognition=null}
+  const chatInput=$('globalChatInput');if(chatInput)chatInput.placeholder='いつでもチャットできます';
 }
 function startCpuCallRecognition(){
   stopCpuCallRecognition();
+  const chatInput=$('globalChatInput');if(chatInput)chatInput.placeholder=`${currentCallName()}へ話す内容を入力`;
   const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!Recognition){setVoiceStatus(`🤖 ${currentCallName()}と通話中（このブラウザは音声認識非対応です）`,true);return false}
+  if(!Recognition){setVoiceStatus(`🤖 ${currentCallName()}と通話中。左下のチャット欄から話しかけられます。`,true);return false}
   try{
     const recognition=new Recognition();cpuCallRecognition=recognition;cpuCallRecognitionActive=true;
     recognition.lang='ja-JP';recognition.continuous=true;recognition.interimResults=false;recognition.maxAlternatives=1;
     recognition.onresult=event=>{
       for(let index=event.resultIndex;index<event.results.length;index++){
         const result=event.results[index];if(!result.isFinal)continue;
-        const text=String(result[0]?.transcript||'').trim();if(text&&activeCallIsCpu())send('cpuCallUtterance',{text});
+        const text=String(result[0]?.transcript||'').trim();if(text&&activeCallIsCpu())runLocalCpuCallReply(text);
       }
     };
     recognition.onerror=event=>{
@@ -2665,7 +2731,12 @@ async function placeCall(peerId){
   if(!peerId||peerId===myId)return;if(activeCallPeer){showNotice('先に現在の通話を終了してください。');return}
   const target=state?.players?.find(player=>player.id===peerId);if(!target?.connected){showNotice('相手は現在接続していません。');return}
   pauseGroupVoiceCapture();activeCallPeer=peerId;currentVoiceStatus=`${target?.name||'相手'}への通話を準備しています…`;updateCallUi();await unlockRemoteAudio();
-  if(target.bot){setVoiceStatus(`${target.name}を呼び出しています…`,true);send('callControl',{targetId:peerId,action:'ring'});armCallTimeout(peerId,9000,'CPUとの通話を開始できませんでした。');return}
+  if(target.bot){
+    clearCallTimeout();startCpuCallRecognition();updateCallUi();
+    const greeting=`もしもし、${target.name}だよ。聞こえてる？`;
+    setVoiceStatus(`🤖 ${target.name}：${greeting}`,true);speakCpuBrowserFallback(greeting,target.name,true,true);
+    return;
+  }
   const started=await startVoiceChat();if(!started||!localVoiceStream){activeCallPeer=null;resumeGroupVoiceCapture();updateCallUi();return}
   setVoiceStatus(`${target?.name||'相手'}を呼び出しています…`,true);send('callControl',{targetId:peerId,action:'ring'});armCallTimeout(peerId,20000,'応答がないため呼び出しを終了しました。');
 }
