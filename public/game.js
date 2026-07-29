@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken }
 import { getAI, getGenerativeModel, getLiveGenerativeModel, GoogleAIBackend, ResponseModality, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),cpuControls:$('cpuControls'),addCpu:$('addCpuButton'),removeCpu:$('removeCpuButton'),cpuHelp:$('cpuHelp'),firebaseAiTest:$('firebaseAiTestButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-reliable-cpu-v75';
+const MAP_VERSION='aurora-call-audio-fallback-v76';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -457,7 +457,7 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,cpuCallRecognition=null,cpuCallRecognitionActive=false,cpuCallReplyBusy=false,cpuLiveSession=null,cpuLiveStarting=false,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0,meetingVoiceBorrowedFromGroup=false,meetingVoiceLastSentAt=0,meetingVoiceSpeechUntil=0,meetingAutoVoicePending=false;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,cpuCallRecognition=null,cpuCallRecognitionActive=false,cpuCallReplyBusy=false,cpuLiveSession=null,cpuLiveStarting=false,lastCpuCallText='',joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0,meetingVoiceBorrowedFromGroup=false,meetingVoiceLastSentAt=0,meetingVoiceSpeechUntil=0,meetingAutoVoicePending=false;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
 let cpuMeetingSpeechEnabled=localStorage.getItem('hiddenCrewCpuSpeech')!=='off';
 let cpuMeetingSpeechQueue=[];
 let cpuMeetingSpeechActive=false;
@@ -654,12 +654,13 @@ function handle(m){
   }else if(m.type==='cpuSpeechAudio'){
     queueCpuMeetingAudio(m);
   }else if(m.type==='cpuCallMessage'){
-    if(activeCallPeer===m.fromId){setVoiceStatus(`🤖 ${m.from||currentCallName()}：${m.text||''}`,true);if(!state?.cpuGeminiTts)queueClientGeminiSpeech(m.text,m.from,'call',true)}
+    if(activeCallPeer===m.fromId){lastCpuCallText=String(m.text||'');setVoiceStatus(`🤖 ${m.from||currentCallName()}：${lastCpuCallText}`,true);if(!state?.cpuGeminiTts)queueClientGeminiSpeech(lastCpuCallText,m.from,'call',true)}
   }else if(m.type==='cpuSpeechError'){
     cpuMeetingSpeechLastError=String(m.message||'Gemini音声の生成に失敗しました');
     updateCpuSpeechButton();
     const now=performance.now();
     if(now-cpuMeetingSpeechErrorShownAt>5000){cpuMeetingSpeechErrorShownAt=now;showNotice(`Gemini音声失敗：${compactFirebaseError(cpuMeetingSpeechLastError)}`)}
+    if(activeCallIsCpu()&&lastCpuCallText)speakCpuCallDeviceFallback(lastCpuCallText);
   }else if(m.type==='chatAck'){
     finishChatRequest(m.clientMessageId);
   }else if(m.type==='chatError'){
@@ -2068,6 +2069,16 @@ function clientGeminiVoiceFor(name='CPU'){
   for(const char of String(name))hash=(hash*33+char.charCodeAt(0))>>>0;
   return voices[hash%voices.length];
 }
+function speakCpuCallDeviceFallback(text){
+  const content=String(text||'').trim();if(!content||!activeCallIsCpu()||!('speechSynthesis'in window))return false;
+  try{
+    speechSynthesis.cancel();
+    const utterance=new SpeechSynthesisUtterance(content),voices=speechSynthesis.getVoices();
+    utterance.lang='ja-JP';utterance.rate=1.18;utterance.pitch=1.02;
+    utterance.voice=voices.find(voice=>/^ja/i.test(voice.lang))||null;
+    speechSynthesis.speak(utterance);return true;
+  }catch(error){console.warn('CPU call device voice fallback failed',error);return false}
+}
 async function drainClientGeminiSpeechQueue(){
   if(clientGeminiSpeechRunning)return;clientGeminiSpeechRunning=true;
   try{
@@ -2117,6 +2128,7 @@ async function drainClientGeminiSpeechQueue(){
       }catch(error){
         cpuMeetingSpeechLastError=String(error?.message||error||'Gemini audio failed');updateCpuSpeechButton();
         console.warn('Client Gemini speech failed',error);
+        if(item.scope==='call')speakCpuCallDeviceFallback(item.text);
         const now=performance.now();if(now-cpuMeetingSpeechErrorShownAt>5000){cpuMeetingSpeechErrorShownAt=now;showNotice(`Gemini音声失敗：${compactFirebaseError(cpuMeetingSpeechLastError)}`)}
       }
     }
