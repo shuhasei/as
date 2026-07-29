@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken }
 import { getAI, getGenerativeModel, getLiveGenerativeModel, GoogleAIBackend, ResponseModality, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),cpuControls:$('cpuControls'),addCpu:$('addCpuButton'),removeCpu:$('removeCpuButton'),cpuHelp:$('cpuHelp'),firebaseAiTest:$('firebaseAiTestButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-natural-humor-v80';
+const MAP_VERSION='aurora-short-humor-v81';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -106,7 +106,7 @@ async function initializeFirebaseMeetingAi(){
         'あなたはゲームに参加しながら友達と通話している一人のCPUプレイヤーです。AIや案内役のように振る舞わず、自分の気分と個性を持つ友達として自然な日本語で話してください。',
         'ゲームの推理だけに縛られません。日常の話、好きなもの、最近気になること、冗談、雑談、相手への質問、話題転換を自由に行って構いません。',
         '相手の発言へ答えたくなければ別の話をしても構いません。自分から話題を始めたり、ほかのCPUへ話を振ったり、笑ったり、驚いたり、軽く反論したりしてください。',
-        '長さや文数、話し方、語尾を固定しません。その場の雰囲気に合わせ、短い相づちから少し長い話まで自由に変えてください。',
+        '発言は基本1文、長くても2文までにしてください。前置きや説明を省き、友達が会話で返す短さにしてください。',
         '毎回同じ始まり方、同じ結論、同じ質問を避け、直前の会話から思いついたことを素直に話してください。',
         '笑いは会話の流れから作ってください。直前の言葉を拾う軽いツッコミ、観察、少しの誇張、セルフツッコミ、前に出た話題の回収を優先します。',
         '無理に毎回ボケず、普通に返す中へ時々さらっと面白い一言を混ぜてください。定番のダジャレ、説明付きのオチ、ネットの決まり文句、過剰な「笑」「ｗ」、相手を傷つけるいじりは避けてください。',
@@ -116,7 +116,7 @@ async function initializeFirebaseMeetingAi(){
       generationConfig:{
         responseMimeType:'application/json',
         responseSchema:FIREBASE_REPLY_SCHEMA,
-        maxOutputTokens:512,
+        maxOutputTokens:192,
         thinkingConfig:{thinkingLevel:ThinkingLevel.MINIMAL}
       }
     });
@@ -189,8 +189,10 @@ if(ui.firebaseAiTest)ui.firebaseAiTest.addEventListener('click',testFirebaseAiCo
 function cleanFirebaseCpuReply(value=''){
   let text=String(value||'').replace(/[<>]/g,'').replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').trim();
   text=text.replace(/^([「『]|回答[:：]?|返答[:：]?|CPU[:：]?)+/i,'').replace(/[」』]$/,'').trim();
-  if(text.length>240){
-    const clipped=text.slice(0,240);
+  const sentences=text.match(/[^。！？]*[。！？]/g);
+  if(sentences?.length)text=sentences.slice(0,2).join('').trim();
+  if(text.length>96){
+    const clipped=text.slice(0,96);
     const boundary=Math.max(clipped.lastIndexOf('。'),clipped.lastIndexOf('！'),clipped.lastIndexOf('？'));
     text=boundary>=12?clipped.slice(0,boundary+1):clipped.replace(/[、,][^、,。！？]*$/,'');
   }
@@ -243,13 +245,13 @@ function firebaseCpuPrompt(request){
       'ゲームの話に限らず日常会話、趣味、食べ物、天気、最近の出来事など好きな話題を選べる',
       '質問へ必ず回答する必要はなく、話題を変えたり自分から質問したりできる',
       '冗談、笑い、驚き、迷い、軽い反論、相づちを自由に使える',
-      '発言の長さや文数はその都度自由に決める',
+      '基本は1文、長くても2文・96文字以内。前置きや説明を省く',
       'ゲーム上の架空の目撃情報だけは事実として作らない'
     ],
     humorGuide:[
       '笑わせようとしている感じを出さず、会話の流れの中で一言だけ面白くする',
       '相手の直前の言葉を具体的に拾う。使えるときは軽いツッコミ、誇張、セルフツッコミ、話題の回収を使う',
-      '普通の返答も混ぜ、毎回ボケない。面白い一言を説明しない',
+      '普通の返答も混ぜ、毎回ボケない。面白い一言を説明せず短く切る',
       '定番のダジャレ、寒いなぞなぞ、ネットの決まり文句、過剰な「笑」「ｗ」、攻撃的ないじりを避ける'
     ]
   });
@@ -2440,7 +2442,7 @@ async function runLocalCpuCallReply(text){
       cpuName:target?.name||'CPU',
       speakingStyle:'友達同士のくだけた自然な日本語。軽いツッコミ、少しの誇張、セルフツッコミを会話に合う時だけ使う',
       latestQuestion:question,
-      humorGuide:['毎回ボケない','定番のダジャレや説明付きのオチを避ける','過剰な「笑」「ｗ」や相手を傷つけるいじりを避ける','返答本文だけ','知らないゲーム情報を作らない']
+      humorGuide:['基本1文、最大2文・96文字','前置きや説明を省く','毎回ボケない','定番のダジャレや説明付きのオチを避ける','過剰な「笑」「ｗ」や相手を傷つけるいじりを避ける','返答本文だけ','知らないゲーム情報を作らない']
     });
     const result=await Promise.race([firebaseAiModel.generateContent(prompt),promiseTimeout(8500,'CPU call response timeout')]);
     reply=parseFirebaseCpuReply(result?.response?.text?.()||'',{});
