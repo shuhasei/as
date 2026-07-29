@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken }
 import { getAI, getGenerativeModel, getLiveGenerativeModel, GoogleAIBackend, ResponseModality, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),cpuControls:$('cpuControls'),addCpu:$('addCpuButton'),removeCpu:$('removeCpuButton'),cpuHelp:$('cpuHelp'),firebaseAiTest:$('firebaseAiTestButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-call-audio-fallback-v76';
+const MAP_VERSION='aurora-gemini-only-retry-v77';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -468,6 +468,7 @@ let cpuMeetingSpeechLastError='';
 let cpuMeetingSpeechErrorShownAt=0;
 let clientGeminiSpeechQueue=[];
 let clientGeminiSpeechRunning=false;
+let clientGeminiLastRequestAt=0;
 let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastCorpseUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
@@ -660,7 +661,7 @@ function handle(m){
     updateCpuSpeechButton();
     const now=performance.now();
     if(now-cpuMeetingSpeechErrorShownAt>5000){cpuMeetingSpeechErrorShownAt=now;showNotice(`Gemini音声失敗：${compactFirebaseError(cpuMeetingSpeechLastError)}`)}
-    if(activeCallIsCpu()&&lastCpuCallText)speakCpuCallDeviceFallback(lastCpuCallText);
+    if(activeCallIsCpu()&&lastCpuCallText)queueClientGeminiSpeech(lastCpuCallText,currentCallName(),'call',true);
   }else if(m.type==='chatAck'){
     finishChatRequest(m.clientMessageId);
   }else if(m.type==='chatError'){
@@ -2069,16 +2070,6 @@ function clientGeminiVoiceFor(name='CPU'){
   for(const char of String(name))hash=(hash*33+char.charCodeAt(0))>>>0;
   return voices[hash%voices.length];
 }
-function speakCpuCallDeviceFallback(text){
-  const content=String(text||'').trim();if(!content||!activeCallIsCpu()||!('speechSynthesis'in window))return false;
-  try{
-    speechSynthesis.cancel();
-    const utterance=new SpeechSynthesisUtterance(content),voices=speechSynthesis.getVoices();
-    utterance.lang='ja-JP';utterance.rate=1.18;utterance.pitch=1.02;
-    utterance.voice=voices.find(voice=>/^ja/i.test(voice.lang))||null;
-    speechSynthesis.speak(utterance);return true;
-  }catch(error){console.warn('CPU call device voice fallback failed',error);return false}
-}
 async function drainClientGeminiSpeechQueue(){
   if(clientGeminiSpeechRunning)return;clientGeminiSpeechRunning=true;
   try{
@@ -2088,18 +2079,28 @@ async function drainClientGeminiSpeechQueue(){
         await firebaseAiInitialization;
         let audio=null,sdkError=null;
         if(firebaseAiService){
-          try{
-            const speechModel=getGenerativeModel(firebaseAiService,{
-              model:'gemini-3.1-flash-tts-preview',
-              generationConfig:{
-                responseModalities:[ResponseModality.AUDIO],
-                speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:clientGeminiVoiceFor(item.from)}}}
-              }
-            });
-            const prompt=`次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`;
-            const result=await Promise.race([speechModel.generateContent(prompt),promiseTimeout(11500,'Gemini TTS timeout')]);
-            audio=result?.response?.candidates?.[0]?.content?.parts?.find(part=>part?.inlineData?.data)?.inlineData||null;
-          }catch(error){sdkError=error;console.warn('Firebase Gemini TTS failed; trying REST fallback',error)}
+          const speechModel=getGenerativeModel(firebaseAiService,{
+            model:'gemini-3.1-flash-tts-preview',
+            generationConfig:{
+              responseModalities:[ResponseModality.AUDIO],
+              speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:clientGeminiVoiceFor(item.from)}}}
+            }
+          });
+          const prompt=`次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`;
+          for(let attempt=0;attempt<3&&!audio?.data;attempt++){
+            const wait=Math.max(0,1350-(performance.now()-clientGeminiLastRequestAt));
+            if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
+            clientGeminiLastRequestAt=performance.now();
+            try{
+              const result=await Promise.race([speechModel.generateContent(prompt),promiseTimeout(11500,'Gemini TTS timeout')]);
+              audio=result?.response?.candidates?.[0]?.content?.parts?.find(part=>part?.inlineData?.data)?.inlineData||null;
+              if(!audio?.data)throw new Error('Geminiから音声が返りませんでした');
+            }catch(error){
+              sdkError=error;
+              if(attempt<2)await new Promise(resolve=>setTimeout(resolve,650*(attempt+1)));
+            }
+          }
+          if(!audio?.data)console.warn('Firebase Gemini TTS retries exhausted; trying REST fallback',sdkError);
         }
         if(!audio?.data){
           const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),10500);
@@ -2128,7 +2129,6 @@ async function drainClientGeminiSpeechQueue(){
       }catch(error){
         cpuMeetingSpeechLastError=String(error?.message||error||'Gemini audio failed');updateCpuSpeechButton();
         console.warn('Client Gemini speech failed',error);
-        if(item.scope==='call')speakCpuCallDeviceFallback(item.text);
         const now=performance.now();if(now-cpuMeetingSpeechErrorShownAt>5000){cpuMeetingSpeechErrorShownAt=now;showNotice(`Gemini音声失敗：${compactFirebaseError(cpuMeetingSpeechLastError)}`)}
       }
     }
