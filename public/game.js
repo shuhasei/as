@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken }
 import { getAI, getGenerativeModel, getLiveGenerativeModel, GoogleAIBackend, ResponseModality, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),cpuControls:$('cpuControls'),addCpu:$('addCpuButton'),removeCpu:$('removeCpuButton'),cpuHelp:$('cpuHelp'),firebaseAiTest:$('firebaseAiTestButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-gemini-live-pcm-v72';
+const MAP_VERSION='aurora-free-meeting-call-v74';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -524,9 +524,7 @@ function submitChatMessage(form,input){
   if(!socket||socket.readyState!==WebSocket.OPEN){showNotice('チャットサーバーへ接続されていません。再読み込みしてください。');return}
   if(form.id==='globalChatForm'&&activeCallIsCpu()){
     input.value='';
-    if(cpuLiveSession&&!cpuLiveSession.isClosed){
-      cpuLiveSession.send(text.slice(0,180),true).catch(error=>{console.warn('CPU Live text send failed',error);showNotice('CPU通話へ送信できませんでした。')});
-    }else runLocalCpuCallReply(text.slice(0,180));
+    send('cpuCallUtterance',{text:text.slice(0,180)});
     return;
   }
   if(form.id==='meetingChatForm'){
@@ -2430,10 +2428,7 @@ function startCpuCallRecognition(){
       for(let index=event.resultIndex;index<event.results.length;index++){
         const result=event.results[index];if(!result.isFinal)continue;
         const text=String(result[0]?.transcript||'').trim();
-        if(text&&activeCallIsCpu()){
-          if(cpuLiveSession&&!cpuLiveSession.isClosed)cpuLiveSession.send(text.slice(0,180),true).catch(error=>{console.warn('CPU Live speech send failed',error);showNotice('CPU通話へ音声を送信できませんでした。')});
-          else runLocalCpuCallReply(text);
-        }
+        if(text&&activeCallIsCpu())send('cpuCallUtterance',{text:text.slice(0,180)});
       }
     };
     recognition.onerror=event=>{
@@ -2831,7 +2826,7 @@ async function handleVoiceAudio(m){
 function stopVoiceChat(){
   clearVoiceFallbackTimer();stopVoiceRelay(false);for(const id of [...voicePeers.keys()])closeVoicePeer(id);for(const track of localVoiceStream?.getTracks()||[])track.stop();localVoiceStream=null;voiceStarting=false;micMuted=false;setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi();
 }
-function updateMicButton(){const button=$('micButton');if(!button)return;if(meetingVoiceActive()){updateMeetingVoiceUi();return}if(!activeCallPeer){button.textContent='🎙 通話相手なし';button.disabled=true;button.classList.remove('muted');return}if(activeCallIsCpu()){button.textContent=cpuLiveStarting?'🎙 Gemini接続中…':cpuLiveSession?'🎙 Gemini通話中':'🎙 接続待ち';button.disabled=true;button.classList.remove('muted');return}button.disabled=false;if(!localVoiceStream){button.textContent='🎙 マイク開始';button.classList.remove('muted');return}button.textContent=micMuted?'🔇 マイクOFF':'🎙 マイクON';button.classList.toggle('muted',micMuted)}
+function updateMicButton(){const button=$('micButton');if(!button)return;if(meetingVoiceActive()){updateMeetingVoiceUi();return}if(!activeCallPeer){button.textContent='🎙 通話相手なし';button.disabled=true;button.classList.remove('muted');return}if(activeCallIsCpu()){button.textContent='🎙 CPU通話中';button.disabled=true;button.classList.remove('muted');return}button.disabled=false;if(!localVoiceStream){button.textContent='🎙 マイク開始';button.classList.remove('muted');return}button.textContent=micMuted?'🔇 マイクOFF':'🎙 マイクON';button.classList.toggle('muted',micMuted)}
 $('speakerButton').onclick=()=>{if(!canParticipateInMeeting()){showNotice('観戦中は会議音声へ参加できません。');return}enableMeetingAudio(true)};
 $('micButton').onclick=async()=>{if(meetingVoiceActive()){if(!canParticipateInMeeting()){showNotice('観戦中は会議音声へ参加できません。');return}await enableMeetingAudio(false);if(!meetingVoiceStream){await startMeetingVoice(false);return}meetingVoiceMuted=!meetingVoiceMuted;for(const track of meetingVoiceStream.getAudioTracks())track.enabled=!meetingVoiceMuted;updateMeetingVoiceUi();setVoiceStatus(meetingVoiceMuted?'会議音声を聞いています。マイクはOFFです。':'会議音声に接続しました。マイクはONです。',true);return}await unlockRemoteAudio();if(!activeCallPeer){showNotice('先にメンバー一覧の📞から通話相手を選んでください。');updateCallUi();return}if(!localVoiceStream){await startVoiceChat();return}micMuted=!micMuted;for(const track of localVoiceStream.getAudioTracks())track.enabled=!micMuted;updateCallUi();setVoiceStatus(micMuted?'マイクをミュートしています。':voiceRelayActive?'音声中継モードで接続しました。':'音声通話に接続しました。',!micMuted)};
 async function placeCall(peerId){
@@ -2839,9 +2834,9 @@ async function placeCall(peerId){
   const target=state?.players?.find(player=>player.id===peerId);if(!target?.connected){showNotice('相手は現在接続していません。');return}
   pauseGroupVoiceCapture();activeCallPeer=peerId;currentVoiceStatus=`${target?.name||'相手'}への通話を準備しています…`;updateCallUi();await unlockRemoteAudio();
   if(target.bot){
-    clearCallTimeout();stopCpuCallRecognition();updateCallUi();
-    const connected=await startCpuLiveCall(target);
-    if(!connected){activeCallPeer=null;resumeGroupVoiceCapture();updateCallUi()}
+    clearCallTimeout();stopCpuCallRecognition();setVoiceStatus(`${target.name}を呼び出しています…`,true);
+    send('callControl',{targetId:peerId,action:'ring'});
+    armCallTimeout(peerId,12000,'CPU通話サーバーから応答がありませんでした。');
     return;
   }
   const started=await startVoiceChat();if(!started||!localVoiceStream){activeCallPeer=null;resumeGroupVoiceCapture();updateCallUi();return}
@@ -2878,7 +2873,7 @@ async function handleCallControl(m){
   else if(action==='hangup'&&incomingCallPeer===from){showNotice('着信がキャンセルされました。');clearIncomingCall(false)}
   else if(action==='hangup'&&activeCallPeer===from){showNotice('通話が終了しました。');hangUpCall(false)}
 }
-function hangUpCall(notify=true){const peer=activeCallPeer;clearCallTimeout();clearVoiceFallbackTimer();if(notify&&peer&&!activeCallIsCpu())send('callControl',{targetId:peer,action:'hangup'});stopCpuCallRecognition();stopCpuLiveCall();activeCallPeer=null;stopVoiceChat();resumeGroupVoiceCapture();setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi()}
+function hangUpCall(notify=true){const peer=activeCallPeer;clearCallTimeout();clearVoiceFallbackTimer();if(notify&&peer)send('callControl',{targetId:peer,action:'hangup'});stopCpuCallRecognition();stopCpuLiveCall();activeCallPeer=null;stopVoiceChat();resumeGroupVoiceCapture();setVoiceStatus('メンバー一覧の📞から個別通話できます。');updateCallUi()}
 ui.players.addEventListener('click',event=>{const button=event.target.closest('.call-member');if(button)placeCall(button.dataset.callId)});
 $('acceptCallButton').onclick=acceptIncomingCall;$('declineCallButton').onclick=declineIncomingCall;$('hangupCallButton').onclick=()=>hangUpCall(true);
 updateCallUi();
