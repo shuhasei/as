@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-gemini-only-retry-v77";
+const MAP_VERSION = "aurora-free-conversation-v78";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -1081,7 +1081,7 @@ export class GameRoom extends DurableObject {
 
   recordMeetingChatLine(from, text, bot = false) {
     if (this.phase !== "meeting") return;
-    const cleaned = String(text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+    const cleaned = String(text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 240);
     if (!cleaned) return;
     const history = Array.isArray(this.meetingChatHistory) ? this.meetingChatHistory : [];
     history.push({ from: String(from || "プレイヤー").slice(0, 18), text: cleaned, bot: Boolean(bot), at: Date.now() });
@@ -1089,7 +1089,7 @@ export class GameRoom extends DurableObject {
   }
 
   broadcastBotMeetingChat(bot, text, replyTo = null, aiSource = "local") {
-    const cleaned = String(text || "").replace(/[<>]/g, "").trim().slice(0, 125);
+    const cleaned = String(text || "").replace(/[<>]/g, "").trim().slice(0, 240);
     if (!cleaned || this.phase !== "meeting" || !bot?.alive || bot.meetingEligible === false) return;
     bot.aiRecentReplies = [...(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []), cleaned].slice(-4);
     this.lastMeetingBotSpeakerId = bot.id;
@@ -1125,7 +1125,7 @@ export class GameRoom extends DurableObject {
 
   queueGeminiBotSpeech(bot, text, options = {}) {
     if (!this.env?.GEMINI_API_KEY || !bot?.id) return;
-    const cleaned = String(text || "").replace(/[🤖👻📢]/g, "").replace(/^CPU[\s　]*/i, "").replace(/[「」『』]/g, "").replace(/\s+/g, " ").trim().slice(0, 125);
+    const cleaned = String(text || "").replace(/[🤖👻📢]/g, "").replace(/^CPU[\s　]*/i, "").replace(/[「」『』]/g, "").replace(/\s+/g, " ").trim().slice(0, 240);
     if (!cleaned) return;
     const scope = ["meeting", "group", "call"].includes(options.scope) ? options.scope : "meeting";
     const item = {
@@ -1494,7 +1494,7 @@ export class GameRoom extends DurableObject {
       .replace(/[\r\n]+/g, " ")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, 120);
+      .slice(0, 240);
     if (!cleaned) return null;
     if (bot?.role === "impostor" && /(私は|自分は).{0,4}人狼|人狼です|犯人です/.test(cleaned)) return null;
     if (!/[。！？]$/.test(cleaned)) cleaned += "。";
@@ -1783,6 +1783,11 @@ export class GameRoom extends DurableObject {
       `さっきの発言、少し引っかかった。言い方じゃなくて時間の流れを整理しよう。`,
       `みんな同じ意見になるのは逆に怖いな。違う見方をしてる人はいない？`,
       `投票先を決める前に、一人ずつ「確実に見たこと」だけ話さない？`,
+      `全然関係ないけど、この会議が終わったら何食べたい？　私は甘いもの欲しい。`,
+      `さっきからちょっと静かすぎない？　ゲームの話じゃなくても誰か何か話そうよ。`,
+      `こういう待ち時間って妙に眠くなるよね。みんなは眠いときどうしてる？`,
+      `ねえ、最近ハマってるものある？　投票まで少し時間あるし聞きたい。`,
+      `ちょっと空気変えよう。今日いちばん笑ったこと、誰か話してよ。`,
     );
     const previous = new Set(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []);
     const fresh = choices.filter((line) => !previous.has(line));
@@ -1831,18 +1836,20 @@ export class GameRoom extends DurableObject {
     try {
       const model = String(this.env?.GEMINI_TEXT_MODEL || "gemini-3.5-flash-lite");
       const prompt = [
-        `あなたは人狼ゲーム中のCPU「${bot.name}」です。性格：${bot.aiPersonality || "自然で親しみやすい"}`,
-        mode === "call" ? `${speaker?.name || "プレイヤー"}との個人通話です。` : "グループ通話です。",
-        `現在地は${aiZoneLabel(bot)}付近です。ゲーム内で確認できない事実や犯人を作らないでください。`,
+        `あなたはCPU「${bot.name}」ですが、案内役ではなく友達として話します。性格：${bot.aiPersonality || "自然で親しみやすい"}`,
+        mode === "call" ? `${speaker?.name || "プレイヤー"}との気楽な個人通話です。` : "友達との気楽なグループ通話です。",
+        "ゲームの話に縛られず、日常会話、趣味、食べ物、冗談、感想、質問、話題転換を自由に行ってください。",
+        "相手の質問へ必ず答える必要も、短くまとめる必要もありません。自分が今話したいことを自然に話してください。",
+        `現在地は${aiZoneLabel(bot)}付近です。ゲーム上の架空の目撃情報だけは事実として作らないでください。`,
         `相手の発言：${String(text || "").slice(0, 180)}`,
-        "友達同士の自然な日本語で、毎回異なる言い回しの1〜2文、70文字以内で返してください。返答本文だけを出力してください。",
+        "友達同士の自然な日本語で自由に返してください。毎回同じ調子にせず、返答本文だけを出力してください。",
       ].join("\n");
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: "POST",
         headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.95, maxOutputTokens: 90 },
+          generationConfig: { temperature: 1.15, maxOutputTokens: 320 },
         }),
         signal: controller.signal,
       });
@@ -1859,7 +1866,7 @@ export class GameRoom extends DurableObject {
   }
 
   broadcastBotAmbientChat(bot, text, channel = "global", aiSource = "local") {
-    const cleaned = String(text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+    const cleaned = String(text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 240);
     if (!cleaned || !bot?.alive || this.phase === "finished") return;
     bot.aiRecentReplies = [...(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []), cleaned].slice(-5);
     this.broadcast({
@@ -2498,7 +2505,7 @@ export class GameRoom extends DurableObject {
   }
 
   chat(player, message) {
-    const text = String(message.text || "").replace(/[<>]/g, "").trim().slice(0, 120);
+    const text = String(message.text || "").replace(/[<>]/g, "").trim().slice(0, 240);
     const clientMessageId = String(message.clientMessageId || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
     const rejectChat = (reason) => this.send(player.id, { type: "chatError", clientMessageId, message: reason });
     if (!this.sessions.has(player.id)) return;
