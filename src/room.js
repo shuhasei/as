@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-free-meeting-dialogue-v65";
+const MAP_VERSION = "aurora-cpu-live-voice-v66";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -415,11 +415,19 @@ export class GameRoom extends DurableObject {
     this.pendingClientAiRequests = new Map();
     this.geminiTtsQueue = [];
     this.geminiTtsRunning = false;
+    this.geminiTtsAbortController = null;
+    this.geminiTtsCurrentScope = "";
     this.geminiTtsLastErrorAt = 0;
     this.meetingChatHistory = [];
     this.lastMeetingBotSpeakerId = null;
     this.meetingFreeTalkAt = 0;
     this.meetingFreeTalkCount = 0;
+    this.cpuCalls = new Map();
+    this.nextAmbientBotTalkAt = Date.now() + 9000;
+    this.nextGroupBotTalkAt = Date.now() + 7000;
+    this.lastAmbientBotSpeakerId = null;
+    this.lastGroupBotSpeakerId = null;
+    this.groupBotTalkCount = 0;
 
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment();
@@ -477,6 +485,12 @@ export class GameRoom extends DurableObject {
     this.lastMeetingBotSpeakerId = null;
     this.meetingFreeTalkAt = 0;
     this.meetingFreeTalkCount = 0;
+    this.cpuCalls = new Map();
+    this.nextAmbientBotTalkAt = Date.now() + 6000;
+    this.nextGroupBotTalkAt = Date.now() + 5000;
+    this.lastAmbientBotSpeakerId = null;
+    this.lastGroupBotSpeakerId = null;
+    this.groupBotTalkCount = 0;
 
     this.hostId = this.pickHumanHost(this.hostId);
   }
@@ -527,6 +541,12 @@ export class GameRoom extends DurableObject {
     this.lastMeetingBotSpeakerId = null;
     this.meetingFreeTalkAt = 0;
     this.meetingFreeTalkCount = 0;
+    this.cpuCalls.clear();
+    this.nextAmbientBotTalkAt = Date.now() + 9000;
+    this.nextGroupBotTalkAt = Date.now() + 7000;
+    this.lastAmbientBotSpeakerId = null;
+    this.lastGroupBotSpeakerId = null;
+    this.groupBotTalkCount = 0;
     await this.ctx.storage.deleteAlarm();
     await this.persist();
   }
@@ -783,6 +803,9 @@ export class GameRoom extends DurableObject {
         break;
       case "callControl":
         this.callControl(player, message);
+        break;
+      case "cpuCallUtterance":
+        await this.cpuCallUtterance(player, message);
         break;
       case "sabotage":
         await this.startSabotage(player, message);
@@ -1100,28 +1123,71 @@ export class GameRoom extends DurableObject {
     return "";
   }
 
-  queueGeminiBotSpeech(bot, text) {
-    if (!this.env?.GEMINI_API_KEY || this.phase !== "meeting" || !bot?.id) return;
+  queueGeminiBotSpeech(bot, text, options = {}) {
+    if (!this.env?.GEMINI_API_KEY || !bot?.id) return;
     const cleaned = String(text || "").replace(/[🤖👻📢]/g, "").replace(/^CPU[\s　]*/i, "").replace(/[「」『』]/g, "").replace(/\s+/g, " ").trim().slice(0, 125);
     if (!cleaned) return;
-    this.geminiTtsQueue.push({ botId: bot.id, botName: String(bot.name || "CPU").slice(0, 18), text: cleaned });
-    if (this.geminiTtsQueue.length > 4) this.geminiTtsQueue.splice(0, this.geminiTtsQueue.length - 4);
+    const scope = ["meeting", "group", "call"].includes(options.scope) ? options.scope : "meeting";
+    const item = {
+      botId: bot.id,
+      botName: String(bot.name || "CPU").slice(0, 18),
+      text: cleaned,
+      scope,
+      targetId: String(options.targetId || ""),
+    };
+    // 個人通話を最優先し、長い読み上げ待ち行列を作らない。
+    if (scope === "call") this.geminiTtsQueue.unshift(item);
+    else this.geminiTtsQueue.push(item);
+    if (this.geminiTtsQueue.length > 5) this.geminiTtsQueue.splice(4);
+    if (scope === "call" && this.geminiTtsRunning && this.geminiTtsCurrentScope !== "call") {
+      try { this.geminiTtsAbortController?.abort(); } catch {}
+    }
     if (!this.geminiTtsRunning) this.ctx.waitUntil(this.drainGeminiTtsQueue());
+  }
+
+  cpuSpeechItemIsActive(item) {
+    if (!item) return false;
+    if (item.scope === "meeting") return this.phase === "meeting";
+    if (item.scope === "call") return this.phase !== "meeting" && this.cpuCalls.get(item.targetId) === item.botId && this.sessions.has(item.targetId);
+    if (item.scope === "group") {
+      return this.phase !== "meeting" && [...this.players.values()].some((player) =>
+        !player.isBot && player.alive && player.groupVoiceJoined && this.sessions.has(player.id)
+      );
+    }
+    return false;
+  }
+
+  sendCpuSpeechAudio(item, payload) {
+    const message = { ...payload, scope: item.scope, targetId: item.targetId || undefined };
+    if (item.scope === "call") {
+      if (this.cpuSpeechItemIsActive(item)) this.send(item.targetId, message);
+      return;
+    }
+    if (item.scope === "group") {
+      for (const player of this.players.values()) {
+        if (!player.isBot && player.alive && player.groupVoiceJoined && this.sessions.has(player.id)) this.send(player.id, message);
+      }
+      return;
+    }
+    this.broadcast(message);
   }
 
   async drainGeminiTtsQueue() {
     if (this.geminiTtsRunning) return;
     this.geminiTtsRunning = true;
     try {
-      while (this.geminiTtsQueue.length && this.phase === "meeting") {
+      while (this.geminiTtsQueue.length) {
         const item = this.geminiTtsQueue.shift();
+        if (!this.cpuSpeechItemIsActive(item)) continue;
         const apiKey = await this.geminiApiKey();
         if (!apiKey) break;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 20000);
+        this.geminiTtsAbortController = controller;
+        this.geminiTtsCurrentScope = item.scope;
+        const timeout = setTimeout(() => controller.abort(), 10500);
         try {
           const model = String(this.env?.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview");
-          const prompt = `次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`;
+          const prompt = `次の日本語だけを、友達との通話のように自然かつ少し速めに読み上げてください。変更や追加は禁止です。\n${item.text}`;
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
             method: "POST",
             headers: {
@@ -1157,33 +1223,39 @@ export class GameRoom extends DurableObject {
           const audio = parts.find((part) => part?.inlineData?.data)?.inlineData;
           const data = String(audio?.data || "");
           if (!data || data.length > 1800000) throw new Error(data ? "音声データが大きすぎます" : "Geminiから音声が返りませんでした");
-          if (this.phase !== "meeting") break;
+          if (!this.cpuSpeechItemIsActive(item)) continue;
           const rateMatch = String(audio?.mime_type || audio?.mimeType || "").match(/rate=(\d+)/i);
-          this.broadcast({
+          this.sendCpuSpeechAudio(item, {
             type: "cpuSpeechAudio",
             from: item.botName,
             fromId: item.botId,
-            phase: "meeting",
+            phase: this.phase,
             bot: true,
             sampleRate: rateMatch ? Number(rateMatch[1]) || 24000 : 24000,
             data,
           });
         } catch (error) {
+          const preemptedForCall = error?.name === "AbortError" && item.scope !== "call" && this.geminiTtsQueue[0]?.scope === "call";
+          if (preemptedForCall) continue;
           const message = error?.name === "AbortError" ? "Gemini音声の生成がタイムアウトしました" : String(error?.message || error || "Gemini音声の生成に失敗しました").slice(0, 180);
           console.warn("[Hidden Crew] Gemini TTS failed", message);
           const now = Date.now();
           if (now - this.geminiTtsLastErrorAt > 5000) {
             this.geminiTtsLastErrorAt = now;
-            this.broadcast({ type: "cpuSpeechError", message });
+            if (item.scope === "call" && item.targetId) this.send(item.targetId, { type: "cpuSpeechError", message });
+            else this.broadcast({ type: "cpuSpeechError", message });
           }
         } finally {
           clearTimeout(timeout);
+          if (this.geminiTtsAbortController === controller) this.geminiTtsAbortController = null;
+          this.geminiTtsCurrentScope = "";
         }
       }
     } finally {
       this.geminiTtsRunning = false;
-      if (this.phase !== "meeting") this.geminiTtsQueue = [];
-      if (this.geminiTtsQueue.length && this.phase === "meeting") this.ctx.waitUntil(this.drainGeminiTtsQueue());
+      this.geminiTtsAbortController = null;
+      this.geminiTtsCurrentScope = "";
+      if (this.geminiTtsQueue.length) this.ctx.waitUntil(this.drainGeminiTtsQueue());
     }
   }
 
@@ -1687,6 +1759,116 @@ export class GameRoom extends DurableObject {
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
+  buildCpuCasualReply(bot, speaker, text, mode = "call") {
+    const source = String(text || "").trim();
+    const name = speaker?.name || "きみ";
+    const zone = aiZoneLabel(bot);
+    const suspect = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
+    const choices = [];
+    if (/(どこ|場所|何して|なにして)/.test(source)) choices.push(`今は${zone}の近くにいるよ。周りを見ながら移動してた。`);
+    if (/(誰|だれ|怪し|人狼|犯人)/.test(source)) {
+      choices.push(suspect?.alive ? `${suspect.name}の動きは少し気になる。でも、まだ証拠まではないよ。` : "今のところ、誰か一人に決めるほどの材料はないかな。");
+    }
+    if (/(元気|調子|大丈夫)/.test(source)) choices.push(`うん、大丈夫。${name}はどう？　ちょっと周りが静かで気になってた。`);
+    if (/(こんにちは|もしもし|聞こえ|やあ|おはよう|こんばんは)/.test(source)) choices.push(`もしもし、聞こえてるよ。${name}、どうしたの？`);
+    if (/(ありがとう|助かった)/.test(source)) choices.push("うん、どういたしまして。また何か気づいたらすぐ話すね。");
+    if (mode === "group") {
+      choices.push(
+        `そういえば、私は${zone}を通ったよ。みんなは今どの辺？`,
+        "今は固まりすぎないほうがいいかも。でも一人になるのもちょっと怖いね。",
+        `${name}の話、分かる。ほかのCPUは何か見てない？`,
+      );
+    } else {
+      choices.push(
+        `うん、聞いてる。${source ? "その話、もう少し詳しく教えて。" : "何か気づいたことある？"}`,
+        `${name}、私は${zone}にいるよ。気になることがあれば聞いて。`,
+        "なるほど。私はまだ決めつけたくないけど、その点は覚えておくね。",
+        "ちょっと考えてた。今のところは、見たことだけ信じたほうがよさそう。",
+      );
+    }
+    const recent = new Set(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []);
+    const fresh = choices.filter((line) => !recent.has(line));
+    const pool = fresh.length ? fresh : choices;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  async generateGeminiBotText(bot, speaker, text, mode = "call") {
+    const apiKey = await this.geminiApiKey();
+    if (!apiKey) return null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5200);
+    try {
+      const model = String(this.env?.GEMINI_TEXT_MODEL || "gemini-3.5-flash-lite");
+      const prompt = [
+        `あなたは人狼ゲーム中のCPU「${bot.name}」です。性格：${bot.aiPersonality || "自然で親しみやすい"}`,
+        mode === "call" ? `${speaker?.name || "プレイヤー"}との個人通話です。` : "グループ通話です。",
+        `現在地は${aiZoneLabel(bot)}付近です。ゲーム内で確認できない事実や犯人を作らないでください。`,
+        `相手の発言：${String(text || "").slice(0, 180)}`,
+        "友達同士の自然な日本語で、毎回異なる言い回しの1〜2文、70文字以内で返してください。返答本文だけを出力してください。",
+      ].join("\n");
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.95, maxOutputTokens: 90 },
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Gemini text ${response.status}`);
+      const payload = await response.json();
+      const raw = payload?.candidates?.[0]?.content?.parts?.map((part) => part?.text || "").join(" ") || "";
+      return this.sanitizeExternalBotReply(raw, bot);
+    } catch (error) {
+      console.warn("Gemini CPU call reply failed; using local reply", error?.message || error);
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  broadcastBotAmbientChat(bot, text, channel = "global") {
+    const cleaned = String(text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!cleaned || !bot?.alive || this.phase === "finished") return;
+    bot.aiRecentReplies = [...(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []), cleaned].slice(-5);
+    this.broadcast({
+      type: "chat",
+      from: bot.name,
+      fromId: bot.id,
+      text: cleaned,
+      alive: true,
+      phase: this.phase,
+      bot: true,
+      aiSource: "local",
+      channel,
+    });
+  }
+
+  runAmbientBotTalk(now) {
+    const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && !bot.spectator);
+    if (!bots.length) return;
+    if (now >= Number(this.nextAmbientBotTalkAt || 0)) {
+      const bot = bots.find((item) => item.id !== this.lastAmbientBotSpeakerId) || bots[0];
+      const text = this.buildCpuCasualReply(bot, null, "", "ambient");
+      this.broadcastBotAmbientChat(bot, text, "global");
+      this.lastAmbientBotSpeakerId = bot.id;
+      this.nextAmbientBotTalkAt = now + 13000 + Math.random() * 11000;
+    }
+    const groupListeners = [...this.players.values()].filter((player) =>
+      !player.isBot && player.alive && !player.spectator && player.groupVoiceJoined && this.sessions.has(player.id)
+    );
+    if (!groupListeners.length || now < Number(this.nextGroupBotTalkAt || 0)) return;
+    const bot = bots.find((item) => item.id !== this.lastGroupBotSpeakerId) || bots[0];
+    const previous = this.lastGroupBotSpeakerId ? this.players.get(this.lastGroupBotSpeakerId) : null;
+    const cue = previous ? `${previous.name}の話を受けて、自分の意見か質問を話す` : "グループ通話を自然に始める";
+    const text = this.buildCpuCasualReply(bot, previous, cue, "group");
+    this.broadcastBotAmbientChat(bot, text, "group");
+    this.queueGeminiBotSpeech(bot, text, { scope: "group" });
+    this.lastGroupBotSpeakerId = bot.id;
+    this.groupBotTalkCount += 1;
+    this.nextGroupBotTalkAt = now + 8500 + Math.random() * 6500;
+  }
+
   scheduleFreeBotTalk(now) {
     if (this.phase !== "meeting" || this.meetingFreeTalkCount >= 3 || now < Number(this.meetingFreeTalkAt || 0)) return;
     const bots = [...this.players.values()]
@@ -1717,7 +1899,7 @@ export class GameRoom extends DurableObject {
 
   async aiTick(player) {
     if (player.id !== this.hostId || player.isBot || !this.sessions.has(player.id)) return;
-    if (this.phase !== "playing" && this.phase !== "meeting") return;
+    if (!["lobby", "playing", "meeting"].includes(this.phase)) return;
     const now = Date.now();
     if (this.aiTickRunning || now - this.lastAiTickAt < 285) return;
     this.aiTickRunning = true;
@@ -1726,8 +1908,10 @@ export class GameRoom extends DurableObject {
     try {
       if (this.phase === "meeting") {
         await this.runAiMeeting(now);
-      } else {
+      } else if (this.phase === "playing") {
         await this.runAiPlaying(now, dt);
+      } else {
+        this.runAmbientBotTalk(now);
       }
       if (now - this.lastAiPersistAt > 4200) {
         this.lastAiPersistAt = now;
@@ -1773,6 +1957,7 @@ export class GameRoom extends DurableObject {
   }
 
   async runAiPlaying(now, dt) {
+    this.runAmbientBotTalk(now);
     const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && !bot.spectator);
     const moves = [];
     for (const bot of bots) {
@@ -2158,6 +2343,10 @@ export class GameRoom extends DurableObject {
       player.emergencyUsed = true;
     }
 
+    for (const [callerId, botId] of this.cpuCalls) {
+      this.send(callerId, { type: "callControl", fromId: botId, action: "hangup", cpu: true });
+    }
+    this.cpuCalls.clear();
     const sabotageWasActive = Boolean(this.sabotage);
     this.sabotage = null;
     this.phase = "meeting";
@@ -2387,11 +2576,48 @@ export class GameRoom extends DurableObject {
     const action = String(message.action || "");
     if (!targetId || targetId === player.id || !["ring", "accept", "decline", "busy", "hangup", "relay"].includes(action)) return;
     const target = this.players.get(targetId);
+    if (target?.isBot) {
+      if (!player.alive || this.phase === "meeting" || !target.alive) {
+        if (action === "ring") this.send(player.id, { type: "callControl", fromId: targetId, action: "unavailable", cpu: true });
+        return;
+      }
+      if (action === "ring") {
+        this.cpuCalls.set(player.id, target.id);
+        this.send(player.id, { type: "callControl", fromId: target.id, action: "accept", cpu: true });
+        const greeting = this.buildCpuCasualReply(target, player, "もしもし", "call");
+        target.aiRecentReplies = [...(Array.isArray(target.aiRecentReplies) ? target.aiRecentReplies : []), greeting].slice(-5);
+        this.send(player.id, { type: "cpuCallMessage", fromId: target.id, from: target.name, text: greeting });
+        this.queueGeminiBotSpeech(target, greeting, { scope: "call", targetId: player.id });
+      } else if (action === "hangup" && this.cpuCalls.get(player.id) === target.id) {
+        this.cpuCalls.delete(player.id);
+        this.geminiTtsQueue = this.geminiTtsQueue.filter((item) => !(item.scope === "call" && item.targetId === player.id));
+      }
+      return;
+    }
     if (!player.alive || this.phase === "meeting" || !target?.alive || !this.sessions.has(targetId)) {
       if (action === "ring" || action === "accept") this.send(player.id, { type: "callControl", fromId: targetId, action: "unavailable" });
       return;
     }
     this.send(targetId, { type: "callControl", fromId: player.id, action });
+  }
+
+  async cpuCallUtterance(player, message) {
+    if (!player.alive || this.phase === "meeting" || !this.sessions.has(player.id)) return;
+    const botId = this.cpuCalls.get(player.id);
+    const bot = botId ? this.players.get(botId) : null;
+    if (!bot?.isBot || !bot.alive) return;
+    const text = String(message.text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 180);
+    if (!text) return;
+    const now = Date.now();
+    if (player.lastCpuCallUtteranceAt && now - player.lastCpuCallUtteranceAt < 900) return;
+    player.lastCpuCallUtteranceAt = now;
+    const localReply = this.buildCpuCasualReply(bot, player, text, "call");
+    const generated = await this.generateGeminiBotText(bot, player, text, "call");
+    if (this.cpuCalls.get(player.id) !== bot.id || this.phase === "meeting") return;
+    const reply = generated || localReply;
+    bot.aiRecentReplies = [...(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []), reply].slice(-5);
+    this.send(player.id, { type: "cpuCallMessage", fromId: bot.id, from: bot.name, text: reply, aiSource: generated ? "gemini" : "local" });
+    this.queueGeminiBotSpeech(bot, reply, { scope: "call", targetId: player.id });
   }
 
   async startSabotage(player, message) {
@@ -2625,6 +2851,8 @@ export class GameRoom extends DurableObject {
 
   async disconnect(id) {
     this.sessions.delete(id);
+    this.cpuCalls.delete(id);
+    this.geminiTtsQueue = this.geminiTtsQueue.filter((item) => !(item.scope === "call" && item.targetId === id));
     if (!this.players.has(id)) return;
 
     this.players.delete(id);
