@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-cpu-live-voice-v66";
+const MAP_VERSION = "aurora-direct-cpu-call-v68";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -1595,10 +1595,12 @@ export class GameRoom extends DurableObject {
     bot.aiVoteAt = Math.max(Number(bot.aiVoteAt || 0), Date.now() + 5200 + Math.random() * 2600);
   }
 
-  requestFirebaseBotReply(bot, sender, question, localReply) {
+  requestFirebaseBotReply(bot, sender, question, localReply, options = {}) {
+    const mode = ["meeting", "ambient", "group", "call"].includes(options.mode) ? options.mode : "meeting";
+    if (bot?.aiAwaitingClientRequestId) return false;
     // 会議は短いため、生成待ちは一度に1件だけにする。待ち行列で会議終了後に
     // タイムアウトするより、ほかのCPUは内蔵の自由発言ですぐ会話へ参加させる。
-    if (this.pendingClientAiRequests.size >= 1) return false;
+    if (this.pendingClientAiRequests.size >= (mode === "meeting" ? 1 : 2)) return false;
     const host = this.players.get(this.hostId);
     if (!host || host.isBot || !host.alive || host.meetingEligible === false || !this.sessions.has(host.id)) return false;
     const requestId = `firebase-ai-${uid()}`;
@@ -1608,6 +1610,8 @@ export class GameRoom extends DurableObject {
       botId: bot.id,
       senderId: sender.id,
       localReply,
+      mode,
+      targetId: String(options.targetId || ""),
       expiresAt,
     });
     bot.aiAwaitingClientRequestId = requestId;
@@ -1617,6 +1621,8 @@ export class GameRoom extends DurableObject {
       botId: bot.id,
       botName: bot.name,
       question: String(question || "").slice(0, 120),
+      mode,
+      targetId: String(options.targetId || ""),
       draftReply: String(localReply || "").slice(0, 140),
       facts: { ...this.botMeetingFacts(bot, sender, question), draftReply: String(localReply || "").slice(0, 140) },
       expiresAt,
@@ -1631,22 +1637,44 @@ export class GameRoom extends DurableObject {
       const bot = this.players.get(request.botId);
       if (!bot || bot.aiAwaitingClientRequestId !== requestId) continue;
       bot.aiAwaitingClientRequestId = null;
-      this.queueLocalBotReply(bot, request.senderId, request.localReply, 120, "local");
+      if (request.mode === "meeting" || !request.mode) this.queueLocalBotReply(bot, request.senderId, request.localReply, 120, "local");
+      else if (request.mode === "call") {
+        if (this.cpuCalls.get(request.targetId) === bot.id) {
+          this.send(request.targetId, { type: "cpuCallMessage", fromId: bot.id, from: bot.name, text: request.localReply, aiSource: "local" });
+          this.queueGeminiBotSpeech(bot, request.localReply, { scope: "call", targetId: request.targetId });
+        }
+      }
+      else {
+        this.broadcastBotAmbientChat(bot, request.localReply, request.mode === "group" ? "group" : "global", "local");
+        if (request.mode === "group") this.queueGeminiBotSpeech(bot, request.localReply, { scope: "group" });
+      }
     }
   }
 
   async receiveClientAiReply(player, message) {
-    if (player.id !== this.hostId || player.isBot || this.phase !== "meeting") return;
+    if (player.id !== this.hostId || player.isBot || this.phase === "finished") return;
     const requestId = String(message.requestId || "");
     const request = this.pendingClientAiRequests.get(requestId);
     if (!request) return;
     this.pendingClientAiRequests.delete(requestId);
     const bot = this.players.get(request.botId);
-    if (!bot || bot.aiAwaitingClientRequestId !== requestId || !bot.alive || bot.meetingEligible === false) return;
+    if (!bot || bot.aiAwaitingClientRequestId !== requestId || !bot.alive) return;
     bot.aiAwaitingClientRequestId = null;
     const reply = message.failed ? null : this.sanitizeExternalBotReply(message.text, bot);
-    this.queueLocalBotReply(bot, request.senderId, reply || request.localReply, reply ? 240 : 100, reply ? "gemini" : "local");
-    if (message.failed) {
+    const delivered = reply || request.localReply;
+    const source = reply ? "gemini" : "local";
+    if (request.mode === "meeting" || !request.mode) this.queueLocalBotReply(bot, request.senderId, delivered, reply ? 240 : 100, source);
+    else if (request.mode === "call") {
+      if (this.cpuCalls.get(request.targetId) === bot.id) {
+        this.send(request.targetId, { type: "cpuCallMessage", fromId: bot.id, from: bot.name, text: delivered, aiSource: source });
+        this.queueGeminiBotSpeech(bot, delivered, { scope: "call", targetId: request.targetId });
+      }
+    }
+    else {
+      this.broadcastBotAmbientChat(bot, delivered, request.mode === "group" ? "group" : "global", source);
+      if (request.mode === "group") this.queueGeminiBotSpeech(bot, delivered, { scope: "group" });
+    }
+    if (message.failed && (request.mode === "meeting" || !request.mode)) {
       this.send(player.id, {
         type: "abilityResult",
         message: `Gemini回答を使えなかったため内蔵回答へ切り替えました${message.errorMessage ? `：${String(message.errorMessage).slice(0, 70)}` : ""}`,
@@ -1701,7 +1729,7 @@ export class GameRoom extends DurableObject {
     const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
     const speakers = bots
       .sort((a, b) => Number(Boolean(b.aiSuspectId)) - Number(Boolean(a.aiSuspectId)) || Math.random() - 0.5)
-      .slice(0, Math.min(2, bots.length));
+      .slice(0, Math.min(1, bots.length));
     speakers.forEach((bot, index) => {
       let text;
       if (reporter?.id === bot.id) text = `${reason}。私は${aiZoneLabel(bot)}付近で見つけました。`;
@@ -1827,7 +1855,7 @@ export class GameRoom extends DurableObject {
     }
   }
 
-  broadcastBotAmbientChat(bot, text, channel = "global") {
+  broadcastBotAmbientChat(bot, text, channel = "global", aiSource = "local") {
     const cleaned = String(text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
     if (!cleaned || !bot?.alive || this.phase === "finished") return;
     bot.aiRecentReplies = [...(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []), cleaned].slice(-5);
@@ -1839,7 +1867,7 @@ export class GameRoom extends DurableObject {
       alive: true,
       phase: this.phase,
       bot: true,
-      aiSource: "local",
+      aiSource: aiSource === "gemini" ? "gemini" : "local",
       channel,
     });
   }
@@ -1848,25 +1876,41 @@ export class GameRoom extends DurableObject {
     const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && !bot.spectator);
     if (!bots.length) return;
     if (now >= Number(this.nextAmbientBotTalkAt || 0)) {
-      const bot = bots.find((item) => item.id !== this.lastAmbientBotSpeakerId) || bots[0];
-      const text = this.buildCpuCasualReply(bot, null, "", "ambient");
-      this.broadcastBotAmbientChat(bot, text, "global");
-      this.lastAmbientBotSpeakerId = bot.id;
-      this.nextAmbientBotTalkAt = now + 13000 + Math.random() * 11000;
+      const available = bots.filter((item) => !item.aiAwaitingClientRequestId);
+      const bot = available.find((item) => item.id !== this.lastAmbientBotSpeakerId) || available[0];
+      if (!bot) this.nextAmbientBotTalkAt = now + 1800;
+      else {
+        const text = this.buildCpuCasualReply(bot, null, "", "ambient");
+        const host = this.players.get(this.hostId);
+        const requested = host && !host.isBot
+          ? this.requestFirebaseBotReply(bot, host, "チャットが静かなので、今の状況について自分から自然に話して。", text, { mode: "ambient" })
+          : false;
+        if (!requested && !host) this.broadcastBotAmbientChat(bot, text, "global", "local");
+        this.lastAmbientBotSpeakerId = bot.id;
+        this.nextAmbientBotTalkAt = requested || !host ? now + 13000 + Math.random() * 11000 : now + 1800;
+      }
     }
     const groupListeners = [...this.players.values()].filter((player) =>
       !player.isBot && player.alive && !player.spectator && player.groupVoiceJoined && this.sessions.has(player.id)
     );
     if (!groupListeners.length || now < Number(this.nextGroupBotTalkAt || 0)) return;
-    const bot = bots.find((item) => item.id !== this.lastGroupBotSpeakerId) || bots[0];
+    const available = bots.filter((item) => !item.aiAwaitingClientRequestId);
+    const bot = available.find((item) => item.id !== this.lastGroupBotSpeakerId) || available[0];
+    if (!bot) { this.nextGroupBotTalkAt = now + 1800; return; }
     const previous = this.lastGroupBotSpeakerId ? this.players.get(this.lastGroupBotSpeakerId) : null;
     const cue = previous ? `${previous.name}の話を受けて、自分の意見か質問を話す` : "グループ通話を自然に始める";
     const text = this.buildCpuCasualReply(bot, previous, cue, "group");
-    this.broadcastBotAmbientChat(bot, text, "group");
-    this.queueGeminiBotSpeech(bot, text, { scope: "group" });
+    const host = this.players.get(this.hostId);
+    const requested = host && !host.isBot
+      ? this.requestFirebaseBotReply(bot, host, cue, text, { mode: "group" })
+      : false;
+    if (!requested && !host) {
+      this.broadcastBotAmbientChat(bot, text, "group", "local");
+      this.queueGeminiBotSpeech(bot, text, { scope: "group" });
+    }
     this.lastGroupBotSpeakerId = bot.id;
     this.groupBotTalkCount += 1;
-    this.nextGroupBotTalkAt = now + 8500 + Math.random() * 6500;
+    this.nextGroupBotTalkAt = requested || !host ? now + 8500 + Math.random() * 6500 : now + 1800;
   }
 
   scheduleFreeBotTalk(now) {
@@ -1892,6 +1936,10 @@ export class GameRoom extends DurableObject {
     const requested = host && !host.isBot
       ? this.requestFirebaseBotReply(bot, host, prompt, localReply)
       : false;
+    if (!requested && host) {
+      this.meetingFreeTalkAt = now + 1800;
+      return;
+    }
     if (!requested) this.queueLocalBotReply(bot, null, localReply, 250 + Math.random() * 500, "local");
     this.meetingFreeTalkCount += 1;
     this.meetingFreeTalkAt = now + 6500 + Math.random() * 4500;
@@ -1901,6 +1949,7 @@ export class GameRoom extends DurableObject {
     if (player.id !== this.hostId || player.isBot || !this.sessions.has(player.id)) return;
     if (!["lobby", "playing", "meeting"].includes(this.phase)) return;
     const now = Date.now();
+    this.flushExpiredClientAiRequests(now);
     if (this.aiTickRunning || now - this.lastAiTickAt < 285) return;
     this.aiTickRunning = true;
     const dt = clamp((now - (this.lastAiTickAt || now - 320)) / 1000, 0.12, 0.45);
@@ -2612,6 +2661,7 @@ export class GameRoom extends DurableObject {
     if (player.lastCpuCallUtteranceAt && now - player.lastCpuCallUtteranceAt < 900) return;
     player.lastCpuCallUtteranceAt = now;
     const localReply = this.buildCpuCasualReply(bot, player, text, "call");
+    if (this.requestFirebaseBotReply(bot, player, text, localReply, { mode: "call", targetId: player.id })) return;
     const generated = await this.generateGeminiBotText(bot, player, text, "call");
     if (this.cpuCalls.get(player.id) !== bot.id || this.phase === "meeting") return;
     const reply = generated || localReply;
