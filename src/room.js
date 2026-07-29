@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-direct-cpu-call-v68";
+const MAP_VERSION = "aurora-client-gemini-tts-v69";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -1187,7 +1187,7 @@ export class GameRoom extends DurableObject {
         const timeout = setTimeout(() => controller.abort(), 10500);
         try {
           const model = String(this.env?.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview");
-          const prompt = `次の日本語だけを、友達との通話のように自然かつ少し速めに読み上げてください。変更や追加は禁止です。\n${item.text}`;
+          const prompt = `次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`;
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
             method: "POST",
             headers: {
