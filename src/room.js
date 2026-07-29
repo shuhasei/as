@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-free-meeting-call-v74";
+const MAP_VERSION = "aurora-reliable-cpu-v75";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -1598,9 +1598,8 @@ export class GameRoom extends DurableObject {
   requestFirebaseBotReply(bot, sender, question, localReply, options = {}) {
     const mode = ["meeting", "ambient", "group", "call"].includes(options.mode) ? options.mode : "meeting";
     if (bot?.aiAwaitingClientRequestId) return false;
-    // 会議は短いため、生成待ちは一度に1件だけにする。待ち行列で会議終了後に
-    // タイムアウトするより、ほかのCPUは内蔵の自由発言ですぐ会話へ参加させる。
-    if (this.pendingClientAiRequests.size >= (mode === "meeting" ? 1 : 2)) return false;
+    // 複数のCPUが会議で続けて話しても、2人目以降をローカル回答へ落とさない。
+    if (this.pendingClientAiRequests.size >= (mode === "meeting" ? 4 : 3)) return false;
     const host = this.players.get(this.hostId);
     if (!host || host.isBot || !host.alive || host.meetingEligible === false || !this.sessions.has(host.id)) return false;
     const requestId = `firebase-ai-${uid()}`;
