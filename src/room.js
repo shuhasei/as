@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-quota-aware-chat-v79";
+const MAP_VERSION = "aurora-natural-humor-v80";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -243,6 +243,8 @@ const BOT_PERSONALITIES = Object.freeze([
   "見たことを率直に話す。「〜は見た」「でもそこから先は分からない」と区切る",
   "少し考えながら話す。「えっと」「たしか」を時々使うが、毎回は使わない",
   "落ち着いて柔らかい。「そうだね」「〜じゃないかな」と周りにも話を振る",
+  "観察が細かく、真面目に答えた後で短いセルフツッコミを入れる。笑いを説明しない",
+  "相手の言葉を拾う軽いツッコミが得意。ただし毎回ボケず、相手を傷つけない",
 ]);
 const botPersonalityFor = (bot) => {
   const source = String(bot?.name || bot?.id || "CPU");
@@ -1192,7 +1194,7 @@ export class GameRoom extends DurableObject {
         const timeout = setTimeout(() => controller.abort(), 10500);
         try {
           const model = String(this.env?.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview");
-          const prompt = `次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`;
+          const prompt = `次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。面白い一言はわずかに間を取り、わざとらしく笑わずさらっと伝えてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`;
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
             method: "POST",
             headers: {
@@ -1814,12 +1816,12 @@ export class GameRoom extends DurableObject {
     const zone = aiZoneLabel(bot);
     const suspect = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
     const choices = [];
-    if (/(どこ|場所|何して|なにして)/.test(source)) choices.push(`今は${zone}の近くにいるよ。周りを見ながら移動してた。`);
+    if (/(どこ|場所|何して|なにして)/.test(source)) choices.push(\n      `今は${zone}の近く。堂々と歩いてたけど、目的地は途中で見失った。`,\n      `${zone}にいるよ。周りは見てる。推理のほうは今ちょっと読み込み中。`,\n    );
     if (/(誰|だれ|怪し|人狼|犯人)/.test(source)) {
-      choices.push(suspect?.alive ? `${suspect.name}の動きは少し気になる。でも、まだ証拠まではないよ。` : "今のところ、誰か一人に決めるほどの材料はないかな。");
+      choices.push(suspect?.alive ? `${suspect.name}の動きは少し気になる。でも私の勘、今日まだ一回も出勤してない。` : "全員ちょっと怪しい。私の人を見る目は今、省エネモード。");
     }
-    if (/(元気|調子|大丈夫)/.test(source)) choices.push(`うん、大丈夫。${name}はどう？　ちょっと周りが静かで気になってた。`);
-    if (/(こんにちは|もしもし|聞こえ|やあ|おはよう|こんばんは)/.test(source)) choices.push(`もしもし、聞こえてるよ。${name}、どうしたの？`);
+    if (/(元気|調子|大丈夫)/.test(source)) choices.push(`元気。推理だけちょっと体調悪そう。${name}はどう？`);
+    if (/(こんにちは|もしもし|聞こえ|やあ|おはよう|こんばんは)/.test(source)) choices.push(`聞こえてるよ。通話品質は良好、私の推理品質は保証対象外。`);
     if (/(ありがとう|助かった)/.test(source)) choices.push("うん、どういたしまして。また何か気づいたらすぐ話すね。");
     if (mode === "group") {
       choices.push(
@@ -1830,6 +1832,9 @@ export class GameRoom extends DurableObject {
         "急に聞きたくなったんだけど、みんな朝型？　私はたぶん夜のほうが元気。",
         "今ちょっとお腹すいた。終わったら何食べるか考えてる人いる？",
         "こういう静かな時間、誰かが急に歌い出したら面白いのにね。",
+        `今の沈黙、全員同時に賢そうな顔してる時間？　私も一応やっとく。`,
+        `${zone}を通ったけど、何も起きなさすぎて逆に私だけ予告編みたいな歩き方になった。`,
+        "みんな急に静かだけど、通信切れた？　それとも一斉に名探偵になった？",
       );
     } else {
       choices.push(
@@ -1844,6 +1849,9 @@ export class GameRoom extends DurableObject {
         "私ばっかり話すのもあれだし、何でもいいから好きな話してよ。",
         "急に話変わるけど、夜更かしって得意？　私は気づいたらずっと起きてそう。",
         "それも面白いけど、別の話もしよう。最近気になってることってある？",
+        `${name}のその言い方、妙に説得力あるな。私の脳内会議、いま全会一致になった。`,
+        "ちゃんと聞いてるよ。返事を考えすぎて、一瞬だけ知的な置物になってた。",
+        "それ分かる。分かるって言ったあと何も続かないくらい分かる。",
       );
     }
     const recent = new Set(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []);
@@ -1864,6 +1872,8 @@ export class GameRoom extends DurableObject {
         mode === "call" ? `${speaker?.name || "プレイヤー"}との気楽な個人通話です。` : "友達との気楽なグループ通話です。",
         "ゲームの話に縛られず、日常会話、趣味、食べ物、冗談、感想、質問、話題転換を自由に行ってください。",
         "相手の質問へ必ず答える必要も、短くまとめる必要もありません。自分が今話したいことを自然に話してください。",
+        "笑いは直前の言葉を具体的に拾う軽いツッコミ、観察、少しの誇張、セルフツッコミ、前の話題の回収から自然に作ってください。",
+        "無理に毎回ボケず、普通の返答の中へ時々さらっと面白い一言を混ぜてください。定番のダジャレ、説明付きのオチ、ネットの決まり文句、過剰な「笑」「ｗ」、攻撃的ないじりは禁止です。",
         `現在地は${aiZoneLabel(bot)}付近です。ゲーム上の架空の目撃情報だけは事実として作らないでください。`,
         `相手の発言：${String(text || "").slice(0, 180)}`,
         "友達同士の自然な日本語で自由に返してください。毎回同じ調子にせず、返答本文だけを出力してください。",
@@ -1967,8 +1977,8 @@ export class GameRoom extends DurableObject {
       .map((line) => `${line.from}「${line.text}」`)
       .join(" ");
     const prompt = lastLines
-      ? `会議の流れは「${lastLines}」。直前の発言をそのまま繰り返さず、賛成、反論、疑問、推理、別の人への質問のどれかを自分で選んで自由に話して。必要なら名前を呼び、会話を次の人へつないで。`
-      : "会議が静かです。自分の記憶、推理、率直な感想、ほかの人への質問から好きなものを選び、友達と話すように自由に発言して。";
+      ? `会議の流れは「${lastLines}」。直前の言葉を具体的に拾い、賛成、反論、疑問、推理、軽いツッコミのどれかを自然に選んで話して。笑わせようと力まず、使える時だけ短い誇張やセルフツッコミを混ぜ、必要なら次の人へ話を振って。`
+      : "会議が静かです。自分の記憶、推理、率直な感想、ほかの人への質問から自由に話して。沈黙やその場の空気を軽くいじってもよいですが、定番のダジャレや説明付きのオチは避け、友達のようにさらっと発言して。";
     const requested = host && !host.isBot
       ? this.requestFirebaseBotReply(bot, host, prompt, localReply)
       : false;
