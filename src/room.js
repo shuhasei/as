@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-free-conversation-v78";
+const MAP_VERSION = "aurora-quota-aware-chat-v79";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -418,6 +418,7 @@ export class GameRoom extends DurableObject {
     this.geminiTtsAbortController = null;
     this.geminiTtsCurrentScope = "";
     this.geminiTtsLastErrorAt = 0;
+    this.geminiTtsCooldownUntil = 0;
     this.meetingChatHistory = [];
     this.lastMeetingBotSpeakerId = null;
     this.meetingFreeTalkAt = 0;
@@ -1174,6 +1175,10 @@ export class GameRoom extends DurableObject {
 
   async drainGeminiTtsQueue() {
     if (this.geminiTtsRunning) return;
+    if (Date.now() < Number(this.geminiTtsCooldownUntil || 0)) {
+      this.geminiTtsQueue.length = 0;
+      return;
+    }
     this.geminiTtsRunning = true;
     try {
       while (this.geminiTtsQueue.length) {
@@ -1217,7 +1222,9 @@ export class GameRoom extends DurableObject {
           }
           if (!response.ok) {
             const detail = payload?.error?.message || payload?.error?.details?.[0]?.reason || payload?.message || responseText || `HTTP ${response.status}`;
-            throw new Error(String(detail).slice(0, 180));
+            const apiError = new Error(String(detail).slice(0, 180));
+            apiError.status = response.status;
+            throw apiError;
           }
           const parts = payload?.candidates?.[0]?.content?.parts || [];
           const audio = parts.find((part) => part?.inlineData?.data)?.inlineData;
@@ -1239,12 +1246,18 @@ export class GameRoom extends DurableObject {
           if (preemptedForCall) continue;
           const message = error?.name === "AbortError" ? "Gemini音声の生成がタイムアウトしました" : String(error?.message || error || "Gemini音声の生成に失敗しました").slice(0, 180);
           console.warn("[Hidden Crew] Gemini TTS failed", message);
+          const quotaFailure = Number(error?.status) === 429 || /(429|quota|rate.?limit|resource.?exhausted)/i.test(message);
+          if (quotaFailure) {
+            this.geminiTtsCooldownUntil = Date.now() + 60000;
+            this.geminiTtsQueue.length = 0;
+          }
           const now = Date.now();
           if (now - this.geminiTtsLastErrorAt > 5000) {
             this.geminiTtsLastErrorAt = now;
             if (item.scope === "call" && item.targetId) this.send(item.targetId, { type: "cpuSpeechError", message });
             else this.broadcast({ type: "cpuSpeechError", message });
           }
+          if (quotaFailure) break;
         } finally {
           clearTimeout(timeout);
           if (this.geminiTtsAbortController === controller) this.geminiTtsAbortController = null;
@@ -1813,6 +1826,10 @@ export class GameRoom extends DurableObject {
         `そういえば、私は${zone}を通ったよ。みんなは今どの辺？`,
         "今は固まりすぎないほうがいいかも。でも一人になるのもちょっと怖いね。",
         `${name}の話、分かる。ほかのCPUは何か見てない？`,
+        "ねえ、ゲームの話ばっかりも疲れるし、最近ハマってるものの話しない？",
+        "急に聞きたくなったんだけど、みんな朝型？　私はたぶん夜のほうが元気。",
+        "今ちょっとお腹すいた。終わったら何食べるか考えてる人いる？",
+        "こういう静かな時間、誰かが急に歌い出したら面白いのにね。",
       );
     } else {
       choices.push(
@@ -1820,6 +1837,13 @@ export class GameRoom extends DurableObject {
         `${name}、私は${zone}にいるよ。気になることがあれば聞いて。`,
         "なるほど。私はまだ決めつけたくないけど、その点は覚えておくね。",
         "ちょっと考えてた。今のところは、見たことだけ信じたほうがよさそう。",
+        `${name}って、休みの日は何してることが多い？　なんとなく気になった。`,
+        "ゲームのことはいったん置いといて、最近おいしかったものの話しようよ。",
+        "そういえば今日、何か笑ったことあった？　ちょっと聞きたい。",
+        "今の気分を色で言うなら何色？　私はなんとなく水色かな。",
+        "私ばっかり話すのもあれだし、何でもいいから好きな話してよ。",
+        "急に話変わるけど、夜更かしって得意？　私は気づいたらずっと起きてそう。",
+        "それも面白いけど、別の話もしよう。最近気になってることってある？",
       );
     }
     const recent = new Set(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []);
@@ -1925,7 +1949,7 @@ export class GameRoom extends DurableObject {
 
   scheduleFreeBotTalk(now) {
     const livingBots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
-    const talkLimit = Math.max(8, livingBots.length * 3);
+    const talkLimit = Math.max(5, Math.min(10, livingBots.length * 2));
     if (this.phase !== "meeting" || this.meetingFreeTalkCount >= talkLimit || now < Number(this.meetingFreeTalkAt || 0)) return;
     const bots = livingBots
       .filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false && !bot.aiReplyInFlight && !bot.aiAwaitingClientRequestId)
