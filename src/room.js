@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-natural-gemini-dialogue-v64";
+const MAP_VERSION = "aurora-free-meeting-dialogue-v65";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -418,6 +418,8 @@ export class GameRoom extends DurableObject {
     this.geminiTtsLastErrorAt = 0;
     this.meetingChatHistory = [];
     this.lastMeetingBotSpeakerId = null;
+    this.meetingFreeTalkAt = 0;
+    this.meetingFreeTalkCount = 0;
 
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment();
@@ -473,6 +475,8 @@ export class GameRoom extends DurableObject {
     this.votes = new Map(saved.votes || []);
     this.meetingChatHistory = [];
     this.lastMeetingBotSpeakerId = null;
+    this.meetingFreeTalkAt = 0;
+    this.meetingFreeTalkCount = 0;
 
     this.hostId = this.pickHumanHost(this.hostId);
   }
@@ -521,6 +525,8 @@ export class GameRoom extends DurableObject {
     this.pendingClientAiRequests.clear();
     this.meetingChatHistory = [];
     this.lastMeetingBotSpeakerId = null;
+    this.meetingFreeTalkAt = 0;
+    this.meetingFreeTalkCount = 0;
     await this.ctx.storage.deleteAlarm();
     await this.persist();
   }
@@ -1518,7 +1524,9 @@ export class GameRoom extends DurableObject {
   }
 
   requestFirebaseBotReply(bot, sender, question, localReply) {
-    if (this.pendingClientAiRequests.size >= 3) return false;
+    // 会議は短いため、生成待ちは一度に1件だけにする。待ち行列で会議終了後に
+    // タイムアウトするより、ほかのCPUは内蔵の自由発言ですぐ会話へ参加させる。
+    if (this.pendingClientAiRequests.size >= 1) return false;
     const host = this.players.get(this.hostId);
     if (!host || host.isBot || !host.alive || host.meetingEligible === false || !this.sessions.has(host.id)) return false;
     const requestId = `firebase-ai-${uid()}`;
@@ -1639,6 +1647,74 @@ export class GameRoom extends DurableObject {
     });
   }
 
+  buildBotFreeTalk(bot) {
+    const zone = aiZoneLabel(bot);
+    const recent = Array.isArray(this.meetingChatHistory) ? this.meetingChatHistory.slice(-4) : [];
+    const last = recent[recent.length - 1];
+    const suspect = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
+    const seen = Object.entries(bot.aiSeen && typeof bot.aiSeen === "object" ? bot.aiSeen : {})
+      .map(([id, item]) => ({ player: this.players.get(id), item }))
+      .filter(({ player, item }) => player?.alive && player.id !== bot.id && item)
+      .sort((a, b) => Number(b.item.at || 0) - Number(a.item.at || 0))[0];
+    const choices = [];
+    if (last && last.from !== bot.name) {
+      choices.push(
+        `${last.from}の話、もう少し聞きたい。会議の直前はどこにいた？`,
+        `今の${last.from}の話だけだと、まだ投票は決めにくいな。ほかに見た人いる？`,
+      );
+    }
+    if (suspect?.alive && suspect.id !== bot.id) {
+      choices.push(
+        `${suspect.name}、疑ってるというより動きが気になってる。最後どこにいた？`,
+        `私は${suspect.name}の話を聞いてから決めたい。今はまだ追放までは言えない。`,
+      );
+    }
+    if (seen?.player) {
+      choices.push(
+        `そういえば、${seen.player.name}は${seen.item.zone}の近くで見かけたよ。その後は分からない。`,
+        `${seen.player.name}、${seen.item.zone}にいたよね？　私が見たのは一瞬だけだけど。`,
+      );
+    }
+    choices.push(
+      `私は最後、${zone}のあたりにいたよ。近くにいた人がいたら確認してほしい。`,
+      `まだ決め手ないし、順番に最後の場所を言っていかない？`,
+      `ちょっと待って、今の情報だけで急いで投票するのは怖いな。`,
+      `誰か、会議直前に二人以上で一緒にいた人いる？`,
+    );
+    const previous = new Set(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []);
+    const fresh = choices.filter((line) => !previous.has(line));
+    const pool = fresh.length ? fresh : choices;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  scheduleFreeBotTalk(now) {
+    if (this.phase !== "meeting" || this.meetingFreeTalkCount >= 3 || now < Number(this.meetingFreeTalkAt || 0)) return;
+    const bots = [...this.players.values()]
+      .filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false && !bot.aiReplyInFlight && !bot.aiAwaitingClientRequestId)
+      .filter((bot) => !(Array.isArray(bot.aiPendingReplies) && bot.aiPendingReplies.length))
+      .sort((a, b) => Number(a.aiLastMeetingReplyAt || 0) - Number(b.aiLastMeetingReplyAt || 0) || Math.random() - 0.5);
+    const bot = bots[0];
+    if (!bot) {
+      this.meetingFreeTalkAt = now + 1800;
+      return;
+    }
+    const host = this.players.get(this.hostId);
+    const localReply = this.buildBotFreeTalk(bot);
+    const lastLines = (Array.isArray(this.meetingChatHistory) ? this.meetingChatHistory : [])
+      .slice(-4)
+      .map((line) => `${line.from}「${line.text}」`)
+      .join(" ");
+    const prompt = lastLines
+      ? `会議の流れは「${lastLines}」。質問への回答だけでなく、気になった点への反応、意見、確認したい質問のどれかを自分から自然に発言して。`
+      : "会議が静かなので、自分の記憶や意見を話すか、ほかの人へ確認したいことを自然に質問して。";
+    const requested = host && !host.isBot
+      ? this.requestFirebaseBotReply(bot, host, prompt, localReply)
+      : false;
+    if (!requested) this.queueLocalBotReply(bot, null, localReply, 250 + Math.random() * 500, "local");
+    this.meetingFreeTalkCount += 1;
+    this.meetingFreeTalkAt = now + 6500 + Math.random() * 4500;
+  }
+
   async aiTick(player) {
     if (player.id !== this.hostId || player.isBot || !this.sessions.has(player.id)) return;
     if (this.phase !== "playing" && this.phase !== "meeting") return;
@@ -1664,6 +1740,7 @@ export class GameRoom extends DurableObject {
 
   async runAiMeeting(now) {
     this.flushExpiredClientAiRequests(now);
+    this.scheduleFreeBotTalk(now);
     const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
     for (const bot of bots) {
       if (this.phase !== "meeting") break;
@@ -2088,6 +2165,8 @@ export class GameRoom extends DurableObject {
     this.pendingClientAiRequests.clear();
     this.meetingChatHistory = [];
     this.lastMeetingBotSpeakerId = null;
+    this.meetingFreeTalkCount = 0;
+    this.meetingFreeTalkAt = Date.now() + 7200 + Math.random() * 2400;
     for (const item of this.players.values()) {
       item.meetingEligible = item.alive;
       if (item.isBot) {
@@ -2106,6 +2185,7 @@ export class GameRoom extends DurableObject {
     if (sabotageWasActive) this.broadcast({ type: "sabotageFixed" });
     this.broadcast({ type: "meetingStarted", reason });
     this.syncAll();
+    this.scheduleOpeningBotTalk(player, reason);
   }
 
   async vote(player, message) {
