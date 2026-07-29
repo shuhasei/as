@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-server-router-v73";
+const MAP_VERSION = "aurora-free-meeting-call-v74";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -1729,7 +1729,7 @@ export class GameRoom extends DurableObject {
     const bots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
     const speakers = bots
       .sort((a, b) => Number(Boolean(b.aiSuspectId)) - Number(Boolean(a.aiSuspectId)) || Math.random() - 0.5)
-      .slice(0, Math.min(1, bots.length));
+      .slice(0, Math.min(2, bots.length));
     speakers.forEach((bot, index) => {
       let text;
       if (reporter?.id === bot.id) text = `${reason}。私は${aiZoneLabel(bot)}付近で見つけました。`;
@@ -1743,7 +1743,7 @@ export class GameRoom extends DurableObject {
       if (!requested) {
         bot.aiPendingReplies = [{ at: now + 1000 + index * 1300 + Math.random() * 450, text, replyTo: null, aiSource: "local" }];
       }
-      bot.aiVoteAt = now + 7000 + index * 900 + Math.random() * 3500;
+      bot.aiVoteAt = now + 16000 + index * 1200 + Math.random() * 5000;
     });
   }
 
@@ -1780,6 +1780,10 @@ export class GameRoom extends DurableObject {
       `まだ決め手ないし、順番に最後の場所を言っていかない？`,
       `ちょっと待って、今の情報だけで急いで投票するのは怖いな。`,
       `誰か、会議直前に二人以上で一緒にいた人いる？`,
+      `私は今の話だとまだ半信半疑かな。反対意見がある人も聞きたい。`,
+      `さっきの発言、少し引っかかった。言い方じゃなくて時間の流れを整理しよう。`,
+      `みんな同じ意見になるのは逆に怖いな。違う見方をしてる人はいない？`,
+      `投票先を決める前に、一人ずつ「確実に見たこと」だけ話さない？`,
     );
     const previous = new Set(Array.isArray(bot.aiRecentReplies) ? bot.aiRecentReplies : []);
     const fresh = choices.filter((line) => !previous.has(line));
@@ -1914,8 +1918,10 @@ export class GameRoom extends DurableObject {
   }
 
   scheduleFreeBotTalk(now) {
-    if (this.phase !== "meeting" || this.meetingFreeTalkCount >= 3 || now < Number(this.meetingFreeTalkAt || 0)) return;
-    const bots = [...this.players.values()]
+    const livingBots = [...this.players.values()].filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false);
+    const talkLimit = Math.max(8, livingBots.length * 3);
+    if (this.phase !== "meeting" || this.meetingFreeTalkCount >= talkLimit || now < Number(this.meetingFreeTalkAt || 0)) return;
+    const bots = livingBots
       .filter((bot) => bot.isBot && bot.alive && bot.meetingEligible !== false && !bot.aiReplyInFlight && !bot.aiAwaitingClientRequestId)
       .filter((bot) => !(Array.isArray(bot.aiPendingReplies) && bot.aiPendingReplies.length))
       .sort((a, b) => Number(a.aiLastMeetingReplyAt || 0) - Number(b.aiLastMeetingReplyAt || 0) || Math.random() - 0.5);
@@ -1931,18 +1937,14 @@ export class GameRoom extends DurableObject {
       .map((line) => `${line.from}「${line.text}」`)
       .join(" ");
     const prompt = lastLines
-      ? `会議の流れは「${lastLines}」。質問への回答だけでなく、気になった点への反応、意見、確認したい質問のどれかを自分から自然に発言して。`
-      : "会議が静かなので、自分の記憶や意見を話すか、ほかの人へ確認したいことを自然に質問して。";
+      ? `会議の流れは「${lastLines}」。直前の発言をそのまま繰り返さず、賛成、反論、疑問、推理、別の人への質問のどれかを自分で選んで自由に話して。必要なら名前を呼び、会話を次の人へつないで。`
+      : "会議が静かです。自分の記憶、推理、率直な感想、ほかの人への質問から好きなものを選び、友達と話すように自由に発言して。";
     const requested = host && !host.isBot
       ? this.requestFirebaseBotReply(bot, host, prompt, localReply)
       : false;
-    if (!requested && host) {
-      this.meetingFreeTalkAt = now + 1800;
-      return;
-    }
     if (!requested) this.queueLocalBotReply(bot, null, localReply, 250 + Math.random() * 500, "local");
     this.meetingFreeTalkCount += 1;
-    this.meetingFreeTalkAt = now + 6500 + Math.random() * 4500;
+    this.meetingFreeTalkAt = now + 3800 + Math.random() * 3200;
   }
 
   async aiTick(player) {
@@ -2404,11 +2406,11 @@ export class GameRoom extends DurableObject {
     this.meetingChatHistory = [];
     this.lastMeetingBotSpeakerId = null;
     this.meetingFreeTalkCount = 0;
-    this.meetingFreeTalkAt = Date.now() + 7200 + Math.random() * 2400;
+    this.meetingFreeTalkAt = Date.now() + 3200 + Math.random() * 1800;
     for (const item of this.players.values()) {
       item.meetingEligible = item.alive;
       if (item.isBot) {
-        item.aiVoteAt = Date.now() + 6500 + Math.random() * 5000;
+        item.aiVoteAt = Date.now() + 16000 + Math.random() * 6000;
         item.aiMeetingSpoken = false;
         item.aiPendingReplies = [];
         item.aiLastMeetingReplyAt = 0;
