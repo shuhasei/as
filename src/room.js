@@ -1816,7 +1816,10 @@ export class GameRoom extends DurableObject {
     const zone = aiZoneLabel(bot);
     const suspect = bot.aiSuspectId ? this.players.get(bot.aiSuspectId) : null;
     const choices = [];
-    if (/(どこ|場所|何して|なにして)/.test(source)) choices.push(\n      `今は${zone}の近く。堂々と歩いてたけど、目的地は途中で見失った。`,\n      `${zone}にいるよ。周りは見てる。推理のほうは今ちょっと読み込み中。`,\n    );
+    if (/(どこ|場所|何して|なにして)/.test(source)) choices.push(
+      `今は${zone}の近く。堂々と歩いてたけど、目的地は途中で見失った。`,
+      `${zone}にいるよ。周りは見てる。推理のほうは今ちょっと読み込み中。`,
+    );
     if (/(誰|だれ|怪し|人狼|犯人)/.test(source)) {
       choices.push(suspect?.alive ? `${suspect.name}の動きは少し気になる。でも私の勘、今日まだ一回も出勤してない。` : "全員ちょっと怪しい。私の人を見る目は今、省エネモード。");
     }
