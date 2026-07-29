@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-gemini-live-pcm-v72";
+const MAP_VERSION = "aurora-server-router-v73";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -2943,3 +2943,49 @@ export class GameRoom extends DurableObject {
     }
   }
 }
+
+function gameRoomNamespace(env) {
+  return env.GAME_ROOMS || env.GAME_ROOM || env.ROOMS || env.ROOM;
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/health") {
+      return Response.json({
+        ok: true,
+        service: "hidden-crew",
+        version: MAP_VERSION,
+        websocketBinding: Boolean(gameRoomNamespace(env)),
+      }, {
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+
+    if (url.pathname === "/ws") {
+      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("Expected WebSocket", { status: 426 });
+      }
+
+      const room = String(url.searchParams.get("room") || "").toUpperCase();
+      if (!/^[A-Z0-9]{6}$/.test(room)) {
+        return new Response("Invalid room code", { status: 400 });
+      }
+
+      const namespace = gameRoomNamespace(env);
+      if (!namespace) {
+        return new Response(
+          "Durable Object binding is missing. Bind GameRoom as GAME_ROOMS.",
+          { status: 503 },
+        );
+      }
+
+      const id = namespace.idFromName(room);
+      return namespace.get(id).fetch(request);
+    }
+
+    if (env.ASSETS?.fetch) return env.ASSETS.fetch(request);
+    return new Response("Not found", { status: 404 });
+  },
+};
