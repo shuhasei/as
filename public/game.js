@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
 import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app-check.js';
-import { getAI, getGenerativeModel, getLiveGenerativeModel, startAudioConversation, GoogleAIBackend, ResponseModality, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
+import { getAI, getGenerativeModel, getLiveGenerativeModel, GoogleAIBackend, ResponseModality, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),cpuControls:$('cpuControls'),addCpu:$('addCpuButton'),removeCpu:$('removeCpuButton'),cpuHelp:$('cpuHelp'),firebaseAiTest:$('firebaseAiTestButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-gemini-live-call-v70';
+const MAP_VERSION='aurora-gemini-live-pcm-v72';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -457,7 +457,7 @@ const SOLID_PROPS=[
   ...LOCKERS.map(locker=>({x:locker.x,z:locker.z,w:1.15,d:.9}))
 ];
 const COLLISION_OBJECTS=Object.freeze([...WALLS,...SOLID_PROPS]);
-let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,cpuCallRecognition=null,cpuCallRecognitionActive=false,cpuCallReplyBusy=false,cpuLiveSession=null,cpuLiveController=null,cpuLiveStarting=false,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0,meetingVoiceBorrowedFromGroup=false,meetingVoiceLastSentAt=0,meetingVoiceSpeechUntil=0,meetingAutoVoicePending=false;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
+let socket,myId,state,scene,camera,renderer,clock,localModel,renderMode='3d',canvas2d=null,cameraMode=0,firstPersonYaw=0,firstPersonTargetYaw=0,firstPersonInputBaseYaw=0,firstPersonInputSignature='',nearest={task:null,player:null,body:null,locker:null,security:false,emergency:false,cargoDelivery:false};const models=new Map(),corpseModels=new Map(),keys=new Set(),keyCodes=new Set();let joy={x:0,y:0},lastMove=0,noticeTimer=0,spectatorTargetId=null,spectatorHiddenModelId=null,lastKnownAlive=true;let securityOpen=false,securityCameraIndex=0,securityCamera=null,securityRenderer=null,securityLastRender=0,securityFeedContext=null,securityRenderWidth=0,securityRenderHeight=0,securityViewerFailed=false,securityTaskActive=false,securityTaskCountsProgress=false,securityTaskViewed=new Set(),securityTaskViewTimer=0;const localVelocity=new THREE.Vector2();let localTargetRotation=0,lastServerSync=0;const voicePeers=new Map();const lockerVisuals=new Map();let localVoiceStream=null,voiceStarting=false,micMuted=false,activeCallPeer=null,incomingCallPeer=null,callTimeoutId=0,incomingCallTimeoutId=0,cpuCallRecognition=null,cpuCallRecognitionActive=false,cpuCallReplyBusy=false,cpuLiveSession=null,cpuLiveStarting=false,joinTimeoutId=0,joinPending=false,gameInitialized=false,pendingRoom='',pendingName='';let runtimeHandlersInstalled=false,animationStarted=false,fallbackSwitching=false,cargoCarryActive=false,cargoCarryVisual=null;let meetingVoiceStream=null,meetingVoiceStarting=false,meetingVoiceMuted=false,meetingVoiceSource=null,meetingVoiceProcessor=null,meetingVoiceSilentGain=null,meetingVoiceSequence=0,meetingVoiceBorrowedFromGroup=false,meetingVoiceLastSentAt=0,meetingVoiceSpeechUntil=0,meetingAutoVoicePending=false;const meetingVoicePlaybackAt=new Map();let groupVoiceStream=null,groupVoiceStarting=false,groupVoiceMuted=false,groupVoiceListening=false,groupVoiceJoined=false,groupVoiceSource=null,groupVoiceProcessor=null,groupVoiceSilentGain=null,groupVoiceSequence=0,groupVoiceLastSentAt=0,groupVoiceSpeechUntil=0,groupVoiceParticipantCount=0;const groupVoicePlaybackAt=new Map(),groupVoiceActiveSources=new Set();
 let cpuMeetingSpeechEnabled=localStorage.getItem('hiddenCrewCpuSpeech')!=='off';
 let cpuMeetingSpeechQueue=[];
 let cpuMeetingSpeechActive=false;
@@ -2173,7 +2173,7 @@ async function speakNextCpuMeetingLine(){
   finally{
     if(generation===cpuMeetingSpeechGeneration){
       cpuMeetingSpeechActive=false;
-      setTimeout(speakNextCpuMeetingLine,240);
+      setTimeout(speakNextCpuMeetingLine,item.scope==='call'?8:240);
     }
   }
 }
@@ -2183,8 +2183,9 @@ function queueCpuMeetingAudio(message){
   const sampleRate=Math.max(8000,Math.min(48000,Number(message.sampleRate)||24000));
   const item={data:message.data,sampleRate,scope,fromId:String(message.fromId||'')};
   if(!cpuSpeechContextActive(item))return;
-  if(scope==='call')cpuMeetingSpeechQueue.unshift(item);else cpuMeetingSpeechQueue.push(item);
-  if(cpuMeetingSpeechQueue.length>5)cpuMeetingSpeechQueue.splice(0,cpuMeetingSpeechQueue.length-5);
+  cpuMeetingSpeechQueue.push(item);
+  const queueLimit=scope==='call'?32:5;
+  if(cpuMeetingSpeechQueue.length>queueLimit)cpuMeetingSpeechQueue.splice(0,cpuMeetingSpeechQueue.length-queueLimit);
   speakNextCpuMeetingLine();
 }
 const cpuSpeechButton=$('cpuSpeechButton');
@@ -2325,9 +2326,31 @@ function clearIncomingCall(notify=false){if(incomingCallTimeoutId){clearTimeout(
 function currentCallName(){return state?.players?.find(p=>p.id===activeCallPeer)?.name||'相手'}
 function activeCallIsCpu(){return Boolean(state?.players?.find(player=>player.id===activeCallPeer)?.bot)}
 async function stopCpuLiveCall(){
-  const controller=cpuLiveController,session=cpuLiveSession;cpuLiveController=null;cpuLiveSession=null;cpuLiveStarting=false;
-  if(controller)try{await controller.stop()}catch{}
+  const session=cpuLiveSession;cpuLiveSession=null;cpuLiveStarting=false;
   if(session&&!session.isClosed)try{await session.close()}catch{}
+}
+async function receiveCpuLiveAudio(session,target){
+  try{
+    for await(const message of session.receive()){
+      if(cpuLiveSession!==session||activeCallPeer!==target.id)break;
+      if(message?.type!=='serverContent')continue;
+      const serverContent=message.serverContent||message;
+      for(const part of serverContent.modelTurn?.parts||[]){
+        const audio=part?.inlineData;
+        if(!audio?.data||!String(audio.mimeType||audio.mime_type||'audio/pcm').startsWith('audio/'))continue;
+        const rateMatch=String(audio.mimeType||audio.mime_type||'').match(/rate=(\d+)/i);
+        queueCpuMeetingAudio({scope:'call',fromId:target.id,from:target.name,sampleRate:rateMatch?Number(rateMatch[1]):24000,data:audio.data});
+      }
+      const transcript=String(serverContent.outputTranscription?.text||'').trim();
+      if(transcript)setVoiceStatus(`🤖 ${target.name}：${transcript}`,true);
+    }
+  }catch(error){
+    if(cpuLiveSession!==session)return;
+    console.error('Gemini Live audio receive failed',error);
+    const detail=compactFirebaseError(error?.message||error);
+    setVoiceStatus(`CPU音声の受信に失敗しました：${detail}`);
+    showNotice(`CPU音声受信失敗：${detail}`);
+  }
 }
 async function startCpuLiveCall(target){
   if(!target?.bot||cpuLiveStarting)return false;
@@ -2350,7 +2373,9 @@ async function startCpuLiveCall(target){
     });
     const session=await liveModel.connect();cpuLiveSession=session;
     await session.connectionPromise;
-    cpuLiveController=await startAudioConversation(session);
+    stopCpuMeetingSpeech();cpuMeetingSpeechEnabled=true;localStorage.setItem('hiddenCrewCpuSpeech','on');updateCpuSpeechButton();
+    receiveCpuLiveAudio(session,target);
+    startCpuCallRecognition();
     await session.send(`${target.name}として、まず「もしもし、聞こえてる？」のように短く挨拶してください。`,true);
     setVoiceStatus(`🤖 ${target.name}とGemini音声通話中。普通に話しかけてください。`,true);
     const chatInput=$('globalChatInput');if(chatInput)chatInput.placeholder=`${target.name}へ話す内容を入力`;
@@ -2404,7 +2429,11 @@ function startCpuCallRecognition(){
     recognition.onresult=event=>{
       for(let index=event.resultIndex;index<event.results.length;index++){
         const result=event.results[index];if(!result.isFinal)continue;
-        const text=String(result[0]?.transcript||'').trim();if(text&&activeCallIsCpu())runLocalCpuCallReply(text);
+        const text=String(result[0]?.transcript||'').trim();
+        if(text&&activeCallIsCpu()){
+          if(cpuLiveSession&&!cpuLiveSession.isClosed)cpuLiveSession.send(text.slice(0,180),true).catch(error=>{console.warn('CPU Live speech send failed',error);showNotice('CPU通話へ音声を送信できませんでした。')});
+          else runLocalCpuCallReply(text);
+        }
       }
     };
     recognition.onerror=event=>{
