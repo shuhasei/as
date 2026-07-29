@@ -4,7 +4,7 @@ import { initializeAppCheck, ReCaptchaV3Provider, getToken as getAppCheckToken }
 import { getAI, getGenerativeModel, GoogleAIBackend, Schema, ThinkingLevel } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-ai.js';
 const $=id=>document.getElementById(id);const ui={menu:$('menu'),game:$('gameScreen'),name:$('nameInput'),roomInput:$('roomInput'),message:$('menuMessage'),room:$('roomCode'),role:$('roleText'),status:$('statusText'),players:$('playerList'),playerCount:$('playerCount'),start:$('startButton'),settings:$('settingsButton'),cpuControls:$('cpuControls'),addCpu:$('addCpuButton'),removeCpu:$('removeCpuButton'),cpuHelp:$('cpuHelp'),firebaseAiTest:$('firebaseAiTestButton'),taskPanel:$('taskPanel'),tasks:$('taskList'),taskProgress:$('taskProgress'),taskCounter:$('taskCounter'),actionBar:$('actionBar'),use:$('useButton'),report:$('reportButton'),kill:$('killButton'),killCooldown:$('killCooldown'),sabotage:$('sabotageButton'),meeting:$('meetingButton'),joystick:$('joystick'),stick:$('stick'),notice:$('notice'),miniMap:$('miniMap'),sabotageBanner:$('sabotageBanner'),sabotageTitle:$('sabotageTitle'),sabotageTimer:$('sabotageTimer')};
 const COLORS={red:0xe9343f,blue:0x1456d9,green:0x25a65a,pink:0xf244a8,orange:0xf58220,yellow:0xf3ce28,cyan:0x29cbd4,purple:0x7f43cf,white:0xe8eef7,lime:0x7bd93f};
-const MAP_VERSION='aurora-direct-cpu-call-v68';
+const MAP_VERSION='aurora-client-gemini-tts-v69';
 const DEVICE_MEMORY=Number(navigator.deviceMemory||0);
 const CPU_CORES=Number(navigator.hardwareConcurrency||0);
 const COARSE_POINTER=matchMedia('(pointer:coarse)').matches;
@@ -466,6 +466,8 @@ let cpuMeetingSpeechGeneration=0;
 let cpuMeetingAudioSource=null;
 let cpuMeetingSpeechLastError='';
 let cpuMeetingSpeechErrorShownAt=0;
+let clientGeminiSpeechQueue=[];
+let clientGeminiSpeechRunning=false;
 let ceilingGroup=null,doorLockGroup=null,doorLockPanelMaterial=null,doorLockWarningMaterial=null,facilityAmbientLight=null,facilityKeyLight=null,facilityFillLight=null,cameraFillLight=null,headLamp=null;const facilityLights=[],emergencyLights=[];let preferredRendererPixelRatio=1,currentRendererPixelRatio=1,animationLastTime=0,lastNearestUpdate=0,lastMiniMapRender=0,lastHudUpdate=0,lastLightUpdate=0,lastShadowUpdate=0,lastCorpseUpdate=0,lastEnclosureMode=-1,performanceWindowStart=0,performanceFrameCount=0,lowFpsWindows=0,highFpsWindows=0,qualitySamplingResumeAt=0;
 function cargoCarryStorageKey(){return 'hiddenCrewCargoCarryV13'}
 function createCargoParcel(scale=1){
@@ -650,7 +652,7 @@ function handle(m){
   }else if(m.type==='cpuSpeechAudio'){
     queueCpuMeetingAudio(m);
   }else if(m.type==='cpuCallMessage'){
-    if(activeCallPeer===m.fromId){setVoiceStatus(`🤖 ${m.from||currentCallName()}：${m.text||''}`,true);speakCpuBrowserFallback(m.text,m.from,true)}
+    if(activeCallPeer===m.fromId){setVoiceStatus(`🤖 ${m.from||currentCallName()}：${m.text||''}`,true);if(!state?.cpuGeminiTts)queueClientGeminiSpeech(m.text,m.from,'call',true)}
   }else if(m.type==='cpuSpeechError'){
     cpuMeetingSpeechLastError=String(m.message||'Gemini音声の生成に失敗しました');
     updateCpuSpeechButton();
@@ -2042,16 +2044,15 @@ function renderVotes(){
 }
 function disableVotes(){document.querySelectorAll('#voteList button,#skipVoteButton').forEach(b=>b.disabled=true)}
 function cpuSpeechSupported(){
-  return Boolean(window.AudioContext||window.webkitAudioContext||window.speechSynthesis);
+  return Boolean(window.AudioContext||window.webkitAudioContext);
 }
 function updateCpuSpeechButton(){
   const button=$('cpuSpeechButton');if(!button)return;
   if(!cpuSpeechSupported()){button.disabled=true;button.textContent='✨ Gemini音声 非対応';button.title='このブラウザでは音声を再生できません。';return}
   if(state&&!state.cpuGeminiTts){
-    const browserVoice=Boolean(window.speechSynthesis&&window.SpeechSynthesisUtterance);
-    button.disabled=!browserVoice;
-    button.textContent=browserVoice?'🔊 CPU音声 ブラウザ':'🔇 CPU音声 非対応';
-    button.title=browserVoice?'サーバー音声未設定のため、端末の日本語音声ですぐ読み上げます。':'このブラウザでは音声を再生できません。';
+    button.disabled=!cpuSpeechSupported();
+    button.textContent='✨ Gemini音声 ON';
+    button.title='Firebase経由でGemini音声を生成して読み上げます。';
     button.classList.toggle('muted',!cpuMeetingSpeechEnabled);
     return;
   }
@@ -2060,16 +2061,51 @@ function updateCpuSpeechButton(){
   button.title=cpuMeetingSpeechLastError?`直前の音声エラー：${compactFirebaseError(cpuMeetingSpeechLastError)}`:'CPUの発言をGeminiの音声で再生します。';
   button.classList.toggle('muted',!cpuMeetingSpeechEnabled);
 }
-function speakCpuBrowserFallback(text,from='',priority=false,force=false){
-  if((!cpuMeetingSpeechEnabled&&!force)||(!force&&state?.cpuGeminiTts)||!window.speechSynthesis||!window.SpeechSynthesisUtterance)return false;
-  const cleaned=String(text||'').replace(/[🤖👻📢]/g,'').replace(/\s+/g,' ').trim().slice(0,125);if(!cleaned)return false;
+function clientGeminiVoiceFor(name='CPU'){
+  const voices=['Achird','Kore','Aoede','Leda','Sulafat','Puck'];let hash=0;
+  for(const char of String(name))hash=(hash*33+char.charCodeAt(0))>>>0;
+  return voices[hash%voices.length];
+}
+async function drainClientGeminiSpeechQueue(){
+  if(clientGeminiSpeechRunning)return;clientGeminiSpeechRunning=true;
   try{
-    if(priority)window.speechSynthesis.cancel();
-    const utterance=new SpeechSynthesisUtterance(cleaned);utterance.lang='ja-JP';utterance.rate=1.16;utterance.pitch=.96;utterance.volume=1;
-    const voices=window.speechSynthesis.getVoices?.()||[];
-    const japanese=voices.filter(voice=>/^ja/i.test(voice.lang||''));if(japanese.length){let hash=0;for(const char of String(from||''))hash=(hash*33+char.charCodeAt(0))>>>0;utterance.voice=japanese[hash%japanese.length]}
-    window.speechSynthesis.speak(utterance);return true;
-  }catch(error){console.warn('Browser CPU speech failed',error);return false}
+    while(clientGeminiSpeechQueue.length){
+      const item=clientGeminiSpeechQueue.shift();if(!cpuSpeechContextActive(item))continue;
+      const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),10500);
+      try{
+        const headers={'Content-Type':'application/json'};
+        if(firebaseAppCheck){
+          try{const token=await getAppCheckToken(firebaseAppCheck,false);if(token?.token)headers['X-Firebase-AppCheck']=token.token}catch{}
+        }
+        const prompt=`次の日本語だけを、友達と人狼ゲームをしているように自然な速さと感情で読み上げてください。言葉を追加・削除・変更しないでください。\n発言：${item.text}`;
+        const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`,{
+          method:'POST',headers,signal:controller.signal,
+          body:JSON.stringify({
+            contents:[{parts:[{text:prompt}]}],
+            generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:clientGeminiVoiceFor(item.from)}}}}
+          })
+        });
+        const payload=await response.json().catch(()=>({}));
+        if(!response.ok)throw new Error(payload?.error?.message||`Gemini TTS ${response.status}`);
+        const audio=payload?.candidates?.[0]?.content?.parts?.find(part=>part?.inlineData?.data)?.inlineData;
+        if(!audio?.data)throw new Error('Geminiから音声が返りませんでした');
+        if(!cpuSpeechContextActive(item))continue;
+        const rateMatch=String(audio.mimeType||audio.mime_type||'').match(/rate=(\d+)/i);
+        queueCpuMeetingAudio({scope:item.scope,fromId:item.fromId,from:item.from,sampleRate:rateMatch?Number(rateMatch[1]):24000,data:audio.data});
+      }catch(error){
+        cpuMeetingSpeechLastError=String(error?.message||error||'Gemini audio failed');updateCpuSpeechButton();
+        console.warn('Client Gemini speech failed',error);
+        const now=performance.now();if(now-cpuMeetingSpeechErrorShownAt>5000){cpuMeetingSpeechErrorShownAt=now;showNotice(`Gemini音声失敗：${compactFirebaseError(cpuMeetingSpeechLastError)}`)}
+      }finally{clearTimeout(timeout)}
+    }
+  }finally{clientGeminiSpeechRunning=false;if(clientGeminiSpeechQueue.length)queueMicrotask(drainClientGeminiSpeechQueue)}
+}
+function queueClientGeminiSpeech(text,from='',scope='meeting',priority=false){
+  if(!cpuMeetingSpeechEnabled||typeof text!=='string'||!text.trim())return false;
+  const item={text:text.replace(/\s+/g,' ').trim().slice(0,125),from:String(from||'CPU'),fromId:activeCallPeer||String(from||'CPU'),scope};
+  if(priority)clientGeminiSpeechQueue.unshift(item);else clientGeminiSpeechQueue.push(item);
+  if(clientGeminiSpeechQueue.length>4)clientGeminiSpeechQueue.splice(4);
+  drainClientGeminiSpeechQueue();return true;
 }
 function stopCpuMeetingSpeech(){
   cpuMeetingSpeechQueue=[];cpuMeetingSpeechActive=false;cpuMeetingSpeechLastAt=0;cpuMeetingSpeechGeneration++;
@@ -2098,7 +2134,7 @@ async function playGeminiPcm(bytes,sampleRate,generation){
   await new Promise((resolve,reject)=>{
     if(generation!==cpuMeetingSpeechGeneration){resolve();return}
     const source=context.createBufferSource();cpuMeetingAudioSource=source;
-    source.buffer=buffer;source.playbackRate.value=1.1;source.connect(context.destination);
+    source.buffer=buffer;source.playbackRate.value=1;source.connect(context.destination);
     source.onended=()=>{if(cpuMeetingAudioSource===source)cpuMeetingAudioSource=null;resolve()};
     try{source.start()}catch(error){if(cpuMeetingAudioSource===source)cpuMeetingAudioSource=null;reject(error)}
   });
@@ -2168,7 +2204,7 @@ function appendChat(m){
   }
   if(m.bot&&!state?.cpuGeminiTts){
     const shouldSpeak=m.phase==='meeting'&&meetingVoiceActive()||m.channel==='group'&&groupVoiceActive();
-    if(shouldSpeak)speakCpuBrowserFallback(m.text,m.from,false);
+    if(shouldSpeak)queueClientGeminiSpeech(m.text,m.from,m.channel==='group'?'group':'meeting',false);
   }
 }
 const chatPanel=$('globalChatPanel'),chatToggle=$('chatToggleButton');
@@ -2308,7 +2344,7 @@ async function runLocalCpuCallReply(text){
     reply=choices[Math.floor(Math.random()*choices.length)];
   }finally{cpuCallReplyBusy=false;updateFirebaseAiHelp()}
   if(activeCallPeer!==targetId)return;
-  setVoiceStatus(`🤖 ${target?.name||'CPU'}：${reply}`,true);speakCpuBrowserFallback(reply,target?.name||'CPU',true,true);
+  setVoiceStatus(`🤖 ${target?.name||'CPU'}：${reply}`,true);queueClientGeminiSpeech(reply,target?.name||'CPU','call',true);
 }
 function stopCpuCallRecognition(){
   cpuCallRecognitionActive=false;
@@ -2734,7 +2770,7 @@ async function placeCall(peerId){
   if(target.bot){
     clearCallTimeout();startCpuCallRecognition();updateCallUi();
     const greeting=`もしもし、${target.name}だよ。聞こえてる？`;
-    setVoiceStatus(`🤖 ${target.name}：${greeting}`,true);speakCpuBrowserFallback(greeting,target.name,true,true);
+    setVoiceStatus(`🤖 ${target.name}：${greeting}`,true);queueClientGeminiSpeech(greeting,target.name,'call',true);
     return;
   }
   const started=await startVoiceChat();if(!started||!localVoiceStream){activeCallPeer=null;resumeGroupVoiceCapture();updateCallUi();return}
