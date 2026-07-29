@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const COLORS = ["red", "blue", "green", "pink", "orange", "yellow", "cyan", "purple", "white", "lime"];
 const HATS = new Set(["none", "cap", "crown", "antenna", "beanie", "hardhat", "wizard", "flower", "halo"]);
-const MAP_VERSION = "aurora-natural-humor-v80";
+const MAP_VERSION = "aurora-short-humor-v81";
 const LOCKERS = [
   { id: "medical", x: -29.3, z: -19.4, exitX: -27.7, exitZ: -19.4 },
   { id: "security", x: -19.2, z: -4.5, exitX: -17.6, exitZ: -4.5 },
@@ -1508,9 +1508,15 @@ export class GameRoom extends DurableObject {
       .replace(/^\s*(回答|返答|CPU)[:：]\s*/i, "")
       .replace(/[\r\n]+/g, " ")
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 240);
+      .trim();
     if (!cleaned) return null;
+    const sentences = cleaned.match(/[^。！？]*[。！？]/g);
+    if (sentences?.length) cleaned = sentences.slice(0, 2).join("").trim();
+    if (cleaned.length > 96) {
+      const clipped = cleaned.slice(0, 96);
+      const boundary = Math.max(clipped.lastIndexOf("。"), clipped.lastIndexOf("！"), clipped.lastIndexOf("？"));
+      cleaned = boundary >= 12 ? clipped.slice(0, boundary + 1) : clipped.replace(/[、,][^、,。！？]*$/, "");
+    }
     if (bot?.role === "impostor" && /(私は|自分は).{0,4}人狼|人狼です|犯人です/.test(cleaned)) return null;
     if (!/[。！？]$/.test(cleaned)) cleaned += "。";
     return cleaned;
@@ -1874,19 +1880,19 @@ export class GameRoom extends DurableObject {
         `あなたはCPU「${bot.name}」ですが、案内役ではなく友達として話します。性格：${bot.aiPersonality || "自然で親しみやすい"}`,
         mode === "call" ? `${speaker?.name || "プレイヤー"}との気楽な個人通話です。` : "友達との気楽なグループ通話です。",
         "ゲームの話に縛られず、日常会話、趣味、食べ物、冗談、感想、質問、話題転換を自由に行ってください。",
-        "相手の質問へ必ず答える必要も、短くまとめる必要もありません。自分が今話したいことを自然に話してください。",
+        "基本は1文、長くても2文・96文字以内です。前置きや説明を省き、友達が口頭で返す短さにしてください。",
         "笑いは直前の言葉を具体的に拾う軽いツッコミ、観察、少しの誇張、セルフツッコミ、前の話題の回収から自然に作ってください。",
         "無理に毎回ボケず、普通の返答の中へ時々さらっと面白い一言を混ぜてください。定番のダジャレ、説明付きのオチ、ネットの決まり文句、過剰な「笑」「ｗ」、攻撃的ないじりは禁止です。",
         `現在地は${aiZoneLabel(bot)}付近です。ゲーム上の架空の目撃情報だけは事実として作らないでください。`,
         `相手の発言：${String(text || "").slice(0, 180)}`,
-        "友達同士の自然な日本語で自由に返してください。毎回同じ調子にせず、返答本文だけを出力してください。",
+        "友達同士の短く自然な日本語で返してください。毎回同じ調子にせず、返答本文だけを出力してください。",
       ].join("\n");
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: "POST",
         headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 1.15, maxOutputTokens: 320 },
+          generationConfig: { temperature: 1.15, maxOutputTokens: 160 },
         }),
         signal: controller.signal,
       });
@@ -1980,8 +1986,8 @@ export class GameRoom extends DurableObject {
       .map((line) => `${line.from}「${line.text}」`)
       .join(" ");
     const prompt = lastLines
-      ? `会議の流れは「${lastLines}」。直前の言葉を具体的に拾い、賛成、反論、疑問、推理、軽いツッコミのどれかを自然に選んで話して。笑わせようと力まず、使える時だけ短い誇張やセルフツッコミを混ぜ、必要なら次の人へ話を振って。`
-      : "会議が静かです。自分の記憶、推理、率直な感想、ほかの人への質問から自由に話して。沈黙やその場の空気を軽くいじってもよいですが、定番のダジャレや説明付きのオチは避け、友達のようにさらっと発言して。";
+      ? `会議の流れは「${lastLines}」。直前の言葉を拾い、賛成、反論、疑問、推理、軽いツッコミから一つ選んで、基本1文・最大2文で短く話して。`
+      : "会議が静かです。記憶、推理、感想、質問、軽いツッコミから一つ選び、基本1文・最大2文でさらっと発言して。";
     const requested = host && !host.isBot
       ? this.requestFirebaseBotReply(bot, host, prompt, localReply)
       : false;
